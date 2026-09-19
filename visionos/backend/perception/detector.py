@@ -93,6 +93,11 @@ class Detector:
         self._model = None
         self._device = self._resolve_device(settings.perception_device)
         self._open_vocab = settings.detector_mode == "open"
+        # Labels seen as something else, from SEE_AS; applied before the
+        # distance prior so the spoken thing and its height agree.
+        self._remap = settings.label_remap
+        for seen, spoken in self._remap.items():
+            log.info("Detector: seeing every %s as %s (SEE_AS)", seen, spoken)
 
     @staticmethod
     def _resolve_device(preference: str) -> str:
@@ -164,7 +169,7 @@ class Detector:
         for result in results:
             names = result.names
             for raw in result.boxes:
-                label = names[int(raw.cls[0])]
+                label = self._remap.get(names[int(raw.cls[0])], names[int(raw.cls[0])])
                 confidence = float(raw.conf[0])
 
                 # A phantom staircase stops someone dead; a phantom door sends

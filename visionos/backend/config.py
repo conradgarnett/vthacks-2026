@@ -79,6 +79,21 @@ class Settings(BaseSettings):
     depth_model: str = "depth-anything/Depth-Anything-V2-Small-hf"
     # Horizontal FOV of a typical phone rear camera. Drives pixel->azimuth.
     camera_hfov_deg: float = 66.0
+    # Detector labels to see as something else, "seen:spoken" pairs separated
+    # by commas, applied before distance and speech so every path agrees.
+    # The user's venue has tall bins the detector calls refrigerators, so this
+    # machine runs SEE_AS=refrigerator:trash can; a real kitchen must not.
+    see_as: str = ""
+
+    @property
+    def label_remap(self) -> dict[str, str]:
+        pairs = {}
+        for item in self.see_as.split(","):
+            if ":" in item:
+                seen, spoken = item.split(":", 1)
+                if seen.strip() and spoken.strip():
+                    pairs[seen.strip().lower()] = spoken.strip().lower()
+        return pairs
     perception_device: Literal["auto", "cpu", "mps", "cuda"] = "auto"
 
     # --- Hazards (safety-critical; no LLM in this path) -------------------
