@@ -68,9 +68,16 @@ def _token_is_plausible(token: str) -> bool:
     if token.isdigit():
         return True
     if _WORDLIKE.match(token):
-        # A long run of letters with no vowel is not a word in any language
-        # that uses this alphabet. "Rhythm" is 6; beyond that it is noise.
-        if len(token) > 3 and not any(ch in _VOWELS for ch in token):
+        # "a" and "I" are the only single-letter English words. Anything
+        # else of length 1 is a stray mark -- observed output included
+        # "J 44 Elevator", where the "J" is the sign's border.
+        if len(token) == 1:
+            return token.lower() == "a" or token == "I"
+        # A run of letters with no vowel is not a word in any language using
+        # this alphabet. Observed junk is short: "JQ", "JJ", "th", "fik".
+        # Genuine vowelless signage ("WC", "ID") is matched by
+        # _MEANINGFUL_SHORT before reaching here.
+        if not any(ch in _VOWELS for ch in token):
             return False
         return True
     # Mixed alphanumeric like "B12" or "A-4" is common on signage.

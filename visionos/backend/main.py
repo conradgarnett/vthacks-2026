@@ -335,6 +335,10 @@ async def websocket_endpoint(socket: WebSocket) -> None:
     try:
         while True:
             message = await socket.receive()
+            # A raw receive() hands back the disconnect as a message rather
+            # than raising; asking again after it is an error, not a wait.
+            if message.get("type") == "websocket.disconnect":
+                break
 
             if (frame := message.get("bytes")) is not None:
                 if frame.startswith(READ_TAG):
@@ -357,6 +361,7 @@ async def websocket_endpoint(socket: WebSocket) -> None:
                 await session.stop_beacon()
 
     except WebSocketDisconnect:
-        log.info("client disconnected")
+        pass
     except Exception:
         log.exception("session error")
+    log.info("client disconnected")

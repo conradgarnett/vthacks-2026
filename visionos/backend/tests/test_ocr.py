@@ -22,6 +22,8 @@ from backend.ai.ocr import (
     TextLine,
     TextReader,
     _accept,
+    _dedupe,
+    _fix_digit_confusions,
     _merge,
     _needs_tiles,
     build_reader,
@@ -166,6 +168,75 @@ class TestConsensus:
         # A short code seen once would not survive a multi-frame vote, but a
         # single frame has nothing to vote against.
         assert texts(Fake().read_consensus_sync([b"jpeg"])) == ["B12"]
+
+
+class TestDigitConfusions:
+    """RapidOCR reads a lone digit inside a word where a letter was."""
+
+    @pytest.mark.parametrize(
+        "read,fixed",
+        [("Ro0m", "Room"), ("R00M", "R00M"), ("EX1T", "EXIT"), ("F1oor", "Floor"), ("H0TEL", "HOTEL")],
+    )
+    def test_lone_digit_between_letters_becomes_the_letter(self, read, fixed):
+        assert _fix_digit_confusions(read) == fixed
+
+    @pytest.mark.parametrize(
+        "code", ["Room 204B", "B12", "A-4", "Gate A12", "R2D2", "A1B2", "Platform 9"]
+    )
+    def test_codes_and_numbers_pass_through(self, code):
+        """Two digits, or digits at the edges, are what room and gate codes
+        look like; only a single digit buried in letters is a misread."""
+        assert _fix_digit_confusions(code) == code
+
+
+class TestEarlyAgreement:
+    def test_costly_engine_stops_once_two_frames_agree(self):
+        calls: list[bytes] = []
+
+        class Slow(TextReader):
+            name = "slow"
+            available = True
+            costly_frames = True
+
+            def _recognize(self, frame_jpeg: bytes, minimum_height: float) -> list[TextLine]:
+                calls.append(frame_jpeg)
+                return [line("Keep door closed", 0.1)]
+
+        merged = Slow().read_consensus_sync([b"a", b"b", b"c"])
+        assert len(calls) == 2, "third frame should not have been read"
+        assert texts(merged) == ["Keep door closed"]
+        assert merged[0].agreement == 2
+
+    def test_cheap_engine_takes_the_full_vote(self):
+        calls: list[bytes] = []
+
+        class Fast(TextReader):
+            name = "fast"
+            available = True
+
+            def _recognize(self, frame_jpeg: bytes, minimum_height: float) -> list[TextLine]:
+                calls.append(frame_jpeg)
+                return [line("Keep door closed", 0.1)]
+
+        Fast().read_consensus_sync([b"a", b"b", b"c"])
+        assert len(calls) == 3
+
+    def test_disagreeing_frames_keep_reading(self):
+        calls: list[bytes] = []
+        variants = ["Departures", "DLpartiirL", "Departures"]
+
+        class Noisy(TextReader):
+            name = "noisy"
+            available = True
+            costly_frames = True
+
+            def _recognize(self, frame_jpeg: bytes, minimum_height: float) -> list[TextLine]:
+                calls.append(frame_jpeg)
+                return [line(variants[len(calls) - 1], 0.1)]
+
+        merged = Noisy().read_consensus_sync([b"a", b"b", b"c"])
+        assert len(calls) == 3
+        assert texts(merged) == ["Departures"]
 
 
 class TestTileGate:
@@ -334,7 +405,9 @@ class TestEngine:
         lines = reader.read_consensus_sync(burst)
         spoken = format_for_speech(lines)
         assert "EXIT" in spoken.upper() and "204B" in spoken.upper()
-        assert all(l.agreement == 3 for l in lines)
+        # A costly engine stops once two identical frames agree; a cheap one
+        # takes all three. Either way every line was confirmed.
+        assert all(l.agreement >= 2 for l in lines)
 
     def test_blank_image_yields_no_text_rather_than_noise(self, reader):
         blank = jpeg(Image.new("RGB", (400, 300), "white"))
@@ -380,3 +453,44 @@ class TestAppleVision:
         assert len(with_tiles) > len(full_only) or not full_only, (
             "tiling added nothing on text the full frame pass missed"
         )
+
+
+class TestDedupeRegressions:
+    """Bugs found by the visionOS-2 collaborator in review.
+
+    Neither shows up in eval/, because every corpus phrase is a single line
+    in one place. A reviewer reading the logic caught what the benchmark
+    structurally could not.
+    """
+
+    def test_two_words_on_one_row_both_survive(self):
+        """An engine that boxes "Room" and "204B" separately must keep both.
+        A 0.20 horizontal tolerance treated them as one place and dropped one."""
+        kept = _dedupe([line("Room", 0.50, left=0.30), line("204B", 0.50, left=0.46)])
+        assert {l.text for l in kept} == {"Room", "204B"}
+
+    def test_same_word_in_two_places_both_survive(self):
+        """"PUSH" on two different doors is two signs, not one read twice."""
+        kept = _dedupe([line("PUSH", 0.30, left=0.12), line("PUSH", 0.72, left=0.80)])
+        assert len(kept) == 2, "repeated signage collapsed into one"
+
+    def test_garbled_twin_in_the_same_place_is_still_collapsed(self):
+        """The behaviour the position rule exists for must not regress."""
+        kept = _dedupe(
+            [line("Departures", 0.40, left=0.20), line("DLpartiirL", 0.41, left=0.21)]
+        )
+        assert len(kept) == 1
+        assert kept[0].text == "Departures", "kept the less plausible variant"
+
+    def test_fragments_beside_a_real_reading_are_not_spoken(self):
+        """Observed: "J 44 Elevator". The "J" is the sign's border."""
+        spoken = format_for_speech(
+            [line("J", 0.40, left=0.05), line("44", 0.40, left=0.10), line("Elevator", 0.40, left=0.30)]
+        )
+        # The single-letter border scrap goes; a two-digit number stays,
+        # because it could be a real room number beside the word.
+        assert spoken == "It reads: 44 Elevator."
+
+    def test_a_room_number_survives_beside_a_longer_line(self):
+        spoken = format_for_speech([line("B12", 0.20, left=0.10), line("Conference Room", 0.60, left=0.10)])
+        assert "B12" in spoken

@@ -1,12 +1,5 @@
 /**
- * Client wiring: camera, voice, spatial audio, speech.
- *
- * The interaction model, for someone who cannot see the screen:
- *
- *   tap anywhere   scan the room
- *   Read           read text in view
- *   hold Ask       speak a question or a command
- *   Stop           silence everything
+ * Client wiring: camera, voice, spatial audio, speech, haptics.
  */
 
 import { Camera } from "./camera";
@@ -17,33 +10,22 @@ import { Voice } from "./voice";
 import { Connection, type ServerEvent } from "./ws";
 
 const DISCLAIMER =
-  "VisionOS ready. Tap anywhere to scan, hold Ask to speak. This is an " +
-  "assistive tool, not a replacement for your cane or guide dog. Distances " +
-  "are estimates.";
+  "VisionOS ready. Tap anywhere to scan. This is an assistive tool, not a " +
+  "replacement for your cane or guide dog. Distances are estimates.";
 
 const FRAME_INTERVAL_MS = 700;
-const TRANSCRIPT_LINES = 3;
-const VOICE_SAMPLE =
-  "This is how I'll sound. A doorway is about three meters ahead, at your two o'clock.";
 
-// Enough frames for majority agreement; the gap lets the scene shift slightly
-// so blur and glare differ between them, which is what makes the vote useful.
-const READ_BURST_FRAMES = 3;
-const READ_BURST_GAP_MS = 120;
-
-// Spoken commands that select a mode rather than ask a question. Matched
-// before anything is sent, because guidance and reading are not answers.
+// "take me to the door" should start a beacon, not narrate. Checked before
+// the question is sent, because guidance is a different mode from an answer.
 const BEACON_PHRASES = [
   /^(?:take|guide|lead|walk) me to (?:the |a |an )?(.+)$/i,
   /^(?:navigate|go) to (?:the |a |an )?(.+)$/i,
   /^(?:find|locate) (?:the |a |an )?(.+?)(?: for me)?$/i,
 ];
 const STOP_PHRASES = /^(?:stop|cancel|quiet|never mind|nevermind)\b/i;
-const READ_PHRASES =
-  /^(?:read(?: (?:this|that|it|the sign|the text|the label|the menu))?|what does (?:it|this|that|the sign) say)$/i;
-const VOICE_PHRASES = /^(?:next|change|switch) voice$/i;
 
-const el = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
+const el = <T extends HTMLElement>(id: string): T =>
+  document.getElementById(id) as T;
 
 const video = el<HTMLVideoElement>("camera");
 const startButton = el<HTMLButtonElement>("start");
@@ -58,28 +40,31 @@ const tts = new TtsPlayer();
 const spatial = new SpatialAudio();
 const camera = new Camera(video);
 
-// Spoken announcements are once per session. Reconnects re-fire the events
-// that trigger them, and a reconnect loop would turn that into a monologue.
+// Spoken announcements are once-per-session. Reconnects re-fire the events
+// that trigger them, and a reconnect loop turns that into an endless monologue.
 let announcedMode = false;
 let announcedDisconnect = false;
 let starting = false;
 let started = false;
-let idleStatus = "Connected";
+
+// While true the fast frame loop is suspended. On a CPU-only backend the
+// object detector and OCR compete for the same cores, and a read that takes
+// seconds should not also be fighting a frame of YOLO every 700 ms. Cleared
+// by the read's trace event, with a backstop in case none arrives.
+let readPending = false;
+const READ_TIMEOUT_MS = 20000;
+// Enough frames for majority agreement; the gap lets the scene shift slightly
+// so blur and glare differ between them, which is what makes the vote useful.
+const READ_BURST_FRAMES = 3;
+const READ_BURST_GAP_MS = 120;
+
 let voiceIndex = 0;
+const VOICE_SAMPLE =
+  "This is how I'll sound. A doorway is about three meters ahead, at your two o'clock.";
 
 const setStatus = (text: string): void => {
   status.textContent = text;
 };
-
-function show(text: string, kind: "speech" | "hazard" = "speech"): void {
-  const line = document.createElement("p");
-  line.textContent = text;
-  if (kind === "hazard") line.className = "hazard";
-  transcript.prepend(line);
-  while (transcript.childElementCount > TRANSCRIPT_LINES) {
-    transcript.lastElementChild?.remove();
-  }
-}
 
 /** Surface a failure the user cannot see. Silence reads as a freeze. */
 function reportFailure(message: string): void {
@@ -88,8 +73,8 @@ function reportFailure(message: string): void {
   tts.say(message, SpeechPriority.Answer);
 }
 
-// Without these, an uncaught error during startup leaves the start screen up
-// with no explanation.
+// Without this, any uncaught error during startup leaves the start screen up
+// with no explanation -- which is exactly how it presented.
 window.addEventListener("error", (event) => {
   console.error(event.error ?? event.message);
   setStatus(`Error: ${event.message}`);
@@ -99,6 +84,14 @@ window.addEventListener("unhandledrejection", (event) => {
   setStatus(`Error: ${String(event.reason)}`);
 });
 
+function show(text: string, kind: "speech" | "hazard" = "speech"): void {
+  const line = document.createElement("p");
+  line.textContent = text;
+  if (kind === "hazard") line.className = "hazard";
+  transcript.prepend(line);
+  while (transcript.childElementCount > 8) transcript.lastElementChild?.remove();
+}
+
 // What this backend can do, in one sentence, before the user commits to
 // starting. The same facts are spoken once connected; showing them here too
 // means a sighted helper can see at a glance whether a key is missing.
@@ -106,7 +99,10 @@ type Health = { provider_active?: string; ocr?: string };
 
 function describeMode(health: Health | null): string {
   if (!health) return "Backend not reachable yet. It will keep trying once you start.";
-  const ocr = health.ocr && health.ocr !== "none" ? `Reads text on-device (${health.ocr}).` : "No on-device text reader.";
+  const ocr =
+    health.ocr && health.ocr !== "none"
+      ? `Reads text on-device (${health.ocr}).`
+      : "No on-device text reader.";
   switch (health.provider_active) {
     case "ClaudeVisionProvider":
       return `Full mode: Claude describes the scene and answers questions. ${ocr}`;
@@ -131,7 +127,8 @@ async function showMode(): Promise<void> {
 const socketUrl = (): string => {
   const override = new URLSearchParams(location.search).get("backend");
   if (override) return override;
-  // Same origin: Vite proxies /ws, so the phone accepts one certificate.
+  // Same origin: Vite proxies /ws. Connecting to :8000 directly would need a
+  // second accepted certificate, which Safari never prompts for on a socket.
   return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
 };
 
@@ -140,7 +137,7 @@ function onServerEvent(event: ServerEvent): void {
     case "ready": {
       const modes: Record<string, { label: string; spoken?: string }> = {
         ReplayVisionProvider: {
-          label: "Replay — scripted, ignores camera",
+          label: "REPLAY — scripted, ignores camera",
           spoken: "Replay mode. Descriptions are scripted and do not match your camera.",
         },
         LocalSceneProvider: {
@@ -151,8 +148,10 @@ function onServerEvent(event: ServerEvent): void {
         },
       };
       const mode = modes[event.provider_active];
-      idleStatus = mode?.label ?? "Connected";
-      setStatus(idleStatus);
+      setStatus(mode?.label ?? "Connected");
+
+      // Spoken once per session, not per `ready`. The server sends `ready` on
+      // every connect, so a reconnect loop repeated this announcement forever.
       if (mode?.spoken && !announcedMode) {
         announcedMode = true;
         tts.say(mode.spoken, SpeechPriority.Answer);
@@ -161,19 +160,19 @@ function onServerEvent(event: ServerEvent): void {
     }
 
     case "speech":
-      setStatus(idleStatus);
       tts.say(event.text, SpeechPriority.Answer);
       show(event.text);
       break;
 
-    case "hazard":
-      // Earcon first: it lands in ~20 ms from the right direction, while the
-      // sentence takes about a second to say.
+    case "hazard": {
+      // Earcon first: it lands in ~20 ms and arrives from the right
+      // direction, while the sentence takes about a second to say.
       spatial.play("hazard", event.azimuth_deg, event.distance_m || 1);
       navigator.vibrate?.(event.severity >= 2 ? [120, 50, 120] : [80]);
       tts.say(event.text, SpeechPriority.Hazard);
       show(event.text, "hazard");
       break;
+    }
 
     case "beacon":
       if (spatial.beaconActive) {
@@ -188,7 +187,8 @@ function onServerEvent(event: ServerEvent): void {
       break;
 
     case "trace":
-      setStatus(idleStatus);
+      // The read is done with the hi-res frame; let the fast loop resume.
+      if (event.label.startsWith("read")) readPending = false;
       console.info(
         `[latency] ${event.label} first_word=${event.stages.first_sentence ?? "-"}ms total=${event.total_ms}ms`
       );
@@ -201,7 +201,7 @@ const connection = new Connection(socketUrl(), {
   onConnectionChange: (connected) => {
     if (connected) {
       announcedDisconnect = false;
-      setStatus(idleStatus);
+      setStatus("Connected");
       return;
     }
     setStatus("Reconnecting…");
@@ -226,7 +226,7 @@ const voice = new Voice({
       spatial.play("info", 0, 1);
       setStatus("Listening…");
     } else {
-      setStatus(idleStatus);
+      setStatus("Connected");
     }
   },
   onError: (message) => {
@@ -235,80 +235,29 @@ const voice = new Voice({
   },
 });
 
-// --- Actions ----------------------------------------------------------------
-
-function scan(): void {
-  if (!connection.isOpen) {
-    reportFailure("Not connected yet.");
-    return;
-  }
-  setStatus("Scanning…");
-  connection.sendIntent("scan");
-}
-
-async function readText(): Promise<void> {
-  if (!connection.isOpen) {
-    reportFailure("Not connected yet.");
-    return;
-  }
-  // Audible acknowledgement: reading takes a moment and the tap is otherwise
-  // silent, which reads as a missed tap.
-  spatial.play("info", 0, 1);
-  setStatus("Reading…");
-
-  // A burst, not one frame. Hand-held capture blurs and glares differently
-  // each time, and the server keeps only text that the frames agree on,
-  // which is what separates real text from OCR noise.
-  const captured: Blob[] = [];
-  for (let i = 0; i < READ_BURST_FRAMES; i++) {
-    const frame = await camera.captureDetailed();
-    if (frame) captured.push(frame);
-    if (i < READ_BURST_FRAMES - 1) {
-      await new Promise((resolve) => setTimeout(resolve, READ_BURST_GAP_MS));
-    }
-  }
-
-  if (captured.length === 0) {
-    reportFailure("Couldn't capture the image to read.");
-    return;
-  }
-  connection.sendReadFrames(captured);
-}
-
-function stopEverything(): void {
-  tts.stopAll();
-  spatial.stopBeacon();
-  connection.sendIntent("stop_beacon");
-  setStatus(idleStatus);
-}
-
 function routeSpokenCommand(text: string): void {
-  const command = text.trim().replace(/[?.!]+$/, "");
+  const trimmed = text.trim();
 
-  if (STOP_PHRASES.test(command)) {
-    stopEverything();
+  if (STOP_PHRASES.test(trimmed)) {
+    tts.stopAll();
+    spatial.stopBeacon();
+    connection.sendIntent("stop_beacon");
     return;
   }
-  if (READ_PHRASES.test(command)) {
-    void readText();
-    return;
-  }
-  if (VOICE_PHRASES.test(command)) {
-    cycleVoice();
-    return;
-  }
+
   for (const pattern of BEACON_PHRASES) {
-    const match = command.match(pattern);
+    const match = trimmed.match(pattern);
     if (match?.[1]) {
-      connection.sendIntent("locate", match[1]);
+      connection.sendIntent("locate", match[1].replace(/[?.!]$/, ""));
       return;
     }
   }
-  connection.sendIntent("ask", text.trim());
+
+  connection.sendIntent("ask", trimmed);
 }
 
 async function begin(): Promise<void> {
-  // Repeated taps on an apparently stuck screen would otherwise re-run the
+  // Repeated taps on an apparently-stuck screen would otherwise re-run the
   // whole sequence and stack up duplicate disclaimers and frame loops.
   if (starting || started) return;
   starting = true;
@@ -335,22 +284,65 @@ async function begin(): Promise<void> {
     connection.connect();
 
     setInterval(async () => {
-      if (!camera.isRunning || !connection.isOpen) return;
+      if (!camera.isRunning || !connection.isOpen || readPending) return;
       const frame = await camera.captureFast();
-      if (frame) connection.sendFrame(frame);
+      // Re-checked after the await: a read may have started while capturing,
+      // and a 640px frame landing after the hi-res one is what made OCR miss.
+      if (frame && !readPending) connection.sendFrame(frame);
     }, FRAME_INTERVAL_MS);
   } catch (err) {
-    // A silent throw here is indistinguishable from a frozen app to someone
-    // who cannot see it.
+    // Anything unexpected must still surface. A silent throw here is
+    // indistinguishable from a frozen app to someone who cannot see it.
     reportFailure(`Couldn't start: ${(err as Error).message}`);
   } finally {
     starting = false;
   }
 }
 
-// --- Voices -----------------------------------------------------------------
+async function readText(): Promise<void> {
+  if (!connection.isOpen) {
+    reportFailure("Not connected yet.");
+    return;
+  }
+  // Audible acknowledgement: reading takes a moment and the tap is otherwise
+  // silent, which reads as a missed tap.
+  spatial.play("info", 0, 1);
+  setStatus("Reading…");
+  // The frame loop is suspended for the whole operation.
+  readPending = true;
+  try {
+    // A burst, not one frame. Hand-held capture blurs and glares differently
+    // each time, and the server keeps only text that several frames agree on
+    // -- which is what separates real text from OCR noise.
+    const captured: Blob[] = [];
+    for (let i = 0; i < READ_BURST_FRAMES; i++) {
+      const frame = await camera.captureDetailed();
+      if (frame) captured.push(frame);
+      if (i < READ_BURST_FRAMES - 1) {
+        await new Promise((resolve) => setTimeout(resolve, READ_BURST_GAP_MS));
+      }
+    }
 
-/** Voices load asynchronously; getVoices() is usually empty at startup. */
+    if (captured.length === 0) {
+      reportFailure("Couldn't capture the image to read.");
+      return;
+    }
+
+    // One tagged message; the server reads it directly and it never enters
+    // the perception pipeline. See sendReadFrames() in ws.ts.
+    connection.sendReadFrames(captured);
+  } finally {
+    // Cleared on the trace event; this is the backstop if none arrives.
+    window.setTimeout(() => {
+      readPending = false;
+    }, READ_TIMEOUT_MS);
+  }
+}
+
+/**
+ * Voices load asynchronously; reading getVoices() once at startup usually
+ * returns an empty list.
+ */
 function applyBestVoice(): void {
   const override = new URLSearchParams(location.search).get("voice");
   const chosen = pickVoice(override);
@@ -386,25 +378,38 @@ function cycleVoice(): void {
   tts.say(`${chosen.name}. ${VOICE_SAMPLE}`, SpeechPriority.Answer);
 }
 
-// --- Wiring -----------------------------------------------------------------
-
 onVoicesReady(applyBestVoice);
 void showMode();
 
-startButton.addEventListener("click", () => void begin());
-tapLayer.addEventListener("click", scan);
-el("read").addEventListener("click", () => void readText());
-el("stop").addEventListener("click", stopEverything);
+startButton.addEventListener("click", begin);
+tapLayer.addEventListener("click", () => connection.sendIntent("scan"));
+el("scan").addEventListener("click", (e) => {
+  e.stopPropagation();
+  connection.sendIntent("scan");
+});
+el("read").addEventListener("click", (e) => {
+  e.stopPropagation();
+  void readText();
+});
+el("voice").addEventListener("click", (e) => {
+  e.stopPropagation();
+  cycleVoice();
+});
+el("stop").addEventListener("click", (e) => {
+  e.stopPropagation();
+  tts.stopAll();
+  spatial.stopBeacon();
+  connection.sendIntent("stop_beacon");
+});
 
 // Push to talk. Pointer events cover touch and mouse; releasing anywhere ends
 // the capture so a drag off the button cannot leave the mic open.
 askButton.addEventListener("pointerdown", (e) => {
   e.preventDefault();
+  e.stopPropagation();
   voice.start();
 });
-const endCapture = () => {
-  if (voice.isListening) voice.stop();
-};
+const endCapture = () => voice.isListening && voice.stop();
 askButton.addEventListener("pointerup", endCapture);
 askButton.addEventListener("pointercancel", endCapture);
 window.addEventListener("pointerup", endCapture);

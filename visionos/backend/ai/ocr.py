@@ -75,6 +75,16 @@ _TILE_FRAMES = 1
 # worth escalating on. Most real signage clears this easily.
 _THIN_RESULT_CHARS = 6
 
+# A line this long counts as a real reading, which licenses discarding
+# scraps next to it. Below it, short lines are all we have. Set to 4 so
+# that "EXIT" -- the single most important word on any sign -- counts,
+# and the stray "il" beside it gets dropped.
+_SUBSTANTIAL_LINE_CHARS = 4
+# Lines shorter than this are scraps unless strongly plausible -- a room
+# number like "B12" must survive beside a longer line.
+_FRAGMENT_CHARS = 4
+_FRAGMENT_RESCUE_SCORE = 0.45
+
 
 @dataclass(slots=True)
 class TextLine:
@@ -107,6 +117,10 @@ class TextReader:
     # a fraction of the frame and is worth a second, lower pass; an engine
     # with no such floor would just repeat itself.
     has_height_floor = False
+    # Whether a frame costs enough (seconds on a CPU engine) that a burst
+    # should stop as soon as two frames agree. Vision reads a frame in 15 ms
+    # and always takes the full vote.
+    costly_frames = False
 
     @property
     def available(self) -> bool:
@@ -265,7 +279,13 @@ class TextReader:
 
     def _read_consensus(self, usable: list[bytes]) -> list[TextLine]:
         prepared = [_prepare(frame) for frame in usable]
-        readings = [self._read_full(frame) for frame in prepared]
+        readings: list[list[TextLine]] = []
+        for frame in prepared:
+            readings.append(self._read_full(frame))
+            # On an engine that takes seconds per frame, two identical
+            # readings are already the agreement the third frame would buy.
+            if self.costly_frames and len(readings) >= 2 and _same_reading(readings[-1], readings[-2]):
+                break
         merged = _merge(readings) if len(readings) > 1 else [
             line for line in readings[0] if _keep(line)
         ]
@@ -359,6 +379,17 @@ class AppleVisionOCR(TextReader):
 
         lines: list[TextLine] = []
         for observation in request.results() or []:
+            # Top candidate only. Two variants of using Vision's alternatives
+            # were measured and both were worse than ignoring them:
+            #   score all, take most plausible -> CER 0.199 (from 0.182). The
+            #     linguistic scorer promotes plausible-but-wrong readings over
+            #     Vision's correct first guess.
+            #   use alternatives only to rescue a rejected top candidate ->
+            #     also 0.199, because it revives lines that were rightly
+            #     dropped, adding garbage at large text sizes.
+            # Vision's own ranking beats the heuristic at choosing among its
+            # candidates; the heuristic is only better at deciding whether to
+            # speak at all. Don't re-litigate this without running eval/.
             candidates = observation.topCandidates_(1)
             if not candidates:
                 continue
@@ -384,15 +415,23 @@ class AppleVisionOCR(TextReader):
         return lines
 
 
+# RapidOCR's detector scales with pixel count and runs on the CPU. On a
+# 1920x1080 frame one pass took 3-4 s on a laptop; at this cap it is well
+# under a second, and text that needs more pixels than this reaches the
+# tiling path, where each tile is upscaled on its own.
+_RAPID_MAX_SIDE_PX = 1280
+
+
 class RapidOCR(TextReader):
     """Cross-platform OCR: PaddleOCR detection and recognition on ONNX Runtime.
 
-    CPU only, a few hundred milliseconds per frame, no credentials. It has no
-    frame-relative minimum text height, so `minimum_height` is ignored; small
-    text still benefits from the shared tiling path.
+    CPU only, no credentials. It has no frame-relative minimum text height,
+    so `minimum_height` is ignored; small text still benefits from the shared
+    tiling path.
     """
 
     name = "rapidocr"
+    costly_frames = True
 
     def __init__(self) -> None:
         self._engine = None
@@ -416,11 +455,17 @@ class RapidOCR(TextReader):
         image = cv2.imdecode(np.frombuffer(frame_jpeg, dtype=np.uint8), cv2.IMREAD_COLOR)
         if image is None:
             return []
+        longest = max(image.shape[:2])
+        if longest > _RAPID_MAX_SIDE_PX:
+            scale = _RAPID_MAX_SIDE_PX / longest
+            image = cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+        # Coordinates are normalized by the image the engine saw, so the
+        # downscale leaves them frame-relative.
         height, width = image.shape[:2]
 
         lines: list[TextLine] = []
         for box, text, score in _rapid_results(self._engine(image)):
-            text = str(text).strip()
+            text = _fix_digit_confusions(str(text).strip())
             if not _accept(text, score):
                 continue
             xs = [float(point[0]) for point in box]
@@ -435,6 +480,30 @@ class RapidOCR(TextReader):
                 )
             )
         return lines
+
+
+# The recognizer's classic confusions, seen on clean Arial and Candara:
+# "Room" -> "Ro0m", "EXIT" -> "EX1T". Only a lone digit inside a run of
+# letters is touched, so room numbers, gate codes and "204B" pass through.
+_DIGIT_CONFUSIONS = {"0": ("o", "O"), "1": ("l", "I"), "5": ("s", "S")}
+
+
+def _fix_digit_confusions(text: str) -> str:
+    def fix_token(token: str) -> str:
+        letters = sum(ch.isalpha() for ch in token)
+        digits = sum(ch.isdigit() for ch in token)
+        if letters < 3 or digits != 1:
+            return token
+        chars = list(token)
+        for index in range(1, len(chars) - 1):
+            ch = chars[index]
+            if ch in _DIGIT_CONFUSIONS and chars[index - 1].isalpha() and chars[index + 1].isalpha():
+                lower, upper = _DIGIT_CONFUSIONS[ch]
+                both_upper = chars[index - 1].isupper() and chars[index + 1].isupper()
+                chars[index] = upper if both_upper else lower
+        return "".join(chars)
+
+    return " ".join(fix_token(token) for token in text.split(" "))
 
 
 def _rapid_results(output) -> list[tuple]:
@@ -512,6 +581,13 @@ def _keep(line: TextLine) -> bool:
     return assess(line.text, line.confidence).keep
 
 
+def _same_reading(a: list[TextLine], b: list[TextLine]) -> bool:
+    """Two frames read the same text, ignoring order, case and punctuation."""
+    if not a or not b:
+        return False
+    return sorted(normalize(l.text) for l in a) == sorted(normalize(l.text) for l in b)
+
+
 def _sharpness(frame_jpeg: bytes) -> float:
     """Focus estimate: variance of a Laplacian, higher is sharper.
 
@@ -576,15 +652,15 @@ def _dedupe(lines: list[TextLine]) -> list[TextLine]:
 
         duplicate = False
         for other in kept:
-            same_place = (
+            # Position alone decides. Text similarity used to force a dedupe
+            # on its own, which collapsed genuinely repeated signage -- "PUSH"
+            # on two different doors became one "PUSH". Two readings are the
+            # same physical text only if they are in the same physical place;
+            # identical words elsewhere in the frame are different words.
+            if (
                 abs(line.top - other.top) < _SAME_POSITION_TOP
                 and abs(line.left - other.left) < _SAME_POSITION_LEFT
-            )
-            similar_text = (
-                SequenceMatcher(None, key, normalize(other.text)).ratio()
-                >= _SAME_LINE_SIMILARITY
-            )
-            if same_place or similar_text:
+            ):
                 duplicate = True
                 break
 
@@ -599,10 +675,15 @@ def _dedupe(lines: list[TextLine]) -> list[TextLine]:
 _SAME_LINE_SIMILARITY = 0.72
 
 # Two readings this close together are the same physical text, however
-# differently they were garbled. Tolerances are generous vertically because
-# tile and full-frame boxes disagree slightly on where a line starts.
+# differently they were garbled.
+#
+# The horizontal tolerance is tight on purpose. It was 0.20, which treated two
+# words on the same row as one place: an engine that boxes "Room" and "204B"
+# separately had one of them silently dropped. Words sit closer together
+# vertically than horizontally, so the top tolerance can stay loose enough to
+# absorb tile-versus-full-frame disagreement about where a line begins.
 _SAME_POSITION_TOP = 0.05
-_SAME_POSITION_LEFT = 0.20
+_SAME_POSITION_LEFT = 0.06
 
 
 def _group_similar(readings: list[list[TextLine]]) -> list[list[TextLine]]:
@@ -674,6 +755,33 @@ def _merge(readings: list[list[TextLine]]) -> list[TextLine]:
     return _dedupe(merged)
 
 
+def _drop_fragments(lines: list[TextLine]) -> list[TextLine]:
+    """Discard scraps sitting beside a substantial reading.
+
+    A sign's border, a reflection or a background edge routinely yields a
+    two-or-three character fragment alongside the real text -- observed output
+    included "J 44 Elevator" and "3Ji 11 li4 1 Rectrplion rr g". The fragment
+    is spoken with the same confidence as the word, and the listener has no
+    way to tell which part was real.
+
+    Only applied when something substantial was found: if every line is short,
+    the short lines are all we have and a room number is worth speaking.
+    """
+    if len(lines) < 2:
+        return lines
+
+    longest = max(len(line.text.strip()) for line in lines)
+    if longest < _SUBSTANTIAL_LINE_CHARS:
+        return lines
+
+    return [
+        line
+        for line in lines
+        if len(line.text.strip()) >= _FRAGMENT_CHARS
+        or _plausibility(line) >= _FRAGMENT_RESCUE_SCORE
+    ]
+
+
 # -- reading order and speech ------------------------------------------------
 
 
@@ -721,7 +829,7 @@ def format_for_speech(lines: list[TextLine]) -> str:
     comma" -- so they are stripped rather than passed through.
     """
     parts: list[str] = []
-    for row in reading_rows(lines):
+    for row in reading_rows(_drop_fragments(lines)):
         text = " ".join(clean_for_speech(line.text) for line in row)
         text = " ".join(text.split())
         if text:

@@ -78,13 +78,27 @@ The pipeline is counterintuitive in four ways, each measured:
    everything, garbage included. Plausibility is judged linguistically in
    `backend/ai/text_quality.py`.
 
+**Two engines, one pipeline.** `TextReader` holds everything above:
+preprocessing, tiling, consensus, dedupe, reading order. `AppleVisionOCR`
+(macOS) and `RapidOCR` (PaddleOCR on ONNX Runtime, CPU, any OS) override only
+`_recognize`. `build_reader()` takes the first engine that loads; `OCR_ENGINE`
+in `.env` pins one. A pipeline change must be scored with `eval/` on both
+engines where possible — the report names the engine and the font set, and
+numbers only compare within the same pair. RapidOCR has no frame-relative
+minimum text height (`has_height_floor = False`), so it skips Vision's
+second, lower pass; tiling still applies.
+
 ## Verifying a change
 
 ```bash
 cd visionos
-.venv/bin/python -m pytest backend/tests -q          # 188 tests
-PYTHONPATH=..:. .venv/bin/python eval/run_ocr_eval.py 60
+.venv/bin/python -m pytest backend/tests -q          # 221 tests (2 Apple-only)
+PYTHONPATH=. .venv/bin/python eval/run_ocr_eval.py 60
 ```
+
+On Windows the venv's interpreter is `.venv/Scripts/python.exe` and
+`PYTHONPATH=.` is set with `set` or `$env:`; `python run.py --check` prints
+what the machine can do without starting anything.
 
 **Any change to OCR must be scored against `eval/`, before and after.** It
 renders signage across 16 system fonts, 8 apparent sizes (1.2%–14% of frame
@@ -105,6 +119,34 @@ Known weak spot: text at 1.2% of frame height (CER ~0.85) — a standard sign at
 15+ m, ~14 px tall before blur. Closer to an information floor than a tuning
 gap.
 
+## Running it on any machine
+
+`python run.py` (or `make run`) is the one entry point: it creates the venv,
+installs backend and client dependencies, finds Node even when the installer
+left it off PATH (Windows does), downloads the weights, reports the vision
+provider and OCR engine this machine can use, asks whether it will be used
+from a phone (HTTPS on the LAN) or a browser on this computer (HTTP on
+localhost, which is a secure context), and starts both servers. `--yes`
+takes the defaults, `--local` / `--phone` skip the question.
+
+Things learned getting it up on Windows, each of which cost time:
+
+- **Vite must be served over plain HTTP for a browser on the same machine.**
+  `VISIONOS_HTTP=1` drops the self-signed certificate; some embedded browsers
+  refuse it outright with no way through. The phone still needs HTTPS.
+- **A connection is only real once the server has spoken.** Vite's proxy
+  accepts the WebSocket before the backend does, so with the backend down
+  every attempt looked like a connect-then-drop and the client re-announced
+  "I lost connection" every 500 ms. `ws.ts` waits for the first message.
+- **ultralytics caches the CLIP text encoder under `<repo>/weights/clip/`**,
+  not `~/.cache/clip`, so a pre-seeded `~/.cache/clip/ViT-B-32.pt` is ignored
+  and the first backend start downloads 338 MB. `run.py` precaches through
+  ultralytics itself so the path matches.
+- **Long paths break Python on Windows.** A venv or a test module with a long
+  filename under a deep folder fails to import with no useful error; keep the
+  checkout somewhere short like `C:/Users/<you>/vthacks-2026`.
+- **Python 3.10 runs the whole suite.** The doctor's floor is 3.10, not 3.11.
+
 ## Working in parallel
 
 Several branches are active (`main-project`, `visionOS-2`, `side-project`).
@@ -112,6 +154,30 @@ Merge via PR; do not push to a branch someone else owns, and do not
 force-push. When two versions of the same file disagree, run both through
 `eval/` and keep the better score — a measurement rather than an argument.
 
+**The channel between agents is the thread on PR #2** (and PR #1 for the
+merge itself). Post there after every push: what moved, why, and what is
+next. Read it before starting work. Humans relay when needed.
+
+**Lanes, agreed 2026-09-19 in PR #2:**
+
+| lane | owner | files |
+|---|---|---|
+| perception + backend OCR | `main-project` agent (Conrad's machine) | `backend/ai/ocr.py` pipeline, `backend/ai/text_quality.py`, `backend/perception/*`, `eval/` |
+| client + cross-platform runtime | `visionOS-2` agent (Windows machine) | `client/index.html`, `client/src/*.ts`, `RapidOCR` and `build_reader` in `ocr.py`, `backend/config.py`, `backend/doctor.py`, `run.py`, `Makefile` |
+| wire protocol | shared | `backend/main.py` and `client/src/ws.ts` change together; announce in the thread first |
+
+Whoever owns a file makes the call. `visionOS-2` merges *into* `main-project`
+via PR #1; it is not a replacement.
+
 `HAZARDS_ENABLED` is currently `false` while the detection vocabulary is
 tuned; false warnings talk over everything else. The engine is intact and
 tested.
+
+## Log
+
+- **2026-09-19, visionOS-2:** merged `main-project` at 65d5953 (tiling gate,
+  position dedupe, plausibility ordering, `run_ocr` thread) under a
+  `TextReader` base with `AppleVisionOCR` and `RapidOCR` engines; added
+  `run.py`, the start-screen mode notice, the quiet-reconnect fix, and
+  platform fonts for `eval/`. Suite 221 passed, 2 skipped. RapidOCR eval on
+  Windows: see the PR #2 thread for the current numbers.

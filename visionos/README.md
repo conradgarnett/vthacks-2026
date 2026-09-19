@@ -28,10 +28,16 @@ make test
 
 | Action        | What happens                                              |
 | ------------- | --------------------------------------------------------- |
-| tap anywhere  | describes the room, nearest things first                  |
-| Read          | reads any text in view                                    |
-| hold Ask      | speak a question, or a command such as "take me to the door", "read the sign", "stop", "next voice" |
+| tap anywhere, or Scan | describes the room, nearest things first          |
+| Read          | reads any text in view (a three-frame burst)              |
+| hold Ask      | speak a question, or a command such as "take me to the door" or "stop" |
+| Voice         | cycles the speaking voice and plays a sample              |
 | Stop          | silences speech and any active beacon                     |
+
+The start screen says which mode the backend is in before you begin: full
+mode with Claude when credentials are present, otherwise on-device mode,
+which reads text and describes recognized objects but cannot answer open
+questions. Put `ANTHROPIC_API_KEY=...` in `visionos/.env` for full mode.
 
 ## Reading text
 
