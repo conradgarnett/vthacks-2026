@@ -187,6 +187,16 @@ tested.
 
 ## Log
 
+- **2026-09-19, evening, visionOS-2:** merged 81b0add (lexicon, 38 bundled
+  fonts; their `eval/fonts.py` supersedes ours, helper renamed `typefaces.py`);
+  RapidOCR detects at 1280 px and recognizes on full-res crops (657 ms/frame,
+  spaces intact); Ask is a tap toggle; start screen shows the phone address.
+  RapidOCR, Windows, bundled font benchmark n=76: everyday_sans 89%,
+  everyday_serif 100%, cursive_script 68% (Vision 4-11%), handwriting 83%,
+  novelty 80% exact. Signage n=60: CER 0.028, exact 90%, silent 0,
+  hallucinated 1/8 ("AN"; was 0/8 at full-resolution detection; a RapidOCR
+  confidence floor should remove it). Packaging: name present 12/24; symbols
+  1/12.
 - **2026-09-19, later, visionOS-2:** merged fa27618, a3537c5 and 2362b03 from
   `main-project` (all ported onto `TextReader`); RapidOCR reads 13 s -> 2.3 s
   live; digit-in-word fix-up; five-button client restored for parity with the
