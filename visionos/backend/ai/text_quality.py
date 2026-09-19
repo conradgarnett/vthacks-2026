@@ -17,6 +17,16 @@ from dataclasses import dataclass
 
 _VOWELS = set("aeiouAEIOU")
 
+# Characters an OCR engine produces from non-text structure. Vertical
+# strokes (barcodes, blinds, railings) collapse into the first family;
+# rings and badges into the second. A token drawn entirely from one
+# family is structure, not writing.
+_CONFUSABLE_FAMILIES = (
+    set("il1|![]/\\"),
+    set("0oq@°"),
+    set("-_=~."),
+)
+
 # Letter combinations that never start an English word. Cheap, and they catch
 # a lot of the consonant soup OCR produces from texture and noise.
 _IMPOSSIBLE_STARTS = re.compile(
@@ -59,9 +69,29 @@ class Plausibility:
     reason: str
 
 
+def _is_stroke_artifact(token: str) -> bool:
+    """Is this token just repeated strokes or circles resolved into glyphs?
+
+    Packaging is full of structure that is not text, and engines resolve it
+    predictably: barcode bars become I, l, 1 or |; circular badges and
+    nutrition rings become 0, O or Q. Observed on a symbol-only corpus --
+    "Il", "Illl" from a barcode and "00", "0000" from nutrition icons.
+
+    A token drawn entirely from one of those confusable sets is an artifact.
+    Mixing sets is the tell for real content: "100" spans both and is fine,
+    "000" does not and is a row of rings.
+    """
+    if len(token) < 2:
+        return False
+    lowered = token.lower()
+    return any(all(ch in family for ch in lowered) for family in _CONFUSABLE_FAMILIES)
+
+
 def _token_is_plausible(token: str) -> bool:
     """Could this token be a word, a number, or a code?"""
     if not token:
+        return False
+    if _is_stroke_artifact(token):
         return False
     if _MEANINGFUL_SHORT.match(token):
         return True
