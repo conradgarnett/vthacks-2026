@@ -522,3 +522,73 @@ class TestDedupeRegressions:
     def test_a_room_number_survives_beside_a_longer_line(self):
         spoken = format_for_speech([line("B12", 0.20, left=0.10), line("Conference Room", 0.60, left=0.10)])
         assert "B12" in spoken
+
+
+class TestDedupeKeepsDifferentWords:
+    """Position decides duplicates, except when the two readings are plainly
+    different texts. On a rotated or curved prescription label a wide line's
+    bounding box swallows the line beneath it, and the drug name was silently
+    dropped in favour of the Rx number under it."""
+
+    @staticmethod
+    def line(text: str, top: float = 0.30, left: float = 0.10, height: float = 0.1) -> TextLine:
+        return TextLine(text=text, confidence=0.9, top=top, left=left, height=height)
+
+    def test_drug_name_survives_beside_the_rx_number_in_the_same_place(self):
+        kept = _dedupe([self.line("3020733", top=0.31, height=0.04), self.line("LISINOPRIL 10 MG")])
+        assert sorted(l.text for l in kept) == ["3020733", "LISINOPRIL 10 MG"]
+
+    def test_garbled_twin_in_the_same_place_still_collapses(self):
+        kept = _dedupe([self.line("Departures"), self.line("DLpartiirL", top=0.32)])
+        assert [l.text for l in kept] == ["Departures"]
+
+    def test_a_scrap_in_the_same_place_still_collapses(self):
+        """Short readings never qualify as different words: "il" beside
+        "EXIT" is noise, not a second sign."""
+        kept = _dedupe([self.line("EXIT"), self.line("il", top=0.31)])
+        assert [l.text for l in kept] == ["EXIT"]
+
+    def test_two_readings_sharing_a_run_are_one_text(self):
+        """"Room 204B" and "Ro0m 2048" share runs, so they stay one text."""
+        kept = _dedupe([self.line("Room 204B"), self.line("Ro0m 2048", top=0.31)])
+        assert len(kept) == 1
+
+    def test_different_words_elsewhere_are_unaffected(self):
+        kept = _dedupe([self.line("PUSH", left=0.1), self.line("PUSH", left=0.7)])
+        assert len(kept) == 2
+
+
+class TestSplitLetterDigitRuns:
+    """RapidOCR drops the spaces in bold capitals, and a number glued to the
+    words around it is invisible to the dose pattern. Codes must keep their
+    shape, since "204B" said as "204 B" is a different room."""
+
+    @pytest.mark.parametrize(
+        "glued, split",
+        [
+            ("TAKE1CAPSULE EVERY8 HOURS", "TAKE 1 CAPSULE EVERY 8 HOURS"),
+            ("QTY14REFILLS2", "QTY 14 REFILLS 2"),
+            ("DISCARDAFTER09/28", "DISCARDAFTER 09/28"),
+            ("Room204B", "Room 204B"),
+            ("Gate12", "Gate 12"),
+        ],
+    )
+    def test_a_number_between_words_becomes_its_own_token(self, glued, split):
+        from backend.ai.ocr import _split_letter_digit_runs
+
+        assert _split_letter_digit_runs(glued) == split
+
+    @pytest.mark.parametrize("code", ["204B", "B12", "A12", "R2D2", "Rx6233425", "MP3", "COVID", "3M"])
+    def test_codes_keep_their_shape(self, code):
+        from backend.ai.ocr import _split_letter_digit_runs
+
+        assert _split_letter_digit_runs(code) == code
+
+    def test_the_dose_digit_survives_the_digit_fix_up(self):
+        """Before the split, the fix-up read the 1 in TAKE1CAPSULE as a lone
+        digit inside a word and made it an I."""
+        from backend.ai.ocr import _fix_digit_confusions, _split_letter_digit_runs
+
+        assert _fix_digit_confusions(_split_letter_digit_runs("TAKE1CAPSULE")) == "TAKE 1 CAPSULE"
+        assert _fix_digit_confusions(_split_letter_digit_runs("Ro0m")) == "Room"
+        assert _fix_digit_confusions(_split_letter_digit_runs("EX1T")) == "EXIT"

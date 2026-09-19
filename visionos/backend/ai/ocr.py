@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import io
 import logging
+import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 
@@ -566,7 +567,7 @@ class RapidOCR(TextReader):
 
         lines: list[TextLine] = []
         for box, text, score in self._detect_small_recognize_full(image):
-            text = _fix_digit_confusions(str(text).strip())
+            text = _fix_digit_confusions(_split_letter_digit_runs(str(text).strip()))
             if not _accept(text, score):
                 continue
             xs = [float(point[0]) for point in box]
@@ -581,6 +582,20 @@ class RapidOCR(TextReader):
                 )
             )
         return lines
+
+
+# Bold capitals lose their spaces on this recognizer, and a number glued to
+# the words around it is unreadable to anything downstream: "TAKE1CAPSULE
+# EVERY8 HOURS" matches no dose pattern, and the digit fix-up below then
+# turned the 1 into an I, so the dose on a prescription label was never even
+# a candidate. A digit run between runs of three or more letters is a
+# separate token. Codes keep their shape: "204B", "B12", "R2D2" and "Rx6233425"
+# have no three-letter run beside the digits.
+_LETTER_DIGIT_BOUNDARY = re.compile(r"(?<=[A-Za-z]{3})(?=\d)|(?<=\d)(?=[A-Za-z]{3})")
+
+
+def _split_letter_digit_runs(text: str) -> str:
+    return _LETTER_DIGIT_BOUNDARY.sub(" ", text)
 
 
 # The recognizer's classic confusions, seen on clean Arial and Candara:
@@ -801,6 +816,14 @@ def _dedupe(lines: list[TextLine]) -> list[TextLine]:
                 abs(line.top - other.top) < _SAME_POSITION_TOP
                 and abs(line.left - other.left) < _SAME_POSITION_LEFT
             ):
+                # Same place is the rule; clearly different words are the
+                # exception. On a rotated or curved label a wide line's
+                # bounding box is tall enough to swallow the line beneath
+                # it, and position alone then discarded the drug name on a
+                # prescription label in favour of the Rx number under it:
+                # 0/10 drug names reached speech, 5/10 with this.
+                if _clearly_different_words(key, normalize(other.text)):
+                    continue
                 duplicate = True
                 break
 
@@ -824,6 +847,23 @@ _SAME_LINE_SIMILARITY = 0.72
 # absorb tile-versus-full-frame disagreement about where a line begins.
 _SAME_POSITION_TOP = 0.05
 _SAME_POSITION_LEFT = 0.06
+
+# Two readings in the same place that share no run of characters are not
+# one text garbled twice; they are two texts whose boxes overlap. The
+# garbled twins the position rule exists for ("Departures" against
+# "DLpartiirL") score about 0.6, far above this floor, and short scraps
+# never qualify, so "il" beside "EXIT" still collapses.
+_DIFFERENT_WORDS_RATIO = 0.3
+_DIFFERENT_WORDS_MIN_CHARS = 4
+_DIFFERENT_WORDS_MAX_RUN = 2
+
+
+def _clearly_different_words(a: str, b: str) -> bool:
+    if len(a) < _DIFFERENT_WORDS_MIN_CHARS or len(b) < _DIFFERENT_WORDS_MIN_CHARS:
+        return False
+    if _longest_common_run(a, b) > _DIFFERENT_WORDS_MAX_RUN:
+        return False
+    return SequenceMatcher(None, a, b).ratio() < _DIFFERENT_WORDS_RATIO
 
 
 def _group_similar(readings: list[list[TextLine]]) -> list[list[TextLine]]:
