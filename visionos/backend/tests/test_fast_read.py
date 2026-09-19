@@ -109,10 +109,18 @@ class TestTieredReader:
         fast, slow = Engine([line("il", 0.99)], "fast"), Engine([line("EXIT")], "slow")
         assert [l.text for l in TieredReader(fast, slow).read_sync(b"f")] == ["EXIT"]
 
+    def test_the_thorough_engine_wins_where_both_read_the_same_place(self):
+        """A sure fast word must not outrank the thorough engine's full line
+        at the same place: that is how receipts lost eleven points."""
+        fast = Engine([line("TOTAL", 0.95, top=0.2)], "fast")
+        slow = Engine([line("TOTAL 12.50", 0.9, top=0.2), line("CASH", 0.9, top=0.6)], "slow")
+        texts = [l.text for l in TieredReader(fast, slow).read_consensus_sync([b"f"])]
+        assert texts == ["TOTAL 12.50", "CASH"], texts
+
     def test_the_mesh_keeps_sure_words_and_fills_in_the_rest(self):
         """The fast engine reads the words it can check and skips the rest;
-        the thorough engine supplies the rest, and where both read the same
-        place the more plausible reading wins."""
+        the thorough engine supplies the rest, and the fast engine's sure
+        words survive only where the thorough engine read nothing."""
         fast = Engine([line("FIRE EXIT", 0.95, top=0.2), line("Ilcccpcion", 0.4, top=0.5)], "fast")
         slow = Engine([line("Reception", 0.9, top=0.5)], "slow")
         texts = sorted(l.text for l in TieredReader(fast, slow).read_consensus_sync([b"f"]))

@@ -783,10 +783,9 @@ class TieredReader(TextReader):
     most of a second per frame on a CPU and reads cursive, handwriting and
     dense labels that Vision cannot. When every fast line clears the bar
     the fast reading stands. Otherwise the thorough engine reads too, and
-    the result is a mesh: the fast engine's sure lines, plus everything the
-    thorough one read, with the more plausible reading winning where both
-    read the same place. The bar is the same 80% every guess here must
-    clear.
+    the result is a mesh: everything the thorough one read, plus the fast
+    engine's sure lines wherever the thorough one read nothing. The bar is
+    the same 80% every guess here must clear.
     """
 
     def __init__(self, fast: TextReader, thorough: TextReader) -> None:
@@ -809,20 +808,26 @@ class TieredReader(TextReader):
         return not _needs_tiles(lines) and all_lines_sure(self.fast, lines)
 
     def _mesh(self, fast: list[TextLine], thorough: list[TextLine]) -> list[TextLine]:
-        """The fast engine's sure lines plus the thorough engine's reading.
+        """The thorough engine's reading, plus the fast engine's sure lines
+        wherever the thorough engine read nothing.
 
-        Where both read the same place, position dedupe keeps the more
-        plausible one, and the thorough engine's real score beats a flat
-        one. A fast line that was not sure is dropped unless the thorough
-        engine found nothing at all, in which case the fast reading stands.
+        The thorough engine wins every place both read. Measured on one
+        machine it beats the fast one on receipts, labels and cursive
+        alike, and letting plausibility choose between the two cost real
+        receipts eleven points (66% -> 55% of lines) once the fast engine's
+        short clean words ("TOTAL") outranked the thorough engine's full
+        line at the same place ("TOTAL 12.50"). A fast line that was not
+        sure is dropped unless the thorough engine found nothing at all,
+        in which case the fast reading stands.
         """
         if not thorough:
             return fast
         sure = [
             line for line in fast
             if line_confidence(self.fast, line) >= FAST_READ_CONFIDENCE
+            and not any(_same_place(line, other) for other in thorough)
         ]
-        return _dedupe(sure + thorough)
+        return _dedupe(thorough + sure)
 
     def read_sync(self, frame_jpeg: bytes) -> list[TextLine]:
         lines = self.fast.read_sync(frame_jpeg)
@@ -1057,6 +1062,11 @@ _SAME_LINE_SIMILARITY = 0.72
 # absorb tile-versus-full-frame disagreement about where a line begins.
 _SAME_POSITION_TOP = 0.05
 _SAME_POSITION_LEFT = 0.06
+
+
+def _same_place(a: TextLine, b: TextLine) -> bool:
+    """The position rule _dedupe uses: one physical piece of text."""
+    return abs(a.top - b.top) < _SAME_POSITION_TOP and abs(a.left - b.left) < _SAME_POSITION_LEFT
 
 # Two readings in the same place that share no run of characters are not
 # one text garbled twice; they are two texts whose boxes overlap. The
