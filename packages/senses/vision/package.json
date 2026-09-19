@@ -11,5 +11,8 @@
     "@sense/protocol": "*",
     "@sense/providers": "*",
     "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@sense/world-sim": "*"
   }
 }

@@ -116,6 +116,35 @@ describe('scene 4: alarm and spoof (Deaf persona)', () => {
   });
 });
 
+describe('scene 2: ask (Blind persona)', () => {
+  it('answers with the verified map and the inferred camera scene, each with its own badge, labelled mock', async () => {
+    const user = userEvent.setup();
+    const { container } = await mountApp();
+    await user.click(await screen.findByRole('button', { name: /arrive at riverside hall/i }));
+    await screen.findAllByText('Riverside Hall: Verified, 7 of 7 checks.');
+    expect(screen.getByText('SAMPLE VIEW')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: /^ask$/i }));
+    const feed = screen.getByRole('list', { name: /percepts, newest first/i });
+    await waitFor(() => expect(within(feed).getAllByText(/Exit: Main entrance/).length).toBeGreaterThan(0));
+    const exit = within(feed)
+      .getAllByText(/Exit: Main entrance, 6 m, 6 o'clock/)[0]
+      ?.closest('li') as HTMLElement;
+    expect(within(exit).getByText('VERIFIED')).toBeTruthy();
+    expect(exit.textContent).toContain('Riverside Hall');
+    const trolley = within(feed)
+      .getAllByText(/in the way/i)[0]
+      ?.closest('li') as HTMLElement;
+    expect(within(trolley).getByText(/INFERRED/)).toBeTruthy();
+    expect(trolley.textContent).toMatch(/74%/);
+    expect(trolley.textContent).toMatch(/Inferred, camera/);
+    expect(feed.textContent).not.toMatch(/safe|all clear/i);
+    // Blind persona: audio modalities, captions shown because this device has no voice.
+    expect(trolley.textContent).toMatch(/Caption:/);
+    expect(screen.getAllByText('MOCK AI').length).toBeGreaterThan(0);
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+});
+
 describe('profile controls', () => {
   it('switches all five personas, keeps allergens, and applies display preferences', async () => {
     const user = userEvent.setup();

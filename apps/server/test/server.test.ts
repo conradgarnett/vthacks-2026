@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { ManualClock, type ServerEvent, type StateSnapshot } from '@sense/protocol';
-import { SenseContext, attachWebSocket, buildServer } from '../src';
+import { SenseContext, attachWebSocket, buildServer, registerVisionRoutes } from '../src';
 
 const cleanups: Array<() => Promise<void> | void> = [];
 afterEach(async () => {
@@ -14,7 +14,7 @@ afterEach(async () => {
 
 async function start(opts: { manual?: boolean; webDist?: string } = {}) {
   const ctx = await SenseContext.create({ env: {}, ...(opts.manual === false ? {} : { clock: new ManualClock() }), online: false });
-  const app = await buildServer(ctx, opts.webDist ? { webDist: opts.webDist } : {});
+  const app = await buildServer(ctx, { extra: [registerVisionRoutes], ...(opts.webDist ? { webDist: opts.webDist } : {}) });
   cleanups.push(() => app.close());
   const get = async (url: string) => (await app.inject({ method: 'GET', url })).json();
   const post = async (url: string, payload?: unknown, headers: Record<string, string> = {}) =>
@@ -152,6 +152,46 @@ describe('alarm, acknowledge and the spoof scene through the API', () => {
     const w = await get('/api/world');
     expect(w.label).toBe('SIMULATED WORLD');
     expect(w.hostnames).toContain('riverside-hall.sim');
+  });
+});
+
+describe('vision routes', () => {
+  it('answers a question by merging the verified map with the mock camera scene, and labels it', async () => {
+    const { post, state, settle } = await start();
+    await post('/api/arrive', { area: 'riverside' });
+    await settle();
+    const res = await post(
+      '/api/ask',
+      { question: 'Where is the nearest exit and is anything in my way?', fixture: 'lobby' },
+      { 'x-sense-via': 'keyboard' },
+    );
+    expect(res.statusCode).toBe(200);
+    const { percepts } = res.json();
+    expect(
+      new Set(
+        percepts.filter((p: { kind: string }) => p.kind === 'answer').map((p: { provenance: { tier: string } }) => p.provenance.tier),
+      ),
+    ).toEqual(new Set(['VERIFIED', 'INFERRED']));
+    const s = await state();
+    expect(s.percepts.some((p) => p.short.startsWith('Exit: Main entrance'))).toBe(true);
+    expect(s.actions.at(-1)).toMatchObject({ kind: 'ask', via: 'keyboard' });
+    expect(s.mode.ai).toBe('MOCK AI');
+  });
+
+  it('describes a frame, and validates bodies and image types', async () => {
+    const { post, state } = await start();
+    expect((await post('/api/see', { fixture: 'corridor' })).statusCode).toBe(200);
+    expect((await state()).percepts[0]?.short).toBe('Scene described. Inferred, mock camera.');
+    expect((await post('/api/ask', {})).statusCode).toBe(400);
+    expect((await post('/api/see', { mediaType: 'application/x-evil' })).statusCode).toBe(400);
+    expect((await post('/api/ask', { question: 'x'.repeat(500) })).statusCode).toBe(400);
+  });
+
+  it('without a verified map it says so instead of inventing an exit', async () => {
+    const { post } = await start();
+    await post('/api/see', { fixture: 'lobby' });
+    const { percepts } = (await post('/api/ask', { question: 'Where is the nearest exit?' })).json();
+    expect(percepts[0].short).toBe('No verified map here. Inferred, SENSE.');
   });
 });
 

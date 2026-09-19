@@ -798,7 +798,9 @@ export class SenseBroker {
    * safety feeds, and announce what is connected and how far each source is trusted.
    */
   async arrive(area: string): Promise<VerificationView[]> {
-    const records = await this.discover({ area });
+    // Safety feeds first, then maps, so alarms are subscribed before anything else finishes loading.
+    const priority = (r: AgentRecord) => (r.capabilities.includes('alarm-feed') ? 2 : r.capabilities.includes('indoor-map') ? 1 : 0);
+    const records = (await this.discover({ area })).sort((a, b) => priority(b) - priority(a) || a.fqdn.localeCompare(b.fqdn));
     const views: VerificationView[] = [];
     for (const r of records) {
       const view = await this.connect(r.fqdn, { force: true }).catch(() => undefined);

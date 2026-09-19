@@ -3,6 +3,8 @@ import { systemClock, iso } from '@sense/protocol';
 import { generateKeyPair, createAnsClient, type KeyPair } from '@sense/identity';
 import { SenseBroker, type DisclosureEntry, type VerificationView } from '@sense/core';
 import { WorldSim } from '@sense/world-sim';
+import { createProviders, type Providers } from '@sense/providers';
+import { VisionSense, type MapSource } from '@sense/vision';
 import { ProfileStore } from './profile-store';
 
 export interface ContextOptions {
@@ -33,6 +35,22 @@ export function toVerificationDto(v: VerificationView): VerificationDto {
   };
 }
 
+/** The current indoor map for a place, with the tier and evidence the broker assigned to it. */
+export function mapSourceFor(broker: SenseBroker, fqdn: string): MapSource | undefined {
+  const rec = broker.latest(fqdn, 'indoor-map');
+  if (!rec || rec.tier === 'REJECTED') return undefined;
+  return {
+    fqdn: rec.fqdn,
+    label: rec.label,
+    tier: rec.tier,
+    simulated: rec.simulated,
+    agentVersion: rec.source.agentVersion,
+    verifiedAt: rec.source.verifiedAt,
+    evidence: rec.source.evidence,
+    map: rec.payload as MapSource['map'],
+  };
+}
+
 const toDisclosureDto = (d: DisclosureEntry): DisclosureDto => d;
 
 /**
@@ -50,6 +68,8 @@ export class SenseContext {
     readonly broker: SenseBroker,
     readonly profiles: ProfileStore,
     readonly mode: ModeDto,
+    readonly providers: Providers,
+    readonly vision: VisionSense,
     /** Owner key for the signed portable profile. Stays on this device. */
     readonly ownerKeys: KeyPair,
   ) {
@@ -74,14 +94,21 @@ export class SenseContext {
       getProfile: () => profiles.current(),
       getPose: () => ({ position: world.user.position, headingDeg: world.user.headingDeg }),
     });
-    const wantsLiveAi = env.SENSE_PROVIDER === 'anthropic' || (env.SENSE_PROVIDER !== 'mock' && Boolean(env.ANTHROPIC_API_KEY));
+    const providers = createProviders(env);
     const mode: ModeDto = {
       world: 'SIMULATED WORLD',
       ans: ans.mode === 'live' ? 'live ANS (not configured)' : 'ANS-modeled (simulated)',
-      ai: wantsLiveAi ? 'ANTHROPIC' : 'MOCK AI',
+      ai: providers.label,
       online: opts.online ?? false,
     };
-    return new SenseContext(clock, world, broker, profiles, mode, await generateKeyPair());
+    const vision = new VisionSense({
+      provider: providers.vision,
+      clock,
+      nextId: () => broker.nextPerceptId(),
+      getPose: () => ({ position: world.user.position, headingDeg: world.user.headingDeg }),
+      getMap: () => mapSourceFor(broker, `${world.user.place}.sim`),
+    });
+    return new SenseContext(clock, world, broker, profiles, mode, providers, vision, await generateKeyPair());
   }
 
   // ── Events and audit trail ────────────────────────────────────────────────────────────────
