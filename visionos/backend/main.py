@@ -5,6 +5,7 @@ Wire protocol, one phone per socket:
   binary  JPEG                         live frame for perception (small, frequent)
   binary  b"READ" + (u32 len + JPEG)*  a burst of detailed frames to read text from
   binary  b"PEEK" + u32 len + JPEG     one detailed frame to read in the background
+  binary  b"SCAN" + (u32 len + JPEG)*  two detailed frames to describe the scene from
   text    {"type": "scan"}             describe the room from the latest live frame
   text    {"type": "read"}             read text from the latest live frame
   text    {"type": "ask", "text": "..."}
@@ -42,6 +43,8 @@ from backend.ai.ocr import (
     format_for_speech,
 )
 from backend.ai.prompts import PROMPT_VERSION, READ_PROMPT, SCAN_PROMPT, scene_context
+from backend.perception.pipeline import _decode_jpeg
+from backend.scene.inference import Seen, describe_scan, inventory_sentence
 from backend.ai.vision import VisionProvider, build_provider
 from backend.config import get_settings
 from backend.hazards.engine import HazardEngine
@@ -54,6 +57,16 @@ log = logging.getLogger(__name__)
 
 READ_TAG = b"READ"
 PEEK_TAG = b"PEEK"
+SCAN_TAG = b"SCAN"
+
+# A scan is its own two-frame burst, detected at 1280 px instead of the live
+# loop's 640: a chair six metres down a hallway is 25 px tall at 640 and was
+# never seen. Something in both frames counts; something in one frame is
+# only ever a hedged guess, and only when the detector was sure of it.
+SCAN_FRAMES = 2
+SCAN_IMGSZ = 1280
+SCAN_MATCH_IOU = 0.2
+SCAN_MATCH_AZIMUTH_DEG = 15.0
 
 # Background reading. The client peeks at what is in view every few seconds
 # and the reader keeps the last few results, so a Read can answer from what
@@ -153,6 +166,65 @@ def with_holder(spoken: str, holder: str | None) -> str:
     if not holder or not spoken.startswith(prefix):
         return spoken
     return f"On the {holder}, it reads: {spoken[len(prefix):]}"
+
+
+def match_scan_frames(per_frame: list[list], frame_size: tuple[int, int]) -> tuple[list[Seen], list[Seen]]:
+    """Sightings seen in both scan frames, and those seen in only one.
+
+    Matched by label and box overlap; the frames are a fraction of a second
+    apart, so a real thing barely moves. Confidence is the better of the
+    two, position the average.
+    """
+    width, height = frame_size
+
+    def norm(box) -> tuple[float, float, float, float]:
+        return (box.x1 / width, box.y1 / height, box.x2 / width, box.y2 / height)
+
+    if not per_frame:
+        return [], []
+    if len(per_frame) == 1:
+        return [], [Seen(d.label, d.confidence, d.azimuth_deg, d.distance_m, 1, norm(d.box)) for d in per_frame[0]]
+
+    first, second = per_frame[0], per_frame[1]
+    claimed: set[int] = set()
+    both: list[Seen] = []
+    once: list[Seen] = []
+    for a in first:
+        best, best_iou = None, 0.0
+        for index, b in enumerate(second):
+            if index in claimed or b.label != a.label:
+                continue
+            iou = a.box.iou(b.box)
+            if iou > best_iou:
+                best, best_iou = index, iou
+        if best is not None and best_iou >= SCAN_MATCH_IOU:
+            claimed.add(best)
+            b = second[best]
+            both.append(Seen(
+                a.label, max(a.confidence, b.confidence),
+                (a.azimuth_deg + b.azimuth_deg) / 2,
+                None if a.distance_m is None or b.distance_m is None else (a.distance_m + b.distance_m) / 2,
+                2, norm(a.box),
+            ))
+        else:
+            once.append(Seen(a.label, a.confidence, a.azimuth_deg, a.distance_m, 1, norm(a.box)))
+    for index, b in enumerate(second):
+        if index not in claimed:
+            once.append(Seen(b.label, b.confidence, b.azimuth_deg, b.distance_m, 1, norm(b.box)))
+    return both, once
+
+
+def add_tracked(seen: list[Seen], objects) -> list[Seen]:
+    """Objects the live loop has already confirmed count as seen, unless the
+    scan already has that label in that direction."""
+    out = list(seen)
+    for o in objects:
+        if not o.visible:
+            continue
+        if any(s.label == o.label and abs(s.azimuth_deg - o.azimuth_deg) <= SCAN_MATCH_AZIMUTH_DEG for s in out):
+            continue
+        out.append(Seen(o.label, o.confidence, o.azimuth_deg, o.distance_m, 2, None))
+    return out
 
 
 def looks_blurry(frames: list[bytes]) -> bool:
@@ -384,6 +456,51 @@ class Session:
             await self._say(no_text_response(frames))
         await self._finish(trace)
 
+    # --- Scanning ---------------------------------------------------------
+
+    async def handle_scan(self, frames: list[bytes]) -> None:
+        """Describe the scene from a two-frame burst detected at scan size."""
+        frames = [frame for frame in frames if frame][:SCAN_FRAMES]
+        if not frames:
+            await self.handle_intent("scan", None)
+            return
+        if self.provider.reads_text:
+            # A vision model describes the picture itself; the burst just
+            # gives it the sharper frame.
+            self.latest_frame = frames[-1]
+            await self.handle_intent("scan", None)
+            return
+
+        trace = LatencyTrace(label="scan")
+        loop = asyncio.get_running_loop()
+        per_frame = []
+        size = None
+        with trace.stage("detect"):
+            for frame in frames:
+                image = await loop.run_in_executor(None, _decode_jpeg, frame)
+                if image is None:
+                    continue
+                size = (image.shape[1], image.shape[0])
+                per_frame.append(await self.perception.detector.detect(image, SCAN_IMGSZ))
+        if size is None:
+            await self._say(NO_CAMERA)
+            return
+
+        seen, once = match_scan_frames(per_frame, size)
+        seen = add_tracked(seen, self.perception.scene.all_objects())
+        await self._say(describe_scan(self.perception.scene, seen, once))
+        await self.socket.send_json({
+            "type": "inventory",
+            "text": inventory_sentence(seen, once),
+            "items": [
+                {"label": s.label, "confidence": round(s.confidence, 2), "frames": s.frames,
+                 "azimuth_deg": round(s.azimuth_deg, 1),
+                 "distance_m": None if s.distance_m is None else round(s.distance_m, 1)}
+                for s in [*seen, *once]
+            ],
+        })
+        await self._finish(trace)
+
     # --- Background reading -----------------------------------------------
 
     async def handle_peek(self, frames: list[bytes]) -> None:
@@ -563,6 +680,8 @@ async def websocket_endpoint(socket: WebSocket) -> None:
                     await session.handle_read(unpack_read_frames(frame))
                 elif frame.startswith(PEEK_TAG):
                     await session.handle_peek(unpack_tagged_frames(frame, PEEK_TAG))
+                elif frame.startswith(SCAN_TAG):
+                    await session.handle_scan(unpack_tagged_frames(frame, SCAN_TAG))
                 else:
                     await session.handle_frame(frame)
                 continue

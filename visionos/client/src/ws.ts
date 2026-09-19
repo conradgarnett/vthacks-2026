@@ -24,7 +24,12 @@ export type ServerEvent =
     }
   | { type: "hazard"; text: string; severity: number; azimuth_deg: number; distance_m: number }
   | { type: "beacon"; label: string; azimuth_deg: number; distance_m: number; visible: boolean }
-  | { type: "beacon_stop" };
+  | { type: "beacon_stop" }
+  | {
+      type: "inventory";
+      text: string;
+      items: Array<{ label: string; confidence: number; frames: number; azimuth_deg: number; distance_m: number | null }>;
+    };
 
 type Handlers = {
   onEvent: (event: ServerEvent) => void;
@@ -39,6 +44,7 @@ const MAX_BACKOFF_MS = 8000;
 // pack_read_frames() in backend/main.py.
 const READ_TAG = new TextEncoder().encode("READ");
 const PEEK_TAG = new TextEncoder().encode("PEEK");
+const SCAN_TAG = new TextEncoder().encode("SCAN");
 
 export class Connection {
   private socket: WebSocket | null = null;
@@ -119,6 +125,11 @@ export class Connection {
    */
   sendPeekFrame(blob: Blob): void {
     this.sendTagged(PEEK_TAG, [blob]);
+  }
+
+  /** Two detailed frames of the whole view, to describe the scene from. */
+  sendScanFrames(blobs: Blob[]): void {
+    this.sendTagged(SCAN_TAG, blobs);
   }
 
   private sendTagged(tag: Uint8Array, blobs: Blob[]): void {

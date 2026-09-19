@@ -24,11 +24,11 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Iterable
 
-from backend.perception.geometry import clock_position
+from backend.perception.geometry import clock_position, describe_direction
 from backend.perception.vocabulary import LANDMARK_CLASSES, is_obstacle
 from backend.scene.model import SceneModel, SceneObject
 from backend.scene.queries import summarize
-from backend.speech.phrasing import join_spoken, with_article
+from backend.speech.phrasing import join_spoken, pluralize, with_article
 
 # Which objects imply which kind of space, and how strongly. Weights are
 # evidence, not probabilities: a bed alone settles "bedroom"; a chair alone
@@ -225,3 +225,200 @@ def snapshot_extras(scene: SceneModel, detections=()) -> dict:
             for t in tentative_objects(detections, scene)
         ],
     }
+
+
+# --- Scan pictures ---------------------------------------------------------
+#
+# A scan used to be an inventory: the nearest few objects, each with a clock
+# position and a distance, nothing about how they sit together. Looking down
+# a hallway at a person sitting at a table with two chairs, it said "a person
+# about 6 meters away". The picture below says where you are, then groups
+# what belongs together and says what the group is doing.
+
+
+@dataclass(slots=True)
+class Seen:
+    """One thing a scan saw, with the evidence for it.
+
+    `frames` is how many of the scan's frames had it: two frames agreeing is
+    what makes a sighting count, the same evidence the reader uses for text.
+    `box` is normalized (x1, y1, x2, y2) within the frame, for relationships.
+    """
+
+    label: str
+    confidence: float
+    azimuth_deg: float
+    distance_m: float | None
+    frames: int = 2
+    box: tuple[float, float, float, float] | None = None
+
+
+# Things that describe the place rather than sit in it.
+_SETTING_LABELS = {"hallway": "You're looking down a hallway."}
+# Furniture a person sits at or in.
+_TABLES = {"table", "dining table", "desk", "counter"}
+_SEATS = {"chair", "couch", "bench"}
+# Two things within this angle and distance of each other belong to one group.
+_GROUP_AZIMUTH_DEG = 20.0
+_GROUP_DISTANCE_RATIO = 1.6
+_GROUP_DISTANCE_M = 1.5
+# A person's box overlapping a seat's by this much means they are in it.
+_SITTING_OVERLAP = 0.05
+
+
+def _about(distance_m: float | None) -> str:
+    if distance_m is None:
+        return ""
+    if distance_m < 1.0:
+        return "less than a meter"
+    if distance_m < 3.0:
+        return f"about {round(distance_m * 2) / 2:g} meters"
+    return f"about {round(distance_m)} meters"
+
+
+def _overlap(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> float:
+    ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
+    ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
+    if ix2 <= ix1 or iy2 <= iy1:
+        return 0.0
+    inter = (ix2 - ix1) * (iy2 - iy1)
+    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return inter / union if union > 0 else 0.0
+
+
+def _together(a: Seen, b: Seen) -> bool:
+    if abs(a.azimuth_deg - b.azimuth_deg) > _GROUP_AZIMUTH_DEG:
+        return False
+    if a.distance_m is None or b.distance_m is None:
+        return abs(a.azimuth_deg - b.azimuth_deg) <= _GROUP_AZIMUTH_DEG / 2
+    near, far = sorted((a.distance_m, b.distance_m))
+    return far - near <= _GROUP_DISTANCE_M or far / max(near, 0.1) <= _GROUP_DISTANCE_RATIO
+
+
+def group_seen(seen: list[Seen]) -> list[list[Seen]]:
+    """Greedy grouping, nearest first, so each thing joins the closest group."""
+    ordered = sorted(seen, key=lambda s: (s.distance_m is None, s.distance_m or 0.0, abs(s.azimuth_deg)))
+    groups: list[list[Seen]] = []
+    for item in ordered:
+        for group in groups:
+            if _together(group[0], item):
+                group.append(item)
+                break
+        else:
+            groups.append([item])
+    return groups
+
+
+def _is_sitting(person: Seen, seats: list[Seen]) -> bool:
+    if person.box is None:
+        return False
+    return any(seat.box is not None and _overlap(person.box, seat.box) >= _SITTING_OVERLAP for seat in seats)
+
+
+def _counted(items: list[Seen]) -> str:
+    counts = Counter(s.label for s in items)
+    parts = [with_article(label) if n == 1 else pluralize(n, label) for label, n in counts.items()]
+    return join_spoken(parts)
+
+
+def describe_group(group: list[Seen]) -> str:
+    """What a group is, as a person would say it: "a person sitting at a table
+    with two chairs, one of them empty"."""
+    people = [s for s in group if s.label == "person"]
+    seats = [s for s in group if s.label in _SEATS]
+    tables = [s for s in group if s.label in _TABLES]
+    rest = [s for s in group if s not in people and s not in seats and s not in tables]
+
+    if not people:
+        return _counted(group)
+
+    subject = "a person" if len(people) == 1 else pluralize(len(people), "person")
+    sitting = any(_is_sitting(p, seats) for p in people)
+    verb = "sitting" if sitting else "standing"
+    phrase = subject
+    if tables and seats:
+        phrase += f" {verb} at {with_article(tables[0].label)} with {pluralize(len(seats), seats[0].label) if len(seats) > 1 else with_article(seats[0].label)}"
+    elif tables:
+        phrase += f" {verb} at {with_article(tables[0].label)}"
+    elif seats:
+        seat_phrase = with_article(seats[0].label) if len(seats) == 1 else pluralize(len(seats), seats[0].label)
+        phrase += f" {verb} {'in' if sitting else 'by'} {seat_phrase}"
+    # Seats nobody is in: all of them when the people are standing.
+    empty = len(seats) - (len(people) if sitting else 0)
+    if seats and empty > 0:
+        if len(seats) == 1:
+            phrase += ", which is empty"
+        else:
+            phrase += ", one of them empty" if empty == 1 else f", {empty} of them empty"
+    if rest:
+        phrase += f", and {_counted(rest)}"
+    return phrase
+
+
+def _where(group: list[Seen], hallway: bool, farthest: bool) -> str:
+    distances = [s.distance_m for s in group if s.distance_m is not None]
+    azimuth = sum(s.azimuth_deg for s in group) / len(group)
+    direction = describe_direction(azimuth)
+    where = _about(min(distances)) if distances else ""
+    if hallway and farthest and direction == "straight ahead":
+        return f"{where} ahead, at the end of the hallway" if where else "at the end of the hallway"
+    return f"{where} {direction}".strip()
+
+
+def describe_scan(scene: SceneModel, seen: list[Seen], glimpsed: Iterable[Seen] = ()) -> str:
+    """A scan answer that paints the scene from what two frames agreed on.
+
+    The place first, then each group of things that sit together, nearest
+    first, with what the group is doing and where it is; then what was only
+    glimpsed, hedged, and only when the detector was sure of it.
+    """
+    labels = [s.label for s in seen]
+    sentences: list[str] = []
+
+    setting = next((_SETTING_LABELS[l] for l in labels if l in _SETTING_LABELS), None)
+    room = room_sentence(labels)
+    if setting:
+        sentences.append(setting)
+    elif room:
+        sentences.append(room)
+
+    hallway = "hallway" in labels
+    things = [s for s in seen if s.label not in _SETTING_LABELS]
+    groups = group_seen(things)
+    if groups:
+        farthest = max(
+            groups, key=lambda g: max((s.distance_m or 0.0) for s in g)
+        )
+        for group in groups:
+            what = describe_group(group)
+            where = _where(group, hallway, group is farthest and len(groups) > 1 or (len(groups) == 1 and hallway))
+            sentence = f"{where[0].upper() + where[1:]}, {what}." if where else f"{what[0].upper() + what[1:]}."
+            sentences.append(sentence)
+    elif not sentences:
+        sentences.append("I can't make out anything specific right now.")
+
+    sure = [g for g in glimpsed if g.confidence >= _TENTATIVE_MIN_CONFIDENCE and g.label not in labels]
+    if sure:
+        parts = [f"{with_article(g.label)} {describe_direction(g.azimuth_deg)}" for g in sure[:2]]
+        sentences.append(f"I think there may also be {join_spoken(parts)}.")
+
+    reminder = reminder_sentence(scene)
+    if reminder:
+        sentences.append(reminder)
+    return " ".join(sentences)
+
+
+def inventory_sentence(seen: list[Seen], glimpsed: Iterable[Seen] = ()) -> str:
+    """Everything the scan saw, with confidence, for the screen or a verbose ear."""
+    def item(s: Seen) -> str:
+        where = f" {_about(s.distance_m)}" if s.distance_m is not None else ""
+        return f"{s.label} {round(s.confidence * 100)}%{where}"
+
+    confirmed = ", ".join(item(s) for s in sorted(seen, key=lambda s: -s.confidence))
+    once = ", ".join(item(s) for s in sorted(glimpsed, key=lambda s: -s.confidence))
+    parts = []
+    if confirmed:
+        parts.append(f"Seen in both frames: {confirmed}.")
+    if once:
+        parts.append(f"Seen once: {once}.")
+    return " ".join(parts) or "Nothing recognized."

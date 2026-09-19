@@ -28,6 +28,10 @@ const HIRES_QUALITY = 0.85;
 // A background peek: enough pixels for a label, a fraction of a read's bytes.
 const PEEK_WIDTH = 1280;
 const PEEK_QUALITY = 0.75;
+// A scan frame: the whole field of view at a size the detector can see a
+// chair at the end of a hallway in.
+const SCAN_WIDTH = 1280;
+const SCAN_QUALITY = 0.8;
 
 /**
  * The part of the frame a read looks at: the middle two thirds, drawn on
@@ -331,6 +335,11 @@ export class Camera {
 
   captureFast(): Promise<Blob | null> {
     return this.capture(FAST_WIDTH, FAST_QUALITY);
+  }
+
+  /** The whole view at scan size, for describing the scene. */
+  captureScan(): Promise<Blob | null> {
+    return this.capture(SCAN_WIDTH, SCAN_QUALITY);
   }
 
   /** Middling resolution of the read area, for the background reader. */

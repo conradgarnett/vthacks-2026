@@ -19,6 +19,8 @@ when it is five. Apparent size gives metric distance directly:
 
 from __future__ import annotations
 
+from functools import partial
+
 import logging
 import math
 from dataclasses import dataclass
@@ -133,7 +135,10 @@ class Detector:
                 "Detector: %s on %s (COCO)", self._settings.detector_weights, self._device
             )
 
-    def detect_sync(self, frame_bgr) -> list[Detection]:
+    def detect_sync(self, frame_bgr, imgsz: int | None = None) -> list[Detection]:
+        """`imgsz` overrides the model's default input size (640). A scan on
+        demand can afford 1280: a chair six metres down a hallway is 25 px
+        tall at 640 and twice that at 1280, at four times the cost."""
         if self._model is None:
             self.load()
 
@@ -146,6 +151,7 @@ class Detector:
             conf=base_confidence,
             device=self._device,
             verbose=False,
+            **({"imgsz": imgsz} if imgsz else {}),
         )
 
         detections: list[Detection] = []
@@ -179,7 +185,7 @@ class Detector:
                 )
         return detections
 
-    async def detect(self, frame_bgr) -> list[Detection]:
+    async def detect(self, frame_bgr, imgsz: int | None = None) -> list[Detection]:
         # Shared single-thread pool: MPS is not thread-safe and concurrent
         # access crashes the process. See perception/runtime.py.
-        return await run_inference(self.detect_sync, frame_bgr)
+        return await run_inference(partial(self.detect_sync, frame_bgr, imgsz))

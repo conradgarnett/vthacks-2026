@@ -209,6 +209,13 @@ function onServerEvent(event: ServerEvent): void {
       spatial.stopBeacon();
       break;
 
+    case "inventory":
+      // Everything the scan saw, with confidence: on screen always, spoken
+      // only when asked for with ?verbose=1, since it is a list, not a picture.
+      show(event.text);
+      if (verbose) tts.say(event.text, SpeechPriority.Answer);
+      break;
+
     case "trace":
       // The read is done with the hi-res frame; let the fast loop resume.
       if (event.label.startsWith("read")) readPending = false;
@@ -340,6 +347,41 @@ async function begin(): Promise<void> {
   }
 }
 
+const SCAN_FRAMES = 2;
+const SCAN_GAP_MS = 150;
+// ?verbose=1 also speaks the full inventory with confidences after a scan.
+const verbose = new URLSearchParams(location.search).get("verbose") === "1";
+
+/**
+ * A scan is two frames of the whole view at scan size, so the detector
+ * can see what the live loop's small frames cannot, and only what both
+ * frames agree on is spoken as seen. Without a running camera it falls
+ * back to describing what the live loop already knows.
+ */
+async function scanScene(): Promise<void> {
+  if (!connection.isOpen) {
+    reportFailure("Not connected yet.");
+    return;
+  }
+  if (!camera.isRunning) {
+    connection.sendIntent("scan");
+    return;
+  }
+  spatial.play("info", 0, 1);
+  setStatus("Scanning…");
+  const captured: Blob[] = [];
+  for (let i = 0; i < SCAN_FRAMES; i++) {
+    const frame = await camera.captureScan();
+    if (frame) captured.push(frame);
+    if (i < SCAN_FRAMES - 1) await new Promise((resolve) => setTimeout(resolve, SCAN_GAP_MS));
+  }
+  if (captured.length === 0) {
+    connection.sendIntent("scan");
+    return;
+  }
+  connection.sendScanFrames(captured);
+}
+
 /** Draw the read area over the preview, wherever the frame landed on screen. */
 function placeReadArea(): void {
   const rect = camera.readWindowOnScreen();
@@ -463,7 +505,7 @@ void showMode();
 // One action per control, so a tap on the screen, a key press and a watch
 // button wired through an Arduino all do exactly the same thing.
 const actions = {
-  scan: () => connection.sendIntent("scan"),
+  scan: () => void scanScene(),
   read: () => void readText(),
   // Tap to toggle, not push-to-talk. A held button fails on phones: the
   // browser cancels the press the moment it takes it for a scroll or a
