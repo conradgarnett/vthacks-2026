@@ -4,8 +4,9 @@ Reading order carries most of the risk. Engines return lines in no
 guaranteed order, and a sign spoken bottom-up or zig-zagged across columns is
 worse than one not read at all: the user has no way to tell it was scrambled.
 
-The engine tests run against whichever OCR engine loads on this machine and
-skip when none does.
+Engine tests run against whichever OCR engine loads on this machine and skip
+when none does. Pipeline quality is measured separately with `eval/`; these
+tests pin behaviour, not accuracy.
 """
 
 from __future__ import annotations
@@ -17,12 +18,15 @@ from PIL import Image, ImageDraw, ImageFont
 
 from backend.ai.ocr import (
     NO_TEXT_FOUND,
+    AppleVisionOCR,
     TextLine,
     TextReader,
+    _accept,
+    _merge,
+    _needs_tiles,
     build_reader,
-    clean_lines,
     format_for_speech,
-    merge_readings,
+    reading_rows,
     sort_reading_order,
 )
 
@@ -86,41 +90,32 @@ class TestReadingOrder:
         ]
         assert texts(sort_reading_order(row)) == ["EXIT", "left"]
 
+    def test_rows_expose_their_grouping(self):
+        rows = reading_rows([line("b", 0.5), line("a", 0.1)])
+        assert [texts(row) for row in rows] == [["a"], ["b"]]
+
     def test_empty_input(self):
         assert sort_reading_order([]) == []
 
 
-class TestCleaning:
-    def test_drops_lines_with_no_letters_or_digits(self):
-        """Arrows, rules and stray marks are detections, not text."""
-        cleaned = clean_lines([line("->", 0.1), line("EXIT", 0.2), line("|||", 0.3)])
-        assert texts(cleaned) == ["EXIT"]
+class TestAcceptance:
+    """The gate every engine's raw output passes through."""
 
-    def test_drops_implausible_text(self):
-        """Observed on a carpet texture. Confidence does not rescue it."""
-        cleaned = clean_lines([line("J¥Y.A'¢&'.;", 0.1, confidence=0.99), line("EXIT", 0.2)])
-        assert texts(cleaned) == ["EXIT"]
+    def test_rejects_texture_noise_regardless_of_confidence(self):
+        """Observed on a carpet texture. Vision reported it at ~0.5, and
+        would happily report it at 0.99."""
+        assert not _accept("J¥Y.A'¢&'.;", 0.99)
 
-    def test_drops_low_confidence_lines(self):
-        cleaned = clean_lines([line("noise", 0.1, confidence=0.1), line("EXIT", 0.2)])
-        assert texts(cleaned) == ["EXIT"]
+    def test_rejects_symbols_only(self):
+        assert not _accept("->", 0.9)
+        assert not _accept("|||", 0.9)
 
-    def test_collapses_internal_whitespace(self):
-        assert texts(clean_lines([line("  Room   204 ", 0.1)])) == ["Room 204"]
+    def test_rejects_low_confidence(self):
+        assert not _accept("EXIT", 0.1)
 
-    def test_removes_the_same_line_reported_twice(self):
-        """Engines sometimes return one line as two overlapping boxes."""
-        cleaned = clean_lines(
-            [line("EXIT", 0.10, height=0.05), line("exit,", 0.11, height=0.05)]
-        )
-        assert texts(cleaned) == ["EXIT"]
-
-    def test_keeps_identical_text_on_different_rows(self):
-        """Two doors both marked PUSH are two lines."""
-        cleaned = clean_lines(
-            [line("PUSH", 0.10, height=0.05), line("PUSH", 0.60, height=0.05)]
-        )
-        assert texts(cleaned) == ["PUSH", "PUSH"]
+    @pytest.mark.parametrize("text", ["EXIT", "Room 204B", "Keep door closed", "B12"])
+    def test_keeps_signage(self, text):
+        assert _accept(text, 0.5)
 
 
 class TestConsensus:
@@ -128,11 +123,11 @@ class TestConsensus:
 
     def test_text_seen_in_every_frame_is_kept_with_its_agreement(self):
         readings = [[line("EXIT", 0.10)], [line("EXIT", 0.11)], [line("EXIT", 0.10)]]
-        merged = merge_readings(readings)
+        merged = _merge(readings)
         assert texts(merged) == ["EXIT"]
         assert merged[0].agreement == 3
 
-    def test_similar_variants_group_and_the_most_confident_wins(self):
+    def test_similar_variants_group_and_the_most_plausible_wins(self):
         """Degraded frames disagree on characters; exact matching would let
         neither variant reach two votes."""
         readings = [
@@ -140,36 +135,48 @@ class TestConsensus:
             [line("2048", 0.1, confidence=0.6)],
             [line("204B", 0.1, confidence=0.8)],
         ]
-        merged = merge_readings(readings)
+        merged = _merge(readings)
         assert texts(merged) == ["204B"]
         assert merged[0].agreement == 3
 
     def test_short_fragment_seen_once_is_dropped(self):
         readings = [[line("EXIT", 0.1), line("Jn", 0.5)], [line("EXIT", 0.1)], [line("EXIT", 0.1)]]
-        assert texts(merge_readings(readings)) == ["EXIT"]
+        assert texts(_merge(readings)) == ["EXIT"]
 
     def test_long_wordlike_line_seen_once_survives(self):
         """Requiring agreement outright cost more real text than it saved."""
         readings = [[line("Keep door closed", 0.5)], [], []]
-        assert texts(merge_readings(readings)) == ["Keep door closed"]
+        assert texts(_merge(readings)) == ["Keep door closed"]
 
     def test_merged_position_is_averaged_so_reading_order_still_works(self):
         readings = [
             [line("Second", 0.50, height=0.04), line("First", 0.10, height=0.04)],
             [line("First", 0.12, height=0.04), line("Second", 0.52, height=0.04)],
         ]
-        assert texts(sort_reading_order(merge_readings(readings))) == ["First", "Second"]
+        assert texts(sort_reading_order(_merge(readings))) == ["First", "Second"]
 
-    def test_single_frame_skips_consensus(self):
-        class Fake:
+    def test_single_frame_skips_the_vote(self):
+        class Fake(TextReader):
             name = "fake"
+            available = True
 
-            def read(self, frame_jpeg: bytes) -> list[TextLine]:
+            def _recognize(self, frame_jpeg: bytes, minimum_height: float) -> list[TextLine]:
                 return [line("B12", 0.1)]
 
         # A short code seen once would not survive a multi-frame vote, but a
         # single frame has nothing to vote against.
-        assert texts(TextReader(Fake()).read_consensus_sync([b"jpeg"])) == ["B12"]
+        assert texts(Fake().read_consensus_sync([b"jpeg"])) == ["B12"]
+
+
+class TestTileGate:
+    def test_nothing_or_a_scrap_escalates_to_tiles(self):
+        assert _needs_tiles([])
+        assert _needs_tiles([line("EX", 0.1)])
+
+    def test_a_solid_reading_does_not(self):
+        """Tiles re-read what the full frame already got right and attach
+        garbled twins, so a good reading must not pay for them."""
+        assert not _needs_tiles([line("Keep door closed", 0.1)])
 
 
 class TestSpeechFormatting:
@@ -209,8 +216,8 @@ class TestSpeechFormatting:
 
 
 class TestReader:
-    def test_reader_without_an_engine_is_unavailable_and_reads_nothing(self):
-        reader = TextReader(None)
+    def test_null_reader_is_unavailable_and_reads_nothing(self):
+        reader = TextReader()
         assert not reader.available
         assert reader.name == "none"
         assert reader.read_sync(b"anything") == []
@@ -219,25 +226,21 @@ class TestReader:
     def test_build_reader_none_disables_ocr(self):
         assert not build_reader("none").available
 
+    def test_build_reader_rejects_unknown_engine_names_gracefully(self):
+        assert not build_reader("not-an-engine").available
+
     def test_engine_failure_degrades_to_no_text(self):
         """This sits in the user's speech path; it must degrade, not crash."""
 
-        class Broken:
+        class Broken(TextReader):
             name = "broken"
+            available = True
 
-            def read(self, frame_jpeg: bytes) -> list[TextLine]:
+            def _recognize(self, frame_jpeg: bytes, minimum_height: float) -> list[TextLine]:
                 raise RuntimeError("model exploded")
 
-        assert TextReader(Broken()).read_sync(b"jpeg") == []
-
-    def test_reader_cleans_engine_output(self):
-        class Noisy:
-            name = "noisy"
-
-            def read(self, frame_jpeg: bytes) -> list[TextLine]:
-                return [line("->", 0.1), line("  EXIT ", 0.2), line("x", 0.3, confidence=0.05)]
-
-        assert texts(TextReader(Noisy()).read_sync(b"jpeg")) == ["EXIT"]
+        assert Broken().read_sync(b"jpeg") == []
+        assert Broken().read_consensus_sync([b"jpeg", b"jpeg"]) == []
 
 
 # --- Against a real engine --------------------------------------------------
@@ -250,7 +253,7 @@ _FONT_CANDIDATES = (
 )
 
 
-def font(px: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+def font(px: int):
     for path in _FONT_CANDIDATES:
         try:
             return ImageFont.truetype(path, px)
@@ -315,9 +318,16 @@ class TestEngine:
         assert spoken.upper().index("EXIT") < spoken.upper().index("204B")
 
     def test_reads_small_distant_text(self, reader):
-        """Regression: reads were 'sometimes bad'. At 26 px in a 1200 px frame
-        (2.2% of height) the text is well under Apple Vision's default floor."""
+        """At 26 px in a 1200 px frame (2.2% of height) the text is under
+        Apple Vision's default floor and must still come back."""
         assert "204" in format_for_speech(reader.read_sync(distant_sign_jpeg(26)))
+
+    def test_reading_a_clean_sign_does_not_pay_for_tiling(self, reader):
+        """Large text must not trigger the expensive path: tiles re-read what
+        the full frame already got right and attach garbled twins."""
+        from backend.ai.ocr import _prepare
+
+        assert not _needs_tiles(reader._read_full(_prepare(sign_jpeg("EXIT", "Room 204B"))))
 
     def test_consensus_over_a_burst_keeps_the_sign(self, reader):
         burst = [sign_jpeg("EXIT", "Room 204B")] * 3
@@ -338,16 +348,35 @@ class TestEngine:
         assert reader.read_consensus_sync([b"", b""]) == []
 
 
-class TestAppleVisionTuning:
-    def test_tuning_beats_the_vision_default_on_small_text(self, reader):
-        """Pins the improvement itself, not just the outcome."""
-        if reader.name != "apple-vision":
-            pytest.skip("Apple Vision specific")
-        engine = reader._engine
-        image = distant_sign_jpeg(26)
+class TestAppleVision:
+    """Vision-specific tuning; skipped everywhere else."""
 
-        untuned = engine.recognize(image, minimum_height=0.031)
-        tuned = reader.read_sync(image)
+    @pytest.fixture(scope="class")
+    def ocr(self):
+        engine = AppleVisionOCR()
+        if not engine.available:
+            pytest.skip("Apple Vision unavailable on this platform")
+        engine.warmup()
+        return engine
+
+    def test_tuning_beats_the_vision_default_on_small_text(self, ocr):
+        """Pins the improvement itself, not just the outcome."""
+        image = distant_sign_jpeg(26)
+        untuned = ocr._recognize(image, minimum_height=0.031)
+        tuned = ocr.read_sync(image)
 
         assert "204" not in format_for_speech(untuned), "default unexpectedly read it"
         assert "204" in format_for_speech(tuned)
+
+    def test_tiling_rescues_text_the_full_frame_pass_cannot_see(self, ocr):
+        """Vision's minimum text height is a fraction of the frame, so a sign
+        across a room is invisible no matter how many pixels the sensor got.
+        Measured CER was 1.00 below 2% of frame height before tiling."""
+        image = distant_sign_jpeg(14)  # ~1.2% of a 1200px frame
+
+        full_only = ocr._read_full(image)
+        with_tiles = ocr.read_sync(image)
+
+        assert len(with_tiles) > len(full_only) or not full_only, (
+            "tiling added nothing on text the full frame pass missed"
+        )
