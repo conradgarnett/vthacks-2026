@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 
 from backend.ai.lexicon import correct_text
+from backend.ai.medication import guard as medication_guard
 from backend.ai.text_quality import assess, clean_for_speech, normalize
 
 log = logging.getLogger(__name__)
@@ -1031,4 +1032,7 @@ def format_for_speech(lines: list[TextLine]) -> str:
 
     if not parts:
         return NO_TEXT_FOUND
-    return f"It reads: {'. '.join(parts)}."
+    spoken = f"It reads: {'. '.join(parts)}."
+    # Medication labels are the one case where a confident number can cause
+    # harm, so an uncorroborated dose is withheld rather than spoken.
+    return medication_guard(spoken, lines)
