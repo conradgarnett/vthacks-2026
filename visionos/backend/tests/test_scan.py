@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from backend.main import Session, add_tracked, match_scan_frames
+from backend.main import Session, add_tracked, detection_items, match_scan_frames
 from backend.perception.detector import Detection
 from backend.perception.geometry import BoundingBox
 from backend.ai.ocr import TextLine
@@ -218,3 +218,9 @@ async def test_a_scan_burst_is_detected_at_scan_size_and_painted():
     assert socket.spoken() == ["About 2 meters straight ahead, a chair."]
     inventory = [p for p in socket.sent if p.get("type") == "inventory"]
     assert inventory and inventory[0]["items"][0]["label"] == "chair" and inventory[0]["items"][0]["frames"] == 2
+
+
+def test_detections_are_sent_with_boxes_normalized_to_the_frame():
+    items = detection_items([detection("door", 64, 72, 320, 648, 0.84)], (640, 720))
+    assert items == [{"label": "door", "confidence": 0.84, "box": [0.1, 0.1, 0.5, 0.9]}]
+    assert detection_items([detection("door", 0, 0, 10, 10)], None) == []

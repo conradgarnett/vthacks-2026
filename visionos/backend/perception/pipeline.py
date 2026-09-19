@@ -48,6 +48,9 @@ class PerceptionPipeline:
         # model only admits what the tracker has seen twice; inference reads
         # the rest as hints, spoken as guesses.
         self.last_detections: list = []
+        # Width and height of the frame those detections were made on, so
+        # their pixel boxes can be sent normalized.
+        self.last_frame_size: tuple[int, int] | None = None
         self.last_trace: dict = {}
         self.dropped_frames = 0
         self._frame_index = 0
@@ -99,6 +102,7 @@ class PerceptionPipeline:
                 frame = await loop.run_in_executor(None, _decode_jpeg, frame_jpeg)
             if frame is None:
                 return
+            self.last_frame_size = (frame.shape[1], frame.shape[0])
 
             with trace.stage("detect"):
                 detections = await self.detector.detect(frame)

@@ -48,6 +48,9 @@
       /* What a read looks at, drawn over the preview for a sighted helper.
          Never load-bearing: the blind user aims the same way with or
          without it. Positioned by main.ts from the camera's geometry. */
+      /* What the detector believes it sees, drawn for a sighted helper:
+         a red outline and label per object. Never load-bearing. */
+      #boxes { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 19; }
       #read-area {
         position: fixed; pointer-events: none; z-index: 20;
         border: 2px solid rgba(255, 212, 0, 0.75); border-radius: 8px;
@@ -139,6 +142,7 @@
 
     <video id="camera" playsinline muted aria-hidden="true"></video>
     <div id="read-area" hidden aria-hidden="true"></div>
+    <canvas id="boxes" aria-hidden="true"></canvas>
 
     <!-- Full-screen tap target, so the primary action needs no aiming. -->
     <button id="tap-layer" hidden aria-label="Scan the room and describe it">

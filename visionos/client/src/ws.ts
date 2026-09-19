@@ -28,8 +28,18 @@ export type ServerEvent =
   | {
       type: "inventory";
       text: string;
-      items: Array<{ label: string; confidence: number; frames: number; azimuth_deg: number; distance_m: number | null }>;
-    };
+      items: Array<{
+        label: string;
+        confidence: number;
+        frames: number;
+        azimuth_deg: number;
+        distance_m: number | null;
+        box: [number, number, number, number] | null;
+      }>;
+    }
+  | { type: "detections"; items: Array<{ label: string; confidence: number; box: [number, number, number, number] }> };
+
+export type Boxed = { label: string; confidence: number; box: [number, number, number, number] };
 
 type Handlers = {
   onEvent: (event: ServerEvent) => void;

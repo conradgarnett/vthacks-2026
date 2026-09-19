@@ -7,7 +7,7 @@ import { SpatialAudio } from "./audio/spatial";
 import { SpeechPriority, TtsPlayer } from "./audio/tts-player";
 import { onVoicesReady, pickVoice, rankVoices, saveVoiceName } from "./audio/voices";
 import { Voice } from "./voice";
-import { Connection, type ServerEvent } from "./ws";
+import { type Boxed, Connection, type ServerEvent } from "./ws";
 
 const DISCLAIMER =
   "VisionOS ready. Tap anywhere to scan, tap Ask to speak. This is an " +
@@ -42,6 +42,7 @@ const el = <T extends HTMLElement>(id: string): T =>
 
 const video = el<HTMLVideoElement>("camera");
 const readArea = el<HTMLDivElement>("read-area");
+const boxes = el<HTMLCanvasElement>("boxes");
 const startButton = el<HTMLButtonElement>("start");
 const tapLayer = el<HTMLButtonElement>("tap-layer");
 const controls = el<HTMLDivElement>("controls");
@@ -209,11 +210,22 @@ function onServerEvent(event: ServerEvent): void {
       spatial.stopBeacon();
       break;
 
-    case "inventory":
+    case "inventory": {
       // Everything the scan saw, with confidence: on screen always, spoken
       // only when asked for with ?verbose=1, since it is a list, not a picture.
       show(event.text);
       if (verbose) tts.say(event.text, SpeechPriority.Answer);
+      const boxed = event.items.filter((item) => item.box !== null) as Boxed[];
+      if (boxed.length > 0) {
+        scanBoxesUntil = performance.now() + SCAN_BOXES_MS;
+        drawBoxes(boxed);
+      }
+      break;
+    }
+
+    case "detections":
+      // Live boxes, unless a scan's are still on show.
+      if (performance.now() >= scanBoxesUntil) drawBoxes(event.items);
       break;
 
     case "trace":
@@ -381,6 +393,51 @@ async function scanScene(): Promise<void> {
   }
   connection.sendScanFrames(captured);
 }
+
+// The last detections drawn, so a resize can redraw them, and how long a
+// scan's boxes stay up before the live ones take over again.
+let drawn: Boxed[] = [];
+let scanBoxesUntil = 0;
+const SCAN_BOXES_MS = 4000;
+
+/**
+ * A red outline and label around everything the detector believes it
+ * sees, for a sighted helper checking the glasses. Boxes arrive normalized
+ * to the frame; the frame is letterboxed on screen, so they are mapped
+ * through the same geometry as the read area.
+ */
+function drawBoxes(items: Boxed[]): void {
+  drawn = items;
+  const frame = camera.frameOnScreen();
+  const scale = window.devicePixelRatio || 1;
+  boxes.width = Math.round(window.innerWidth * scale);
+  boxes.height = Math.round(window.innerHeight * scale);
+  const ctx = boxes.getContext("2d");
+  if (!ctx) return;
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+  if (!frame) return;
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "#e53935";
+  ctx.font = "13px system-ui, sans-serif";
+  for (const item of items) {
+    const [x1, y1, x2, y2] = item.box;
+    const left = frame.left + x1 * frame.width;
+    const top = frame.top + y1 * frame.height;
+    const width = (x2 - x1) * frame.width;
+    const height = (y2 - y1) * frame.height;
+    ctx.strokeRect(left, top, width, height);
+    const text = `${item.label} ${Math.round(item.confidence * 100)}%`;
+    const pad = 4;
+    const textWidth = ctx.measureText(text).width;
+    const tagTop = top >= 18 ? top - 18 : top;
+    ctx.fillStyle = "#e53935";
+    ctx.fillRect(left, tagTop, textWidth + pad * 2, 18);
+    ctx.fillStyle = "#fff";
+    ctx.fillText(text, left + pad, tagTop + 13);
+  }
+}
+window.addEventListener("resize", () => drawBoxes(drawn));
 
 /** Draw the read area over the preview, wherever the frame landed on screen. */
 function placeReadArea(): void {

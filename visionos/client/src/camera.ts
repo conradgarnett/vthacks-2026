@@ -353,19 +353,29 @@ export class Camera {
    * whole frame. Null until the camera has a size.
    */
   readWindowOnScreen(): ScreenRect | null {
+    const frame = this.frameOnScreen();
+    if (!frame) return null;
+    return {
+      left: frame.left + frame.width * READ_WINDOW.x,
+      top: frame.top + frame.height * READ_WINDOW.y,
+      width: frame.width * READ_WINDOW.width,
+      height: frame.height * READ_WINDOW.height,
+    };
+  }
+
+  /** Where the whole frame sits on the page, letterboxing included. */
+  frameOnScreen(): ScreenRect | null {
     const { videoWidth, videoHeight } = this.video;
     if (!videoWidth || !videoHeight) return null;
     const rect = this.video.getBoundingClientRect();
     const scale = Math.min(rect.width / videoWidth, rect.height / videoHeight);
-    const shownWidth = videoWidth * scale;
-    const shownHeight = videoHeight * scale;
-    const left = rect.left + (rect.width - shownWidth) / 2;
-    const top = rect.top + (rect.height - shownHeight) / 2;
+    const width = videoWidth * scale;
+    const height = videoHeight * scale;
     return {
-      left: left + shownWidth * READ_WINDOW.x,
-      top: top + shownHeight * READ_WINDOW.y,
-      width: shownWidth * READ_WINDOW.width,
-      height: shownHeight * READ_WINDOW.height,
+      left: rect.left + (rect.width - width) / 2,
+      top: rect.top + (rect.height - height) / 2,
+      width,
+      height,
     };
   }
 

@@ -227,6 +227,26 @@ def add_tracked(seen: list[Seen], objects) -> list[Seen]:
     return out
 
 
+def detection_items(detections, frame_size) -> list[dict]:
+    """Detections as the client draws them: label, confidence and a box
+    normalized to the frame, origin top-left. A sighted helper checking
+    the glasses sees what the detector believes; nothing here is spoken."""
+    if not frame_size:
+        return []
+    width, height = frame_size
+    return [
+        {
+            "label": d.label,
+            "confidence": round(d.confidence, 2),
+            "box": [
+                round(d.box.x1 / width, 4), round(d.box.y1 / height, 4),
+                round(d.box.x2 / width, 4), round(d.box.y2 / height, 4),
+            ],
+        }
+        for d in detections
+    ]
+
+
 def looks_blurry(frames: list[bytes], sharpest: float | None = None) -> bool:
     """Was every frame of the burst too soft to carry text? `sharpest` is
     the burst's best sharpness score when the caller already has it."""
@@ -377,6 +397,10 @@ class Session:
     async def handle_frame(self, frame: bytes) -> None:
         self.latest_frame = frame
         await self.perception.process(frame)
+        await self.socket.send_json({
+            "type": "detections",
+            "items": detection_items(self.perception.last_detections, self.perception.last_frame_size),
+        })
 
         # Deterministic and ahead of everything else: nothing on this path
         # can be delayed by an API call.
@@ -502,7 +526,8 @@ class Session:
             "items": [
                 {"label": s.label, "confidence": round(s.confidence, 2), "frames": s.frames,
                  "azimuth_deg": round(s.azimuth_deg, 1),
-                 "distance_m": None if s.distance_m is None else round(s.distance_m, 1)}
+                 "distance_m": None if s.distance_m is None else round(s.distance_m, 1),
+                 "box": [round(v, 4) for v in s.box] if s.box else None}
                 for s in [*seen, *once]
             ],
         })
