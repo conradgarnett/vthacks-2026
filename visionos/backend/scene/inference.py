@@ -278,6 +278,27 @@ _ACTIVITIES = (
     ("bowl", "eating"),
 )
 _IN_REACH = 0.25
+# What a person is doing, read from the furniture they are at rather than
+# an object in hand. Same bar: both above 0.8, the person on or at it.
+_FURNITURE_ACTIVITIES = (
+    ("desk", "working at a desk"),
+    ("counter", "at a counter"),
+    ("couch", "sitting on a couch"),
+    ("bed", "lying on a bed"),
+    ("sink", "at a sink"),
+)
+# Words worth reading out from a scan even when nobody asked for text:
+# wayfinding and safety. Anything printed on a sign or a door counts too.
+_NOTABLE_WORDS = {
+    "exit", "entrance", "entry", "stairs", "stair", "elevator", "lift",
+    "restroom", "restrooms", "toilet", "toilets", "washroom", "emergency",
+    "fire", "caution", "warning", "danger", "push", "pull", "open",
+    "closed", "gate", "platform", "room", "reception", "information",
+    "pharmacy", "way", "out", "private", "staff", "authorized", "wet",
+    "floor", "keep", "stop", "no", "only", "office", "lobby",
+}
+_SIGN_LIKE = {"sign", "exit sign", "door", "doorway", "elevator"}
+_MAX_NOTABLE = 2
 
 
 def _about(distance_m: float | None) -> str:
@@ -350,6 +371,62 @@ def _activity(people: list[Seen], items: list[Seen]) -> tuple[str, Seen] | None:
     return None
 
 
+def _furniture_activity(people: list[Seen], furniture: list[Seen]) -> tuple[str, Seen] | None:
+    """The first place a sure person is at or on, with what that implies."""
+    for person in people:
+        if person.confidence < _TENTATIVE_MIN_CONFIDENCE:
+            continue
+        for label, doing in _FURNITURE_ACTIVITIES:
+            for item in furniture:
+                if item.label != label or item.confidence < _TENTATIVE_MIN_CONFIDENCE:
+                    continue
+                if _in_reach(person, item) or (
+                    person.box and item.box and _overlap(person.box, item.box) >= _SITTING_OVERLAP
+                ):
+                    return doing, item
+    return None
+
+
+def _text_direction(left: float) -> str:
+    if left < 0.33:
+        return "to your left"
+    if left > 0.66:
+        return "to your right"
+    return "ahead"
+
+
+def notable_text(text_lines, seen: list[Seen]) -> list[str]:
+    """Sentences for the words in view worth saying unasked.
+
+    A line is notable when it carries a wayfinding or safety word, or
+    when it sits on something sign-like (a sign, a door). Anything else
+    in view is left for a Read. At most two, nearest the middle first.
+    """
+    signs = [s for s in seen if s.label in _SIGN_LIKE and s.box is not None]
+    picked: list[tuple[float, str]] = []
+    spoken: set[str] = set()
+    for line in text_lines:
+        text = " ".join(line.text.split())
+        key = text.lower()
+        if len(key) < 2 or key in spoken:
+            continue
+        words = {w.strip(".,:;!").lower() for w in text.split()}
+        on_sign = next(
+            (s for s in signs if _point_inside(line.left, line.top + line.height / 2, s.box)), None
+        )
+        if not (words & _NOTABLE_WORDS) and on_sign is None:
+            continue
+        spoken.add(key)
+        where = _text_direction(line.left)
+        if on_sign is not None:
+            sentence = f"The {on_sign.label} {where} says {text}."
+        else:
+            sentence = f"A sign {where} says {text}."
+        picked.append((abs(line.left + 0.1 - 0.5), sentence))
+    picked.sort(key=lambda pair: pair[0])
+    return [sentence for _, sentence in picked[:_MAX_NOTABLE]]
+
+
 def _counted(items: list[Seen]) -> str:
     counts = Counter(s.label for s in items)
     parts = [with_article(label) if n == 1 else pluralize(n, label) for label, n in counts.items()]
@@ -373,12 +450,17 @@ def describe_group(group: list[Seen]) -> str:
     phrase = subject
 
     activity = _activity(people, rest)
-    if activity:
-        doing, item = activity
+    placed = None if activity else _furniture_activity(people, [*tables, *seats, *rest])
+    if activity or placed:
+        doing, item = activity or placed
         rest = [s for s in rest if s is not item]
+        tables = [s for s in tables if s is not item]
+        seats = [s for s in seats if s is not item]
         phrase = f"it looks like {subject} {doing}"
-        if tables:
+        if activity and tables:
             phrase += f" at {with_article(tables[0].label)}"
+        elif placed and tables:
+            phrase += f", with {_counted(tables)}"
         extra_seats = len(seats) - (len(people) if sitting else 0)
         if extra_seats > 0:
             phrase += f", with {pluralize(extra_seats, seats[0].label) if extra_seats > 1 else 'an empty ' + seats[0].label}"
@@ -417,7 +499,9 @@ def _where(group: list[Seen], hallway: bool, farthest: bool) -> str:
     return f"{where} {direction}".strip()
 
 
-def describe_scan(scene: SceneModel, seen: list[Seen], glimpsed: Iterable[Seen] = ()) -> str:
+def describe_scan(
+    scene: SceneModel, seen: list[Seen], glimpsed: Iterable[Seen] = (), text_lines=()
+) -> str:
     """A scan answer that paints the scene from what two frames agreed on.
 
     The place first, then each group of things that sit together, nearest
@@ -448,6 +532,8 @@ def describe_scan(scene: SceneModel, seen: list[Seen], glimpsed: Iterable[Seen] 
             sentences.append(sentence)
     elif not sentences:
         sentences.append("I can't make out anything specific right now.")
+
+    sentences.extend(notable_text(text_lines, seen))
 
     sure = [g for g in glimpsed if g.confidence >= _TENTATIVE_MIN_CONFIDENCE and g.label not in labels]
     if sure:

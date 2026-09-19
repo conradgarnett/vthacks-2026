@@ -519,7 +519,7 @@ class Session:
                 cues = await self.ocr.read_quick(frames[0])
         seen = refine_labels(seen, cues)
         once = refine_labels(once, cues)
-        await self._say(describe_scan(self.perception.scene, seen, once))
+        await self._say(describe_scan(self.perception.scene, seen, once, cues))
         await self.socket.send_json({
             "type": "inventory",
             "text": inventory_sentence(seen, once),

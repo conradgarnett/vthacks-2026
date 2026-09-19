@@ -19,7 +19,10 @@ const DISCLAIMER =
 // and starves the read that the user is actually waiting on, so the rate
 // drops once the backend says where it runs.
 const FRAME_INTERVAL_MS = 700;
-const FRAME_INTERVAL_CPU_MS = 1500;
+// Detection is ~30 ms on this CPU; the old 1500 ms was set when the depth
+// pass still ran behind every frame, and it left the boxes a second and a
+// half behind the picture.
+const FRAME_INTERVAL_CPU_MS = 500;
 let frameIntervalMs = FRAME_INTERVAL_MS;
 // A detailed frame for the background reader every few seconds, so Read
 // answers from what is already known. Rarer on a CPU, where each costs

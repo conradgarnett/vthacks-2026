@@ -20,6 +20,7 @@ from backend.scene.inference import (
     describe_scan,
     group_seen,
     inventory_sentence,
+    notable_text,
     refine_labels,
 )
 from backend.scene.model import SceneModel
@@ -103,16 +104,59 @@ class TestActivity:
 
     def test_an_unsure_laptop_is_only_listed(self):
         group = [replace_conf(self.DESK[0], 0.92), replace_conf(self.DESK[1], 0.6), self.DESK[2]]
-        assert describe_group(group) == "a person standing at a desk, and a laptop"
+        # The desk is sure, so the place prediction stands in for the object one.
+        assert describe_group(group) == "it looks like a person working at a desk, and a laptop"
 
     def test_a_laptop_out_of_reach_is_only_listed(self):
         far = seen("laptop", 15.0, 2.0, 0.9, box=(0.85, 0.55, 0.95, 0.65))
         group = [self.DESK[0], far, self.DESK[2]]
-        assert describe_group(group) == "a person standing at a desk, and a laptop"
+        # The desk is sure, so the place prediction stands in for the object one.
+        assert describe_group(group) == "it looks like a person working at a desk, and a laptop"
 
     def test_a_phone_in_hand_is_a_prediction_too(self):
         group = [seen("person", 0, 1.5, 0.9, box=(0.4, 0.2, 0.6, 0.9)), seen("cell phone", 1.0, 1.4, 0.85, box=(0.5, 0.5, 0.55, 0.58))]
         assert describe_group(group) == "it looks like a person on their phone"
+
+
+class TestPlaceActivity:
+    """What a person is doing, read from where they are when nothing is in hand."""
+
+    def test_a_person_at_a_desk_is_working(self):
+        group = [
+            seen("person", 0.0, 2.0, 0.9, box=(0.40, 0.30, 0.60, 0.85)),
+            seen("desk", 1.0, 2.0, 0.85, box=(0.20, 0.60, 0.80, 0.90)),
+            seen("chair", -6.0, 2.1, 0.7, box=(0.15, 0.55, 0.28, 0.85)),
+        ]
+        assert describe_group(group) == "it looks like a person working at a desk, with an empty chair"
+
+    def test_an_unsure_desk_is_only_a_desk(self):
+        group = [seen("person", 0.0, 2.0, 0.9, box=(0.40, 0.30, 0.60, 0.85)), seen("desk", 1.0, 2.0, 0.6, box=(0.20, 0.60, 0.80, 0.90))]
+        assert describe_group(group) == "a person standing at a desk"
+
+    def test_a_person_on_a_couch(self):
+        group = [seen("person", 0.0, 2.0, 0.9, box=(0.40, 0.30, 0.60, 0.80)), seen("couch", 0.0, 2.0, 0.88, box=(0.20, 0.55, 0.80, 0.95))]
+        assert describe_group(group) == "it looks like a person sitting on a couch"
+
+
+class TestNotableText:
+    def test_an_exit_sign_is_read_out_with_its_direction(self):
+        assert notable_text([text("EXIT", 0.1, 0.2)], []) == ["A sign to your left says EXIT."]
+
+    def test_text_on_a_door_is_read_out_whatever_it_says(self):
+        door = seen("door", 0.0, 3.0, 0.9, box=(0.4, 0.1, 0.6, 0.9))
+        assert notable_text([text("STAFF ONLY", 0.45, 0.4)], [door]) == ["The door ahead says STAFF ONLY."]
+
+    def test_ordinary_text_is_left_for_a_read(self):
+        assert notable_text([text("LISINOPRIL 10 MG", 0.45, 0.4), text("Diet Cola", 0.7, 0.5)], []) == []
+
+    def test_at_most_two_nearest_the_middle_and_no_repeats(self):
+        lines = [text("EXIT", 0.05, 0.2), text("EXIT", 0.06, 0.6), text("STAIRS", 0.45, 0.3), text("PUSH", 0.9, 0.5)]
+        out = notable_text(lines, [])
+        assert len(out) == 2 and out[0] == "A sign ahead says STAIRS."
+
+    def test_the_scan_speaks_the_sign_after_the_picture(self):
+        spoken = describe_scan(SceneModel(), [seen("chair", 0, 1.5)], [], [text("FIRE EXIT", 0.8, 0.2)])
+        assert spoken.endswith("A sign to your right says FIRE EXIT.")
 
 
 def replace_conf(item, confidence):
