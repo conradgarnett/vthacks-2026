@@ -92,7 +92,7 @@ second, lower pass; tiling still applies.
 
 ```bash
 cd visionos
-.venv/bin/python -m pytest backend/tests -q          # 221 tests (2 Apple-only)
+.venv/bin/python -m pytest backend/tests -q          # 480 tests (3 Apple-only)
 PYTHONPATH=. .venv/bin/python eval/run_ocr_eval.py 60
 ```
 
@@ -187,6 +187,39 @@ tested.
 
 ## Log
 
+- **2026-09-19, night, visionOS-2:** merged `main-project` at 4037f63
+  (Conrad's per-engine gating: RapidOCR lines below 0.70 confidence are
+  dropped and the acronym rules relax for a confident engine; his Mac
+  measurement keeps the tier and the dedupe veto). Architecture at 361151b:
+  `TieredReader(fast, thorough)` when two engines load (Vision then RapidOCR
+  on a Mac; RapidOCR alone here) meshes the fast engine's sure lines with
+  the thorough read whenever a line is below 0.8; a `PEEK` frame every 4 s
+  on CPU feeds a background reader, so Read answers at once from readings
+  under 6 s old when every line is >= 0.8, else runs the 3-frame burst with
+  exposure turned down; `SCAN` is its own two-frame burst at 1280 px
+  (imgsz 1280) and `scene/inference.py` paints the description: setting,
+  groups by angle and distance, what a person is doing when person and
+  object are both >= 0.8, up to two notable words with a direction, hedged
+  glimpses only above 0.8, a landmark reminder; a `detections` event after
+  every processed live frame draws red boxes on the preview (live frames
+  every 150 ms on CPU, overlay cleared 350 ms after the last processed
+  frame); the medication guard speaks numbers that frames agreed on and
+  withholds an unconfirmed dose; lexicon context pass and glued-word split;
+  the client picks a plugged-in webcam, keys 1-5 and 0 stand in for the
+  watch, a Web Serial button reads the Arduino. Numbers, RapidOCR, Windows,
+  0.70 floor: signage n=60 CER 0.031, exact 92%, silent 1/60, no-text
+  invented 0/8; bundled fonts n=76 sans 94%, serif 100%, cursive 75%,
+  handwriting 83%, novelty 80%; packaging name 12/24, symbols invented
+  0/12; prescription labels 40 tuning / 40 held-out: drug name 57% / 72%,
+  strength 60% / 78%, dose right 12% / 18%, wrong dose 0%. Conrad's Mac,
+  both engines, one corpus set: tier receipts 66% at 1132 ms vs RapidOCR
+  alone 66% at 1975 ms vs Vision 36% at 152 ms; medicine drug name 40%,
+  dose 25%, wrong 0%. Later that night: size tiers in `vocabulary.py`
+  (`scale_of`): hand-held things (cups, bottles, bowls, phones, remotes,
+  books, keyboards) are never boxed and are spoken only when asked about
+  ("are there any cups on the table"); laptops and bigger are always
+  spoken. Suite 480 passed, 3 skipped. `HAZARDS_ENABLED` is still false
+  and the depth pass is gated on it.
 - **2026-09-19, evening, visionOS-2:** merged 81b0add (lexicon, 38 bundled
   fonts; their `eval/fonts.py` supersedes ours, helper renamed `typefaces.py`);
   RapidOCR detects at 1280 px and recognizes on full-res crops (657 ms/frame,
