@@ -325,3 +325,34 @@ def test_size_tiers_follow_the_height_prior_unless_the_entry_says_otherwise():
     assert scale_of("person") == "large" and scale_of("chair") == "large"
     assert scale_of("stairs") == "large", "no height prior means spoken"
     assert scale_of("large cabinet or bin") == "large", "a refined label is spoken"
+
+
+# --- A wider vocabulary, still tiered and still guarded -----------------------
+
+
+def test_the_vocabulary_grew_with_priors_and_tiers():
+    from backend.perception.vocabulary import CLASS_NAMES, HIGH_PRECISION_CLASSES, VOCABULARY, scale_of
+
+    assert len(CLASS_NAMES) >= 110 and len(set(CLASS_NAMES)) == len(CLASS_NAMES)
+    for label in ("armchair", "stove", "bathtub", "pill bottle", "escalator", "crosswalk",
+                  "traffic light", "shopping cart", "fire extinguisher", "power strip"):
+        assert label in VOCABULARY, label
+    assert scale_of("pill bottle") == "small" and scale_of("plate") == "small"
+    assert scale_of("power strip") == "medium" and scale_of("curb") == "medium", (
+        "trip hazards are spoken however low they sit")
+    assert scale_of("escalator") == "large" and scale_of("wardrobe") == "large"
+    assert {"escalator", "crosswalk"} <= HIGH_PRECISION_CLASSES
+
+
+def test_a_person_at_a_stove_is_cooking():
+    person = seen("person", 0.0, 2.0, box=(0.4, 0.2, 0.6, 0.9))
+    stove = seen("stove", 2.0, 2.2, box=(0.35, 0.5, 0.75, 0.95))
+    spoken = describe_scan(SceneModel(), [person, stove])
+    assert "cooking at a stove" in spoken, spoken
+
+
+def test_a_person_in_an_armchair_is_sitting():
+    person = seen("person", 0.0, 2.0, box=(0.4, 0.3, 0.6, 0.9))
+    chair = seen("armchair", 0.0, 2.0, box=(0.35, 0.4, 0.65, 0.95))
+    spoken = describe_scan(SceneModel(), [person, chair])
+    assert "sitting in an armchair" in spoken, spoken

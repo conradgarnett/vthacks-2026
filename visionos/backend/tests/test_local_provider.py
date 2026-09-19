@@ -165,3 +165,32 @@ async def test_stairs_are_a_thing_one_can_ask_about():
     scene = build_scene([make_detection(label="stairs", distance=None, azimuth=20.0)])
     spoken = await answer(scene, "Where are the stairs?")
     assert "stairs" in spoken and "can't judge the distance" in spoken, spoken
+
+
+# --- The wider vocabulary can be asked about in everyday words -----------------
+
+
+@pytest.mark.asyncio
+async def test_pills_means_the_pill_bottle():
+    scene = build_scene([make_detection(label="pill bottle", distance=0.6, azimuth=0.0)])
+    spoken = await answer(scene, "Where are my pills?")
+    assert "pill bottle" in spoken and "0.6 meters" in spoken, spoken
+
+
+@pytest.mark.asyncio
+async def test_bin_means_the_trash_can_and_not_the_cabinet():
+    scene = build_scene(
+        [
+            make_detection(label="cabinet", x=100, distance=2.0),
+            make_detection(label="trash can", x=400, distance=1.5, azimuth=20.0),
+        ]
+    )
+    spoken = await answer(scene, "Is there a bin?")
+    assert "trash can" in spoken and "cabinet" not in spoken, spoken
+
+
+@pytest.mark.asyncio
+async def test_how_many_steps_is_not_a_question_about_stairs():
+    scene = build_scene([make_detection(label="door", distance=3.0, azimuth=0.0)])
+    spoken = await answer(scene, "How many steps to the door?")
+    assert "door" in spoken and "stairs" not in spoken, spoken

@@ -92,7 +92,7 @@ second, lower pass; tiling still applies.
 
 ```bash
 cd visionos
-.venv/bin/python -m pytest backend/tests -q          # 480 tests (3 Apple-only)
+.venv/bin/python -m pytest backend/tests -q          # 486 tests (3 Apple-only)
 PYTHONPATH=. .venv/bin/python eval/run_ocr_eval.py 60
 ```
 
@@ -218,8 +218,14 @@ tested.
   (`scale_of`): hand-held things (cups, bottles, bowls, phones, remotes,
   books, keyboards) are never boxed and are spoken only when asked about
   ("are there any cups on the table"); laptops and bigger are always
-  spoken. Suite 480 passed, 3 skipped. `HAZARDS_ENABLED` is still false
-  and the depth pass is gated on it.
+  spoken. Detector vocabulary 53 -> 118 classes (`vocabulary.py`, tiered;
+  class-agnostic NMS so near-synonyms box a thing once), measured with
+  the new `eval/run_detect_eval.py` on this CPU at idle priority: 640 px
+  median 257 -> 286 ms, 1280 px 1048 -> 924 ms (noise), invented objects
+  on 24 blank textures 0 -> 0; recall and precision on photographs need
+  the COCO slice from `eval/fetch_everyday.py`. Suite 486 passed,
+  3 skipped. `HAZARDS_ENABLED` is still false and the depth pass is gated
+  on it.
 - **2026-09-19, evening, visionOS-2:** merged 81b0add (lexicon, 38 bundled
   fonts; their `eval/fonts.py` supersedes ours, helper renamed `typefaces.py`);
   RapidOCR detects at 1280 px and recognizes on full-res crops (657 ms/frame,

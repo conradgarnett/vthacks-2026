@@ -6,9 +6,13 @@ handrail -- the three things a blind person most needs found. An
 open-vocabulary detector takes free-text classes, so the vocabulary becomes a
 design decision rather than a fixed constraint.
 
-Kept deliberately short. Every extra class costs inference time and adds
-another chance to hallucinate an obstacle, and a false stair is worse than a
-missed lamp.
+Every extra class costs inference time and adds another chance to
+hallucinate an obstacle, and a false stair is worse than a missed lamp, so an
+addition is measured before it stays: eval/run_detect_eval.py reports detect
+time, objects invented on blank textures, and recall and precision on
+photographed everyday things (eval/fetch_everyday.py). The list grew from 53
+to 118 classes on 2026-09-19 at the user's request; the numbers are in the
+log in CLAUDE.md.
 """
 
 from __future__ import annotations
@@ -102,6 +106,81 @@ VOCABULARY: dict[str, ClassSpec] = {
     "refrigerator": ClassSpec(1.70, True),
     "sink": ClassSpec(0.25, False, scale="medium"),
     "toilet": ClassSpec(0.75, False),
+    # -- More of the home: furniture and fixtures you walk into ------------
+    "armchair": ClassSpec(0.90, True),
+    "stool": ClassSpec(0.70, True),
+    "coffee table": ClassSpec(0.45, True),
+    "nightstand": ClassSpec(0.60, True),
+    "dresser": ClassSpec(1.00, True),
+    "wardrobe": ClassSpec(2.00, True),
+    "bookshelf": ClassSpec(1.80, True),
+    "lamp": ClassSpec(0.55, True),
+    "radiator": ClassSpec(0.60, True),
+    "fireplace": ClassSpec(1.00, True),
+    "ladder": ClassSpec(1.80, True),
+    "mirror": ClassSpec(0.80, False),
+    # A power strip on the floor is what a cane misses and a foot finds. It
+    # is low, so by height it would count as hand-held; it is spoken anyway.
+    "power strip": ClassSpec(0.04, True, scale="medium"),
+    # -- Kitchen ----------------------------------------------------------
+    "oven": ClassSpec(0.90, True),
+    "stove": ClassSpec(0.90, True),
+    "dishwasher": ClassSpec(0.85, True),
+    "washing machine": ClassSpec(0.85, True),
+    "coffee maker": ClassSpec(0.35, False),
+    "blender": ClassSpec(0.40, False),
+    "kettle": ClassSpec(0.25, False),
+    "toaster": ClassSpec(0.20, False),
+    "pot": ClassSpec(0.15, False),
+    "pan": ClassSpec(0.08, False),
+    "plate": ClassSpec(0.02, False),
+    "drinking glass": ClassSpec(0.12, False),
+    "fork": ClassSpec(0.02, False),
+    "knife": ClassSpec(0.03, False),
+    "spoon": ClassSpec(0.02, False),
+    "banana": ClassSpec(0.04, False),
+    "apple": ClassSpec(0.08, False),
+    # -- Bathroom ---------------------------------------------------------
+    "bathtub": ClassSpec(0.55, True),
+    "towel": ClassSpec(0.40, False),
+    "toilet paper": ClassSpec(0.10, False),
+    "toothbrush": ClassSpec(0.02, False),
+    "hair dryer": ClassSpec(0.20, False),
+    # -- Desk and personal things -----------------------------------------
+    "computer mouse": ClassSpec(0.04, False),
+    "printer": ClassSpec(0.30, False),
+    "scissors": ClassSpec(0.02, False),
+    "clock": ClassSpec(0.30, False),
+    "vase": ClassSpec(0.25, False),
+    "handbag": ClassSpec(0.30, False),
+    "umbrella": ClassSpec(0.30, False),
+    "shoe": ClassSpec(0.10, False),
+    # The thing the user most wants read. Naming it lets a read say "On the
+    # pill bottle, it reads ..." and lets a question find it.
+    "pill bottle": ClassSpec(0.08, False),
+    # -- Out and about ----------------------------------------------------
+    "escalator": ClassSpec(None, True, True),
+    "ramp": ClassSpec(None, False, True),
+    # A curb is a step down at the edge of the road: low, and spoken anyway.
+    "curb": ClassSpec(0.15, True, scale="medium"),
+    "crosswalk": ClassSpec(None, False, True),
+    "traffic light": ClassSpec(1.00, False, True),
+    "stop sign": ClassSpec(0.75, False, True),
+    "fire hydrant": ClassSpec(0.75, True),
+    "parking meter": ClassSpec(1.40, True),
+    "bollard": ClassSpec(1.00, True),
+    "traffic cone": ClassSpec(0.70, True),
+    "mailbox": ClassSpec(1.10, True),
+    "fence": ClassSpec(1.20, True),
+    "gate": ClassSpec(1.50, False, True),
+    "tree": ClassSpec(None, True),
+    "shopping cart": ClassSpec(1.00, True),
+    "stroller": ClassSpec(1.00, True),
+    "wheelchair": ClassSpec(0.95, True),
+    "scooter": ClassSpec(1.00, True),
+    "vending machine": ClassSpec(1.80, False, True),
+    "drinking fountain": ClassSpec(1.00, False, True),
+    "fire extinguisher": ClassSpec(0.55, False, True),
     # Deliberately absent: keys, wallet, glasses and similar small personal
     # items. Open-vocabulary detection fires on them constantly -- a street
     # photo produced "glasses, 1.9 meters ahead" at 0.62 confidence -- and
@@ -153,7 +232,8 @@ SMALL_CLASSES = frozenset(k for k in VOCABULARY if is_small(k))
 # these classes are the ones that cause harm when wrong: a phantom staircase
 # will stop someone dead, and a phantom door sends them into a wall.
 HIGH_PRECISION_CLASSES = frozenset(
-    {"stairs", "staircase", "door", "doorway", "elevator", "low ceiling"}
+    {"stairs", "staircase", "door", "doorway", "elevator", "low ceiling",
+     "escalator", "crosswalk"}
 )
 HIGH_PRECISION_THRESHOLD = 0.25
 

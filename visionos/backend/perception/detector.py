@@ -151,6 +151,12 @@ class Detector:
             conf=base_confidence,
             device=self._device,
             verbose=False,
+            # One box per thing. The vocabulary holds near-synonyms on
+            # purpose ("chair" and "armchair", "oven" and "stove", "bottle"
+            # and "pill bottle"); without class-agnostic suppression the same
+            # object comes back twice under two names, and the tracker,
+            # which never associates different labels, keeps both.
+            agnostic_nms=True,
             **({"imgsz": imgsz} if imgsz else {}),
         )
 

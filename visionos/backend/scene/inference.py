@@ -34,17 +34,27 @@ from backend.speech.phrasing import join_spoken, pluralize, with_article
 # evidence, not probabilities: a bed alone settles "bedroom"; a chair alone
 # settles nothing, because chairs are everywhere.
 ROOMS: list[tuple[str, dict[str, float]]] = [
-    ("kitchen", {"refrigerator": 2.0, "microwave": 1.5, "sink": 1.0, "counter": 1.0,
-                 "bowl": 0.5, "cup": 0.3, "bottle": 0.3}),
-    ("bathroom", {"toilet": 3.0, "sink": 1.0}),
-    ("bedroom", {"bed": 3.0}),
-    ("office", {"desk": 1.5, "laptop": 1.5, "keyboard": 1.0, "chair": 0.5, "book": 0.3}),
-    ("dining area", {"dining table": 2.0, "table": 1.5, "chair": 0.5, "cup": 0.3, "bowl": 0.3}),
-    ("living room", {"couch": 2.0, "tv": 1.5, "potted plant": 0.5, "remote": 0.5, "chair": 0.3}),
+    ("kitchen", {"refrigerator": 2.0, "microwave": 1.5, "oven": 1.5, "stove": 1.5,
+                 "dishwasher": 1.5, "sink": 1.0, "counter": 1.0, "kettle": 0.5,
+                 "toaster": 0.5, "coffee maker": 0.5, "bowl": 0.5, "cup": 0.3,
+                 "bottle": 0.3, "pot": 0.3, "pan": 0.3}),
+    ("bathroom", {"toilet": 3.0, "bathtub": 3.0, "sink": 1.0, "toilet paper": 1.0,
+                  "toothbrush": 1.0, "towel": 0.5, "hair dryer": 0.5, "mirror": 0.3}),
+    ("bedroom", {"bed": 3.0, "wardrobe": 1.5, "nightstand": 1.5, "dresser": 1.0}),
+    ("office", {"desk": 1.5, "laptop": 1.5, "keyboard": 1.0, "printer": 1.0,
+                "computer mouse": 0.7, "bookshelf": 0.5, "chair": 0.5, "book": 0.3}),
+    ("dining area", {"dining table": 2.0, "table": 1.5, "chair": 0.5, "cup": 0.3, "bowl": 0.3,
+                     "plate": 0.3, "fork": 0.2, "spoon": 0.2}),
+    ("living room", {"couch": 2.0, "fireplace": 2.0, "tv": 1.5, "coffee table": 1.5,
+                     "armchair": 1.0, "potted plant": 0.5, "remote": 0.5, "lamp": 0.3,
+                     "chair": 0.3}),
     ("corridor", {"hallway": 2.0, "door": 1.0, "doorway": 1.0, "exit sign": 1.5, "elevator": 1.5,
-                  "handrail": 1.0, "stairs": 1.0, "staircase": 1.0}),
-    ("street", {"bus": 2.0, "car": 1.5, "truck": 1.5, "motorcycle": 1.0, "bicycle": 0.7,
-                "pole": 0.7}),
+                  "escalator": 1.5, "handrail": 1.0, "stairs": 1.0, "staircase": 1.0,
+                  "fire extinguisher": 1.0, "vending machine": 1.0, "drinking fountain": 1.0}),
+    ("street", {"bus": 2.0, "crosswalk": 2.0, "car": 1.5, "truck": 1.5, "traffic light": 1.5,
+                "stop sign": 1.5, "fire hydrant": 1.5, "motorcycle": 1.0, "curb": 1.0,
+                "bollard": 1.0, "parking meter": 1.0, "bicycle": 0.7, "pole": 0.7,
+                "traffic cone": 0.7, "mailbox": 0.7, "scooter": 0.5, "tree": 0.5}),
 ]
 # Evidence needed before a room is named. A fridge plus a sink, a bed
 # alone or a toilet alone reach it; a door plus a handrail do not. There
@@ -260,8 +270,8 @@ class Seen:
 # Things that describe the place rather than sit in it.
 _SETTING_LABELS = {"hallway": "You're looking down a hallway."}
 # Furniture a person sits at or in.
-_TABLES = {"table", "dining table", "desk", "counter"}
-_SEATS = {"chair", "couch", "bench"}
+_TABLES = {"table", "dining table", "desk", "counter", "coffee table"}
+_SEATS = {"chair", "armchair", "stool", "couch", "bench"}
 # Two things within this angle and distance of each other belong to one group.
 _GROUP_AZIMUTH_DEG = 20.0
 _GROUP_DISTANCE_RATIO = 1.6
@@ -279,7 +289,11 @@ _ACTIVITIES = (
     ("cell phone", "on their phone"),
     ("book", "reading"),
     ("cup", "having a drink"),
+    ("drinking glass", "having a drink"),
     ("bowl", "eating"),
+    ("fork", "eating"),
+    ("spoon", "eating"),
+    ("toothbrush", "brushing their teeth"),
 )
 _IN_REACH = 0.25
 # What a person is doing, read from the furniture they are at rather than
@@ -290,6 +304,7 @@ _FURNITURE_ACTIVITIES = (
     ("couch", "sitting on a couch"),
     ("bed", "lying on a bed"),
     ("sink", "at a sink"),
+    ("stove", "cooking at a stove"),
 )
 # Words worth reading out from a scan even when nobody asked for text:
 # wayfinding and safety. Anything printed on a sign or a door counts too.
@@ -576,7 +591,10 @@ _TEXT_CUES = (
 )
 # A refrigerator with none of these around it, below the confidence bar,
 # is more likely a bin or a cabinet than a fridge in a hallway.
-_KITCHEN_COMPANY = {"sink", "microwave", "counter", "dining table", "bowl", "cup", "bottle"}
+_KITCHEN_COMPANY = {
+    "sink", "microwave", "counter", "dining table", "bowl", "cup", "bottle",
+    "stove", "oven", "dishwasher", "kettle", "toaster", "coffee maker",
+}
 UNSURE_TALL_BOX = "large cabinet or bin"
 
 
