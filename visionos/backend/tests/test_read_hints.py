@@ -12,7 +12,7 @@ import io
 from PIL import Image, ImageDraw, ImageFilter
 
 from backend.ai.ocr import NO_TEXT_FOUND
-from backend.main import BLURRY_HINT, looks_blurry, no_text_response
+from backend.main import BLURRY_HINT, looks_blurry, no_text_response, text_holder, with_holder
 
 
 def label(blur: float) -> bytes:
@@ -53,3 +53,46 @@ def test_the_hint_says_where_to_hold_it():
 
 def test_no_frames_is_not_blurry():
     assert not looks_blurry([])
+
+
+class Seen:
+    """The fields of a tracked object that naming the text's holder uses."""
+
+    def __init__(self, label, azimuth=0.0, distance=1.0, confidence=0.9, visible=True):
+        self.label = label
+        self.azimuth_deg = azimuth
+        self.distance_m = distance
+        self.confidence = confidence
+        self.visible = visible
+
+
+class TestTextHolder:
+    def test_the_nearest_central_object_is_named(self):
+        objects = [Seen("door", azimuth=10.0, distance=3.0), Seen("bottle", azimuth=-5.0, distance=0.4)]
+        assert text_holder(objects) == "bottle"
+
+    def test_an_unsure_object_is_not_named(self):
+        """The same 80% floor as every other guess: a wrong holder is
+        misinformation the user cannot check."""
+        assert text_holder([Seen("bottle", confidence=0.6)]) is None
+
+    def test_an_object_at_the_edge_of_view_is_not_the_holder(self):
+        assert text_holder([Seen("sign", azimuth=60.0)]) is None
+
+    def test_an_object_that_left_view_is_not_the_holder(self):
+        assert text_holder([Seen("bottle", visible=False)]) is None
+
+    def test_a_person_is_never_what_text_is_on(self):
+        assert text_holder([Seen("person", distance=0.5), Seen("box", distance=1.0)]) == "box"
+
+    def test_nothing_tracked_names_nothing(self):
+        assert text_holder([]) is None
+
+    def test_the_holder_prefixes_the_reading(self):
+        assert with_holder("It reads: Diet Cola.", "bottle") == "On the bottle, it reads: Diet Cola."
+
+    def test_no_holder_leaves_the_reading_alone(self):
+        assert with_holder("It reads: EXIT.", None) == "It reads: EXIT."
+
+    def test_the_refusal_is_not_prefixed(self):
+        assert with_holder("I don't see any readable text.", "bottle") == "I don't see any readable text."

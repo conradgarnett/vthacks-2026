@@ -97,6 +97,45 @@ def read_is_weak(lines) -> bool:
     return sum(len(line.text.strip()) for line in lines) < WEAK_READ_CHARS
 
 
+# Naming what the text sits on. The read burst never enters perception, but
+# the live loop was tracking the scene until the moment before, so the
+# object in front of the camera is known. It is named only when the tracker
+# is sure of it (the same 80% floor as every other guess here) and it sits
+# near the middle of the view, where a label being read has to be. Living
+# things are never what the text is on.
+TEXT_HOLDER_MIN_CONFIDENCE = 0.8
+TEXT_HOLDER_MAX_AZIMUTH_DEG = 25.0
+NOT_A_SURFACE = frozenset({"person", "people", "dog", "cat", "face", "hand"})
+
+
+def text_holder(objects) -> str | None:
+    """The label of the object the text is most likely on, or None."""
+    candidates = [
+        o for o in objects
+        if o.visible
+        and o.confidence >= TEXT_HOLDER_MIN_CONFIDENCE
+        and abs(o.azimuth_deg) <= TEXT_HOLDER_MAX_AZIMUTH_DEG
+        and o.label not in NOT_A_SURFACE
+    ]
+    if not candidates:
+        return None
+    # The nearest thing in the middle of the view; an unknown distance
+    # sorts last, and ties go to the most central.
+    best = min(
+        candidates,
+        key=lambda o: (o.distance_m if o.distance_m is not None else 99.0, abs(o.azimuth_deg)),
+    )
+    return best.label
+
+
+def with_holder(spoken: str, holder: str | None) -> str:
+    """'It reads: ...' becomes 'On the bottle, it reads: ...'."""
+    prefix = "It reads: "
+    if not holder or not spoken.startswith(prefix):
+        return spoken
+    return f"On the {holder}, it reads: {spoken[len(prefix):]}"
+
+
 def looks_blurry(frames: list[bytes]) -> bool:
     """Was every frame of the burst too soft to carry text?"""
     return bool(frames) and max(_sharpness(frame) for frame in frames) < BLURRY_SHARPNESS
@@ -268,7 +307,8 @@ class Session:
             return
 
         if lines:
-            await self._say(format_for_speech(lines))
+            holder = text_holder(self.perception.scene.all_objects())
+            await self._say(with_holder(format_for_speech(lines), holder))
             log.info(
                 "read: %d line(s) via %s from %d frame(s)", len(lines), self.ocr.name, len(frames)
             )
