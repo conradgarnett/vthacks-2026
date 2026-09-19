@@ -416,8 +416,9 @@ window.setInterval(() => {
 }, 100);
 
 /**
- * A red outline and label around everything the detector believes it
- * sees, for a sighted helper checking the glasses. Each set replaces the
+ * A red outline and label around the people, furniture and things of size
+ * the detector believes it sees, for a sighted helper checking the glasses;
+ * hand-held things (a phone, a bottle) get no box. Each set replaces the
  * last outright: a box that is not in the newest frame is gone. Boxes
  * arrive normalized to the frame; the frame is letterboxed on screen, so
  * they are mapped through the same geometry as the read area.
@@ -437,6 +438,9 @@ function drawBoxes(items: Boxed[]): void {
   ctx.strokeStyle = "#e53935";
   ctx.font = "13px system-ui, sans-serif";
   for (const item of items) {
+    // Hand-held things clutter the picture and are spoken only when asked
+    // about, so they are not drawn either.
+    if (item.scale === "small") continue;
     const [x1, y1, x2, y2] = item.box;
     const left = frame.left + x1 * frame.width;
     const top = frame.top + y1 * frame.height;

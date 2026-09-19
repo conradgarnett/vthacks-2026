@@ -5,6 +5,9 @@
  * surfaced to the caller to be spoken rather than shown.
  */
 
+// How big a thing is in the hand-held sense; "small" is never boxed.
+export type Scale = "small" | "medium" | "large";
+
 export type ServerEvent =
   | {
       type: "ready";
@@ -34,12 +37,16 @@ export type ServerEvent =
         frames: number;
         azimuth_deg: number;
         distance_m: number | null;
+        scale?: Scale;
         box: [number, number, number, number] | null;
       }>;
     }
-  | { type: "detections"; items: Array<{ label: string; confidence: number; box: [number, number, number, number] }> };
+  | {
+      type: "detections";
+      items: Array<{ label: string; confidence: number; scale?: Scale; box: [number, number, number, number] }>;
+    };
 
-export type Boxed = { label: string; confidence: number; box: [number, number, number, number] };
+export type Boxed = { label: string; confidence: number; scale?: Scale; box: [number, number, number, number] };
 
 type Handlers = {
   onEvent: (event: ServerEvent) => void;

@@ -266,5 +266,62 @@ async def test_a_scan_burst_is_detected_at_scan_size_and_painted():
 
 def test_detections_are_sent_with_boxes_normalized_to_the_frame():
     items = detection_items([detection("door", 64, 72, 320, 648, 0.84)], (640, 720))
-    assert items == [{"label": "door", "confidence": 0.84, "box": [0.1, 0.1, 0.5, 0.9]}]
+    assert items == [{"label": "door", "confidence": 0.84, "scale": "large", "box": [0.1, 0.1, 0.5, 0.9]}]
     assert detection_items([detection("door", 0, 0, 10, 10)], None) == []
+
+
+# --- Hand-held things are for questions, not scans ---------------------------
+
+
+def test_hand_held_things_are_left_out_of_a_scan():
+    """The user's rule: people, chairs, tables and laptops are spoken; a
+    phone, a bottle or a cup on the table only when asked about."""
+    spoken = describe_scan(SceneModel(), [
+        seen("table", 0.0, 2.0), seen("chair", 5.0, 2.2), seen("laptop", 2.0, 2.0),
+        seen("cup", 1.0, 2.0), seen("bottle", -2.0, 2.0), seen("cell phone", 3.0, 2.0),
+    ])
+    assert "table" in spoken and "chair" in spoken and "laptop" in spoken, spoken
+    for small in ("cup", "bottle", "phone"):
+        assert small not in spoken, spoken
+
+
+def test_only_hand_held_things_in_view_is_nothing_specific():
+    spoken = describe_scan(SceneModel(), [seen("cup", 0.0, 1.0), seen("remote", 3.0, 1.0)])
+    assert "can't make out anything specific" in spoken, spoken
+    assert "cup" not in spoken and "remote" not in spoken
+
+
+def test_a_phone_in_hand_still_says_what_the_person_is_doing():
+    person = seen("person", 0.0, 2.0, box=(0.4, 0.2, 0.6, 0.9))
+    phone = seen("cell phone", 0.0, 2.0, box=(0.48, 0.5, 0.52, 0.56))
+    spoken = describe_scan(SceneModel(), [person, phone])
+    assert "on their phone" in spoken, spoken
+    beside_a_chair = describe_scan(SceneModel(), [seen("chair", 0.0, 2.0), phone])
+    assert "phone" not in beside_a_chair, beside_a_chair
+
+
+def test_glimpsed_hand_held_things_are_not_hedged():
+    spoken = describe_scan(
+        SceneModel(), [seen("chair", 0.0, 2.0)],
+        glimpsed=[seen("cell phone", 10.0, 1.5, confidence=0.95, frames=1)],
+    )
+    assert "phone" not in spoken and "may also be" not in spoken, spoken
+
+
+def test_detections_carry_their_size_tier_for_the_overlay():
+    items = detection_items(
+        [detection("cup", 0, 0, 40, 40), detection("laptop", 0, 0, 90, 60), detection("chair", 0, 0, 200, 300)],
+        (640, 480),
+    )
+    assert [i["scale"] for i in items] == ["small", "medium", "large"]
+
+
+def test_size_tiers_follow_the_height_prior_unless_the_entry_says_otherwise():
+    from backend.perception.vocabulary import SMALL_CLASSES, scale_of
+
+    assert {"cup", "bottle", "bowl", "cell phone", "remote", "book", "keyboard"} <= SMALL_CLASSES
+    assert scale_of("laptop") == "medium" and scale_of("sink") == "medium"
+    assert scale_of("exit sign") == "medium", "a wayfinding sign is small but never left out"
+    assert scale_of("person") == "large" and scale_of("chair") == "large"
+    assert scale_of("stairs") == "large", "no height prior means spoken"
+    assert scale_of("large cabinet or bin") == "large", "a refined label is spoken"

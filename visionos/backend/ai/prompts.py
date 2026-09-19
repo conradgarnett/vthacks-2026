@@ -6,7 +6,9 @@ regression in answer quality can be traced to a specific prompt revision.
 
 from __future__ import annotations
 
-PROMPT_VERSION = "v2"
+from backend.perception.vocabulary import is_small
+
+PROMPT_VERSION = "v3"
 
 SYSTEM_PROMPT = """You are VisionOS, the visual sense of a blind or low-vision \
 user. You perceive their surroundings through a camera and a tracked spatial \
@@ -36,7 +38,8 @@ RULES
 SCAN_PROMPT = """Describe this room for someone who cannot see it. Sweep \
 left to right. Name the major objects and where each one is, using clock \
 positions and approximate distances. Mention anything in the walking path \
-first. Two or three sentences."""
+first. Leave out small hand-held things such as cups, bottles and phones
+unless asked about them. Two or three sentences."""
 
 READ_PROMPT = """Read all the text visible in this image aloud, exactly as \
 written and in natural reading order: top to bottom, left to right. Include \
@@ -59,10 +62,12 @@ def scene_context(snapshot: dict) -> str:
     lines = [
         f"- {o['label']} at {o['clock']}, about {o['distance_m']:.1f} m"
         f"{'' if o.get('visible', True) else ' (remembered, no longer in view)'}"
+        f"{' (small; mention only if asked)' if is_small(o['label']) else ''}"
         for o in objects
         if o.get("distance_m") is not None
     ] + [
         f"- {o['label']} at {o['clock']}, distance unknown"
+        f"{' (small; mention only if asked)' if is_small(o['label']) else ''}"
         for o in objects
         if o.get("distance_m") is None
     ]

@@ -25,7 +25,7 @@ from dataclasses import dataclass, replace
 from typing import Iterable
 
 from backend.perception.geometry import clock_position, describe_direction
-from backend.perception.vocabulary import LANDMARK_CLASSES, is_obstacle
+from backend.perception.vocabulary import LANDMARK_CLASSES, is_obstacle, is_small
 from backend.scene.model import SceneModel, SceneObject
 from backend.scene.queries import summarize
 from backend.speech.phrasing import join_spoken, pluralize, with_article
@@ -116,6 +116,10 @@ def tentative_objects(detections, scene: SceneModel, limit: int = 2) -> list[Ten
     out: list[Tentative] = []
     for detection in sorted(detections, key=lambda d: -d.confidence):
         if detection.confidence < _TENTATIVE_MIN_CONFIDENCE:
+            continue
+        # A possible cup is never worth a mention; a real one is spoken
+        # only when asked about.
+        if is_small(detection.label):
             continue
         if detection.label in confirmed or detection.label in seen:
             continue
@@ -442,7 +446,10 @@ def describe_group(group: list[Seen]) -> str:
     rest = [s for s in group if s not in people and s not in seats and s not in tables]
 
     if not people:
-        return _counted(group)
+        # Hand-held things are left for a question: "are there any cups on
+        # the table" gets them, a scan does not.
+        shown = [s for s in group if not is_small(s.label)]
+        return _counted(shown) if shown else ""
 
     subject = "a person" if len(people) == 1 else pluralize(len(people), "person")
     sitting = any(_is_sitting(p, seats) for p in people)
@@ -451,6 +458,9 @@ def describe_group(group: list[Seen]) -> str:
 
     activity = _activity(people, rest)
     placed = None if activity else _furniture_activity(people, [*tables, *seats, *rest])
+    # A phone in someone's hand says what they are doing; a phone on the
+    # table is not mentioned unless asked about.
+    rest = [s for s in rest if not is_small(s.label)]
     if activity or placed:
         doing, item = activity or placed
         rest = [s for s in rest if s is not item]
@@ -520,7 +530,9 @@ def describe_scan(
 
     hallway = "hallway" in labels
     things = [s for s in seen if s.label not in _SETTING_LABELS]
-    groups = group_seen(things)
+    # Small things still group, since a cup in reach says what a person is
+    # doing, but a group with nothing bigger in it is not spoken.
+    groups = [g for g in group_seen(things) if any(not is_small(s.label) for s in g)]
     if groups:
         farthest = max(
             groups, key=lambda g: max((s.distance_m or 0.0) for s in g)
@@ -535,7 +547,10 @@ def describe_scan(
 
     sentences.extend(notable_text(text_lines, seen))
 
-    sure = [g for g in glimpsed if g.confidence >= _TENTATIVE_MIN_CONFIDENCE and g.label not in labels]
+    sure = [
+        g for g in glimpsed
+        if g.confidence >= _TENTATIVE_MIN_CONFIDENCE and g.label not in labels and not is_small(g.label)
+    ]
     if sure:
         parts = [f"{with_article(g.label)} {describe_direction(g.azimuth_deg)}" for g in sure[:2]]
         sentences.append(f"I think there may also be {join_spoken(parts)}.")

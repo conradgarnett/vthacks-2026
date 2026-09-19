@@ -49,6 +49,7 @@ from backend.ai.vision import VisionProvider, build_provider
 from backend.config import get_settings
 from backend.hazards.engine import HazardEngine
 from backend.perception.pipeline import PerceptionPipeline
+from backend.perception.vocabulary import scale_of
 from backend.scene.queries import find_object
 from backend.speech.chunker import SentenceChunker
 from backend.telemetry import LatencyTrace, metrics_snapshot
@@ -228,9 +229,11 @@ def add_tracked(seen: list[Seen], objects) -> list[Seen]:
 
 
 def detection_items(detections, frame_size) -> list[dict]:
-    """Detections as the client draws them: label, confidence and a box
-    normalized to the frame, origin top-left. A sighted helper checking
-    the glasses sees what the detector believes; nothing here is spoken."""
+    """Detections as the client draws them: label, confidence, size tier
+    and a box normalized to the frame, origin top-left. A sighted helper
+    checking the glasses sees what the detector believes; nothing here is
+    spoken, and the client leaves hand-held things (scale "small")
+    unboxed."""
     if not frame_size:
         return []
     width, height = frame_size
@@ -238,6 +241,7 @@ def detection_items(detections, frame_size) -> list[dict]:
         {
             "label": d.label,
             "confidence": round(d.confidence, 2),
+            "scale": scale_of(d.label),
             "box": [
                 round(d.box.x1 / width, 4), round(d.box.y1 / height, 4),
                 round(d.box.x2 / width, 4), round(d.box.y2 / height, 4),
@@ -529,6 +533,7 @@ class Session:
             "text": inventory_sentence(seen, once),
             "items": [
                 {"label": s.label, "confidence": round(s.confidence, 2), "frames": s.frames,
+                 "scale": scale_of(s.label),
                  "azimuth_deg": round(s.azimuth_deg, 1),
                  "distance_m": None if s.distance_m is None else round(s.distance_m, 1),
                  "box": [round(v, 4) for v in s.box] if s.box else None}
