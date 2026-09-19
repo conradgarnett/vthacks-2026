@@ -243,8 +243,20 @@ tested.
   in the vocabulary with no height, spoken by direction only, never
   listed or boxed, 0/24 invented on the blank textures. Reading a scan's
   signs while detecting was measured (2.28 -> 2.53 s here) and reverted.
-  Suite 493 passed, 3 skipped. `HAZARDS_ENABLED` is still false and the
-  depth pass is gated on it.
+  Ask can go online: `VISION_PROVIDER=nvidia` with `NVIDIA_API_KEY` in
+  `.env` builds `NvidiaVisionProvider` (`backend/ai/nvidia_provider.py`):
+  questions go to NVIDIA's OpenAI-style endpoint with the frame as an
+  `image_url` part (their inline `<img>` tag was never seen by the model
+  and it invented a person on a chair; the part form described the same
+  kitchen correctly, 1.4 to 2.5 s), scans and reads stay on-device, a
+  medicine question never goes online, `verify()` reports the key and
+  the model in `/health`. `meta/llama-3.2-11b-vision-instruct` is the
+  default; the 90b timed out at 60 s and Gemma, Phi and NeVA are not
+  enabled for this key. In the two-engine mesh the thorough engine now
+  wins where both read a place (2751b63, for Conrad's receipts drop
+  66% -> 55%; his SROIE run decides). Suite 493 passed, 3 skipped before
+  the NVIDIA and mesh tests were added. `HAZARDS_ENABLED` is still false
+  and the depth pass is gated on it.
 - **2026-09-19, evening, visionOS-2:** merged 81b0add (lexicon, 38 bundled
   fonts; their `eval/fonts.py` supersedes ours, helper renamed `typefaces.py`);
   RapidOCR detects at 1280 px and recognizes on full-res crops (657 ms/frame,
