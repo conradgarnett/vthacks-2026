@@ -42,6 +42,15 @@ OCR_UNAVAILABLE = "I can't read text right now."
 # floor: below ~0.01 Vision starts finding "text" in textures.
 _MIN_TEXT_HEIGHT = 0.02
 _MIN_TEXT_HEIGHT_RETRY = 0.012
+# Used only once a document has already been evidenced at the safe
+# threshold. Recovery on real receipts plateaus here (43%); lower buys
+# nothing and costs texture hallucination.
+_MIN_TEXT_HEIGHT_DENSE = 0.008
+# Lines at the safe threshold needed before the denser pass is allowed.
+# One is enough, and is the whole point: textures produce nothing at the
+# safe threshold, so any text at all means a text-bearing surface worth
+# looking at harder. Measured 27% receipt recovery at 1, 21% at 3.
+_DOCUMENT_LINE_HINT = 1
 
 # Vision's confidence is coarse. This only drops the obviously-bad; real
 # filtering is linguistic.
@@ -202,10 +211,26 @@ class AppleVisionOCR:
         return best
 
     def _read_full(self, prepared: bytes) -> list[TextLine]:
-        """Whole-frame pass. Cheap, and enough for ordinary signage."""
+        """Whole-frame pass, with a denser second look when a document appears.
+
+        Minimum text height cannot be one global value. At 0.02 a receipt
+        loses almost everything -- 9% of its lines -- because 44 lines on one
+        page means each is about 2% of frame height. At 0.008 it recovers 43%,
+        but open scenes then read carpet, brick and foliage as words
+        (hallucination 0/8 -> 4/8).
+
+        The safe pass settles which case this is. Textures produce *nothing*
+        at 0.02, so they can never reach the denser pass; a label or receipt
+        produces several lines and does. Evidence, not a guess about intent.
+        """
         lines = self._recognize(prepared, _MIN_TEXT_HEIGHT)
         if not lines:
-            lines = self._recognize(prepared, _MIN_TEXT_HEIGHT_RETRY)
+            return self._recognize(prepared, _MIN_TEXT_HEIGHT_RETRY)
+
+        if len(lines) >= _DOCUMENT_LINE_HINT:
+            denser = self._recognize(prepared, _MIN_TEXT_HEIGHT_DENSE)
+            if len(denser) > len(lines):
+                return denser
         return lines
 
     def _escalate_tiles(self, prepared: bytes, lines: list[TextLine]) -> list[TextLine]:

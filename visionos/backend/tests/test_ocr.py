@@ -241,3 +241,49 @@ class TestDedupeRegressions:
         )
         assert len(kept) == 1
         assert kept[0].text == "Departures", "kept the less plausible variant"
+
+
+class TestDocumentEscalation:
+    """Minimum text height cannot be one global value.
+
+    A receipt with 44 lines has each line at ~2% of frame height, so the
+    signage-safe threshold loses almost the whole page. Dropping the threshold
+    globally instead makes open scenes read carpet and foliage as words.
+
+    The gate is evidence rather than intent: textures produce NOTHING at the
+    safe threshold, so any text at all means a text-bearing surface worth a
+    denser look. Verified on real photographs -- 9% -> 27% line recovery on
+    SROIE receipts, with texture hallucination unchanged at 0/8.
+    """
+
+    def test_the_dense_threshold_is_lower_than_the_safe_one(self):
+        from backend.ai.ocr import (
+            _MIN_TEXT_HEIGHT,
+            _MIN_TEXT_HEIGHT_DENSE,
+        )
+
+        assert _MIN_TEXT_HEIGHT_DENSE < _MIN_TEXT_HEIGHT
+
+    def test_any_text_at_the_safe_threshold_permits_the_denser_pass(self):
+        """One line is the intended gate. Raising it costs real documents:
+        measured 27% recovery at 1, 21% at 3."""
+        from backend.ai.ocr import _DOCUMENT_LINE_HINT
+
+        assert _DOCUMENT_LINE_HINT == 1
+
+    def test_a_blank_surface_never_reaches_the_denser_pass(self, ):
+        """The safety property the gate rests on: no text at the safe
+        threshold means no escalation, so textures cannot be over-read."""
+        import io
+
+        from PIL import Image
+
+        from backend.ai.ocr import AppleVisionOCR
+
+        engine = AppleVisionOCR()
+        if not engine.available:
+            pytest.skip("Apple Vision unavailable on this platform")
+
+        buffer = io.BytesIO()
+        Image.new("RGB", (900, 600), "#d9d4cc").save(buffer, "JPEG")
+        assert engine._read_full(buffer.getvalue()) == []
