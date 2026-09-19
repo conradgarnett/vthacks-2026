@@ -23,7 +23,7 @@ const FRAME_INTERVAL_MS = 700;
 // pass still ran behind every frame, and it left the boxes a second and a
 // half behind the picture. Four frames a second keeps the boxes on the
 // picture and costs about a fifth of one core.
-const FRAME_INTERVAL_CPU_MS = 250;
+const FRAME_INTERVAL_CPU_MS = 150;
 let frameIntervalMs = FRAME_INTERVAL_MS;
 // A detailed frame for the background reader every few seconds, so Read
 // answers from what is already known. Rarer on a CPU, where each costs
@@ -229,7 +229,8 @@ function onServerEvent(event: ServerEvent): void {
 
     case "detections":
       // Live boxes, unless a scan's are still on show.
-      if (performance.now() >= scanBoxesUntil) drawBoxes(event.items);
+      lastLiveBoxesAt = performance.now();
+      if (lastLiveBoxesAt >= scanBoxesUntil) drawBoxes(event.items);
       break;
 
     case "trace":
@@ -402,7 +403,17 @@ async function scanScene(): Promise<void> {
 // scan's boxes stay up before the live ones take over again.
 let drawn: Boxed[] = [];
 let scanBoxesUntil = 0;
-const SCAN_BOXES_MS = 4000;
+const SCAN_BOXES_MS = 1500;
+// A box lives only as long as the frame it came from is current. If no
+// fresh frame has been looked at within this long, whatever is drawn is
+// stale and goes, so a box never outlives the thing it was drawn around.
+const BOX_TTL_MS = 350;
+let lastLiveBoxesAt = 0;
+window.setInterval(() => {
+  const now = performance.now();
+  if (drawn.length === 0 || now < scanBoxesUntil) return;
+  if (now - lastLiveBoxesAt > BOX_TTL_MS) drawBoxes([]);
+}, 100);
 
 /**
  * A red outline and label around everything the detector believes it
