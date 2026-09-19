@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     nvidia_api_key: str | None = None
     nvidia_model: str = "meta/llama-3.2-11b-vision-instruct"
     nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
+    # How the picture travels: "parts" is the OpenAI image_url content part,
+    # "inline" NVIDIA's own <img src="data:.."> tag in the message text.
+    # Measured 2026-09-19 with meta/llama-3.2-11b-vision-instruct on a COCO
+    # kitchen: "parts" described the kitchen correctly in 2.5 s; "inline"
+    # invented a person on a chair in 7 s, so the picture was not seen.
+    nvidia_image_style: Literal["inline", "parts"] = "parts"
     replay_fixture: str = "assets/replay/livingroom.json"
 
     # --- Text reading -----------------------------------------------------

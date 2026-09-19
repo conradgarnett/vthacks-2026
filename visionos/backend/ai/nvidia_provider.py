@@ -136,14 +136,18 @@ class NvidiaVisionProvider(VisionProvider):
     def build_payload(self, frame_jpeg: bytes, prompt: str, scene_context: str | None) -> dict:
         image_b64 = base64.standard_b64encode(shrink_jpeg(frame_jpeg)).decode()
         text = (scene_context + "\n\n" if scene_context else "") + prompt
+        if self._settings.nvidia_image_style == "parts":
+            user_content: str | list = [
+                {"type": "text", "text": text},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
+            ]
+        else:
+            user_content = f'{text} <img src="data:image/jpeg;base64,{image_b64}" />'
         return {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT + "\n10. " + NO_DOSES},
-                {
-                    "role": "user",
-                    "content": f'{text} <img src="data:image/jpeg;base64,{image_b64}" />',
-                },
+                {"role": "user", "content": user_content},
             ],
             "max_tokens": self._settings.visionos_max_tokens,
             "temperature": 0.2,

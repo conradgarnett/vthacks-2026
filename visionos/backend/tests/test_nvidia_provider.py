@@ -63,9 +63,20 @@ async def test_a_question_is_answered_online_with_the_picture_and_the_scene():
     payload = json.loads(request.content)
     assert payload["model"] == "meta/llama-3.2-11b-vision-instruct" and payload["stream"] is True
     user = payload["messages"][-1]["content"]
-    assert "Is there a chair?" in user and "SCENE MODEL: chair" in user
-    assert '<img src="data:image/jpeg;base64,' + base64.b64encode(b"jpegbytes").decode() in user
+    assert isinstance(user, list) and user[0]["type"] == "text"
+    assert "Is there a chair?" in user[0]["text"] and "SCENE MODEL: chair" in user[0]["text"]
+    assert user[1]["image_url"]["url"] == "data:image/jpeg;base64," + base64.b64encode(b"jpegbytes").decode()
     assert payload["messages"][0]["role"] == "system"
+
+
+@pytest.mark.asyncio
+async def test_the_inline_style_puts_the_picture_in_the_text():
+    fake = FakeNvidia()
+    p = provider(fake)
+    p._settings.nvidia_image_style = "inline"
+    await collect(p, "Is there a chair?", "ask", frame=b"jpegbytes")
+    user = json.loads(fake.requests[0].content)["messages"][-1]["content"]
+    assert isinstance(user, str) and '<img src="data:image/jpeg;base64,' in user
 
 
 @pytest.mark.asyncio
