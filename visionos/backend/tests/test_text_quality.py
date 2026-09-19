@@ -145,3 +145,39 @@ class TestStrokeArtifacts:
 
         assert not _is_stroke_artifact("l")
         assert not _is_stroke_artifact("0")
+
+
+class TestPerEngineGating:
+    """An engine whose confidence discriminates should be trusted with it.
+
+    These heuristics exist to reconstruct a signal Apple Vision does not
+    provide -- it reports ~0.5 for everything, garbage included. RapidOCR
+    does provide one (median 0.94 on real text, 0.51 on the line it invented
+    on a symbol), and applying the full linguistic gate to it costs real text.
+    """
+
+    def test_a_confident_engine_rejects_its_own_low_scores(self):
+        from backend.ai.text_quality import CONFIDENT_ENGINE_FLOOR
+
+        # is_plausible() does not opt in, so the gate must be asked for.
+        assert not assess("EXIT", 0.40, confidence_informative=True).keep
+        assert is_plausible("EXIT", confidence=0.40)
+        assert CONFIDENT_ENGINE_FLOOR > 0.5
+
+    def test_confidence_gating_is_opt_in(self):
+        """Vision's flat 0.5 must not be read as a rejection."""
+        assert assess("EXIT", 0.5, confidence_informative=False).keep
+
+    def test_a_confident_engine_keeps_unusual_but_real_text(self):
+        """The looser linguistic bar: a high-scoring line the heuristics would
+        have second-guessed still reaches speech."""
+        # NDC is the National Drug Code, on essentially every medicine
+        # label, and the vowelless-run rule rejected it.
+        assert assess("RX 8830021 NDC", 0.95, confidence_informative=True).keep
+        assert not assess("RX 8830021 NDC", 0.95).keep, "Vision path changed"
+
+    def test_a_confident_engine_still_rejects_symbol_artifacts(self):
+        """Stroke artifacts are about what the image contains, not how the
+        engine scores, so that rule applies to every engine."""
+        assert not assess("Illl", 0.95, confidence_informative=True).keep
+        assert not assess("0000", 0.95, confidence_informative=True).keep

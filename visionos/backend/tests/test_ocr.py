@@ -423,10 +423,15 @@ class TestEngine:
 
     def test_reading_a_clean_sign_does_not_pay_for_tiling(self, reader):
         """Large text must not trigger the expensive path: tiles re-read what
-        the full frame already got right and attach garbled twins."""
+        the full frame already got right and attach garbled twins.
+
+        Asserted against the engine rather than the reader, because a
+        TieredReader delegates and has no whole-frame pass of its own.
+        """
         from backend.ai.ocr import _prepare
 
-        assert not _needs_tiles(reader._read_full(_prepare(sign_jpeg("EXIT", "Room 204B"))))
+        engine = getattr(reader, "fast", reader)
+        assert not _needs_tiles(engine._read_full(_prepare(sign_jpeg("EXIT", "Room 204B"))))
 
     def test_consensus_over_a_burst_keeps_the_sign(self, reader):
         burst = [sign_jpeg("EXIT", "Room 204B")] * 3
