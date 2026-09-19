@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from backend.ai.lexicon import LEXICON, correct_text, correct_token
+from backend.ai.lexicon import LEXICON, correct_text, correct_token, split_glued
 
 
 class TestFixesNearMisses:
@@ -73,3 +73,51 @@ class TestWholeText:
 
     def test_leaves_clean_text_untouched(self):
         assert correct_text("Diet Cola") == "Diet Cola"
+
+
+class TestContext:
+    """The line is its own context. Words the reader could not finish are
+    repaired from the legible words around them, never in isolation."""
+
+    def test_directions_finish_when_the_rest_of_the_line_is_known(self):
+        assert correct_text("TAKE 1 TABLET BY MOUIH DAILV") == "TAKE 1 TABLET BY MOUTH DAILY"
+
+    def test_a_lone_garbled_word_gets_no_wider_snap(self):
+        """No known word beside it, no evidence it is prose: left as read."""
+        assert correct_text("MOUIH") == "MOUIH"
+
+    def test_unrecoverable_garble_stays_garbled_even_in_context(self):
+        assert correct_text("Ilcccpcion desk") == "Ilcccpcion desk"
+
+    def test_codes_are_never_snapped_even_in_context(self):
+        assert correct_text("Room 204B") == "Room 204B"
+        assert correct_text("Rx6233425 daily") == "Rx6233425 daily"
+
+    def test_scrambled_case_of_a_known_word_is_tidied(self):
+        assert correct_text("TAKE 2 taBLEtS BY MoUTh") == "TAKE 2 TABLETS BY MOUTH"
+
+    def test_title_case_is_left_alone(self):
+        assert correct_text("Fire Exit") == "Fire Exit"
+
+
+class TestGluedWords:
+    @pytest.mark.parametrize(
+        "glued, apart",
+        [
+            ("DISCARDAFTER", ["DISCARD", "AFTER"]),
+            ("GINGERALE", ["GINGER", "ALE"]),
+            ("DIETCOLA", ["DIET", "COLA"]),
+            ("SparklingWater", ["Sparkling", "Water"]),
+        ],
+    )
+    def test_a_run_of_known_words_comes_apart(self, glued, apart):
+        assert split_glued(glued) == apart
+
+    def test_a_real_word_is_never_split(self):
+        assert split_glued("INFORMATION") is None
+
+    def test_a_run_with_an_unknown_piece_is_not_split(self):
+        assert split_glued("CARBONATEDWATER") is None
+
+    def test_split_words_are_then_spoken_apart(self):
+        assert correct_text("DISCARDAFTER 09/28") == "DISCARD AFTER 09/28"
