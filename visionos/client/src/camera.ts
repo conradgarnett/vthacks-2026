@@ -136,11 +136,6 @@ export class Camera {
     return this.label;
   }
 
-  /** How many cameras the browser offered, once started. */
-  get count(): number {
-    return this.cameras.length;
-  }
-
   /** The camera in use, named for speech; empty before start. */
   get label(): string {
     const raw = this.track()?.label ?? "";
@@ -395,10 +390,5 @@ export class Camera {
     return new Promise((resolve) =>
       this.canvas.toBlob((blob) => resolve(blob), "image/jpeg", quality)
     );
-  }
-
-  stop(): void {
-    this.stream?.getTracks().forEach((track) => track.stop());
-    this.stream = null;
   }
 }

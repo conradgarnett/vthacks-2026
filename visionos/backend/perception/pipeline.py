@@ -51,6 +51,11 @@ class PerceptionPipeline:
         self.last_trace: dict = {}
         self.dropped_frames = 0
         self._frame_index = 0
+        # Depth feeds the drop-off hints, which only the hazard engine reads.
+        # With hazards off the pass was 117 ms every sixth frame on the one
+        # inference thread, ahead of every detection queued behind it, for
+        # nothing.
+        self._depth_enabled = settings.hazards_enabled
         self._depth_task: asyncio.Task | None = None
         self._enabled = True
         self._busy = False
@@ -104,7 +109,7 @@ class PerceptionPipeline:
                 self.scene.update(visible, self.tracker.remembered())
 
             self._frame_index += 1
-            if self._frame_index % DEPTH_EVERY_N_FRAMES == 0:
+            if self._depth_enabled and self._frame_index % DEPTH_EVERY_N_FRAMES == 0:
                 self._maybe_run_depth(frame)
 
             trace.mark("total")

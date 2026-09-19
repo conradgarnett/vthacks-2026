@@ -22,8 +22,6 @@ class Settings(BaseSettings):
     # --- Claude -----------------------------------------------------------
     # Live conversational loop. Sonnet-class: latency is the product here.
     visionos_model: str = "claude-sonnet-5"
-    # Escalation path for hard questions where accuracy beats speed.
-    visionos_model_heavy: str = "claude-opus-5"
     # "low" keeps tool calls consolidated and preamble short -- what a voice
     # assistant wants. Raise to "high" only if answer quality measurably drops.
     visionos_effort: Literal["low", "medium", "high", "xhigh", "max"] = "low"
@@ -83,13 +81,6 @@ class Settings(BaseSettings):
     # How long a departed object stays remembered ("it was there a moment ago").
     object_memory_s: float = 20.0
     track_iou_threshold: float = 0.3
-
-    # --- Speech -----------------------------------------------------------
-    # "browser" needs no keys and works offline via speechSynthesis.
-    tts_provider: Literal["browser", "elevenlabs", "openai"] = "browser"
-    elevenlabs_api_key: str | None = None
-    elevenlabs_voice_id: str = "21m00Tcm4TlvDq8ikWAM"
-    openai_api_key: str | None = None
 
     # --- Server -----------------------------------------------------------
     host: str = "0.0.0.0"

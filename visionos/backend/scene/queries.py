@@ -1,8 +1,8 @@
 """Queries over the scene model.
 
-These become Claude's tools in Phase 3. Keeping them as plain functions means
-the geometry can be tested without an API call, and the same code answers both
-the LLM and the deterministic hazard engine.
+Plain functions, so the geometry is tested without a model call, and the same
+code serves the on-device answers, the hazard engine and the prompt context
+that a vision model receives.
 """
 
 from __future__ import annotations

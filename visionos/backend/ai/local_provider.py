@@ -12,7 +12,6 @@ is rule 4 of the system prompt enforced in code.
 
 from __future__ import annotations
 
-import logging
 import re
 from typing import AsyncIterator, Callable
 
@@ -42,7 +41,6 @@ _KNOWN_LABELS: tuple[str, ...] = tuple(
     )
 )
 
-log = logging.getLogger(__name__)
 
 _READ_UNAVAILABLE = (
     "I can't read text from a question without a connection. Press Read, "

@@ -8,8 +8,6 @@
  */
 
 export enum SpeechPriority {
-  Ambient = 10,
-  Beacon = 20,
   Answer = 30,
   Hazard = 40,
 }
@@ -32,14 +30,6 @@ export class TtsPlayer {
     this.voice = voice;
   }
 
-  get voiceName(): string {
-    return this.voice?.name ?? "default";
-  }
-
-  setPitch(pitch: number): void {
-    this.pitch = Math.min(2, Math.max(0.5, pitch));
-  }
-
   /**
    * iOS refuses to speak unless the first utterance follows a user gesture.
    * Call this from a tap handler or the demo opens in total silence.
@@ -54,10 +44,6 @@ export class TtsPlayer {
 
   get isSupported(): boolean {
     return "speechSynthesis" in window;
-  }
-
-  setRate(rate: number): void {
-    this.rate = Math.min(2, Math.max(0.5, rate));
   }
 
   say(text: string, priority: SpeechPriority = SpeechPriority.Answer): void {

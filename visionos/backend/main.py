@@ -227,13 +227,17 @@ def add_tracked(seen: list[Seen], objects) -> list[Seen]:
     return out
 
 
-def looks_blurry(frames: list[bytes]) -> bool:
-    """Was every frame of the burst too soft to carry text?"""
-    return bool(frames) and max(_sharpness(frame) for frame in frames) < BLURRY_SHARPNESS
+def looks_blurry(frames: list[bytes], sharpest: float | None = None) -> bool:
+    """Was every frame of the burst too soft to carry text? `sharpest` is
+    the burst's best sharpness score when the caller already has it."""
+    if not frames:
+        return False
+    score = max(_sharpness(frame) for frame in frames) if sharpest is None else sharpest
+    return score < BLURRY_SHARPNESS
 
 
-def no_text_response(frames: list[bytes]) -> str:
-    if looks_blurry(frames):
+def no_text_response(frames: list[bytes], sharpest: float | None = None) -> str:
+    if looks_blurry(frames, sharpest):
         return f"{NO_TEXT_FOUND} {BLURRY_HINT}"
     return NO_TEXT_FOUND
 
@@ -262,18 +266,8 @@ def unpack_tagged_frames(payload: bytes, tag: bytes) -> list[bytes]:
 
 
 def unpack_read_frames(payload: bytes) -> list[bytes]:
-    """Inverse of pack_read_frames. A truncated tail is dropped, not guessed at."""
-    frames: list[bytes] = []
-    offset = len(READ_TAG)
-    while offset + 4 <= len(payload):
-        length = int.from_bytes(payload[offset : offset + 4], "big")
-        offset += 4
-        frame = payload[offset : offset + length]
-        if len(frame) != length:
-            break
-        frames.append(frame)
-        offset += length
-    return frames[-OCR_CONSENSUS_FRAMES:]
+    """Inverse of pack_read_frames, keeping the last few frames of a burst."""
+    return unpack_tagged_frames(payload, READ_TAG)[-OCR_CONSENSUS_FRAMES:]
 
 
 @asynccontextmanager
@@ -426,8 +420,13 @@ class Session:
         # burst is the fallback, not the default. A medical label whose dose
         # the guard would withhold always gets the burst, since only
         # agreement across frames can release a dose.
+        # Sharpness once per burst and off the loop: decoding every frame
+        # on the asyncio thread, twice on the no-text path, was the read's
+        # own worst stall.
+        scores = await asyncio.to_thread(lambda: [_sharpness(frame) for frame in frames])
+        sharpest = frames[scores.index(max(scores))]
         with trace.stage("quick"):
-            first = await self.ocr.read_quick(max(frames, key=_sharpness))
+            first = await self.ocr.read_quick(sharpest)
         lines = self.ocr.combine_readings([*self.fresh_peek_readings(), first])
         settled = (
             all_lines_sure(self.ocr, lines)
@@ -453,7 +452,7 @@ class Session:
                 "read: %d line(s) via %s from %d frame(s)", len(lines), self.ocr.name, len(frames)
             )
         else:
-            await self._say(no_text_response(frames))
+            await self._say(no_text_response(frames, max(scores)))
         await self._finish(trace)
 
     # --- Scanning ---------------------------------------------------------
@@ -515,7 +514,7 @@ class Session:
             return
         if self.peek_task is not None and not self.peek_task.done():
             return
-        if _sharpness(frame) < PEEK_MIN_SHARPNESS:
+        if await asyncio.to_thread(_sharpness, frame) < PEEK_MIN_SHARPNESS:
             return
         self.peek_task = asyncio.create_task(self._peek(frame))
 

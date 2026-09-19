@@ -49,7 +49,6 @@ const SCAN_TAG = new TextEncoder().encode("SCAN");
 export class Connection {
   private socket: WebSocket | null = null;
   private backoff = 500;
-  private closedByUs = false;
   // True once the server has actually spoken. The dev proxy accepts the
   // socket before the backend does, so onopen alone proves nothing: with the
   // backend down, every attempt opened and closed, and each one re-announced
@@ -59,7 +58,6 @@ export class Connection {
   constructor(private url: string, private handlers: Handlers) {}
 
   connect(): void {
-    this.closedByUs = false;
     this.socket = new WebSocket(this.url);
     this.socket.binaryType = "arraybuffer";
 
@@ -86,7 +84,7 @@ export class Connection {
         this.established = false;
         this.handlers.onConnectionChange(false);
       }
-      if (!this.closedByUs) this.scheduleReconnect();
+      this.scheduleReconnect();
     };
 
     // onerror always precedes onclose; reconnect is handled there.
@@ -104,10 +102,9 @@ export class Connection {
 
   /** Live frame for perception. */
   sendFrame(blob: Blob): void {
-    if (!this.isOpen) return;
-    blob.arrayBuffer().then((buf) => {
-      if (this.isOpen) this.socket!.send(buf);
-    });
+    // The socket takes a Blob as it is; copying it to an ArrayBuffer first
+    // was an allocation and a microtask on every live frame for nothing.
+    if (this.isOpen) this.socket!.send(blob);
   }
 
   /**
@@ -155,10 +152,5 @@ export class Connection {
   sendIntent(type: string, text?: string): void {
     if (!this.isOpen) return;
     this.socket!.send(JSON.stringify(text ? { type, text } : { type }));
-  }
-
-  close(): void {
-    this.closedByUs = true;
-    this.socket?.close();
   }
 }

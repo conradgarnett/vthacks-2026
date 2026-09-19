@@ -9,7 +9,7 @@
  * a dead network, and pitch and length become parameters instead of files.
  */
 
-export type Earcon = "hazard" | "beacon" | "info" | "found";
+export type Earcon = "hazard" | "beacon" | "info";
 
 type ToneSpec = {
   frequency: number;
@@ -26,7 +26,6 @@ const TONES: Record<Earcon, ToneSpec> = {
   hazard: { frequency: 880, duration: 0.17, type: "square", gain: 0.5, sweep: 0.55 },
   beacon: { frequency: 660, duration: 0.09, type: "sine", gain: 0.3 },
   info: { frequency: 520, duration: 0.13, type: "sine", gain: 0.22 },
-  found: { frequency: 780, duration: 0.2, type: "triangle", gain: 0.28, sweep: 1.5 },
 };
 
 const MIN_BEACON_INTERVAL_MS = 130;
@@ -84,10 +83,6 @@ export class SpatialAudio {
       // Default orientation already faces -z, so this is cosmetic.
       console.warn("Could not orient audio listener:", err);
     }
-  }
-
-  get isReady(): boolean {
-    return this.ctx !== null;
   }
 
   /**

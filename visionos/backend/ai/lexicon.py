@@ -135,13 +135,10 @@ def _match_case(original: str, replacement: str) -> str:
 def correct_token(token: str) -> str:
     """Snap a near-miss to a known word, or return it unchanged."""
     stripped = token.strip()
-    if len(stripped) < _MIN_TOKEN_CHARS:
-        return token
     # Mostly-alphabetic covers digit substitutions, which OCR makes
     # constantly: "Recepti0n", "Stair5". A token that is mostly digits is
     # a room or platform number and must never be snapped to a word.
-    letters = sum(ch.isalpha() for ch in stripped)
-    if letters / len(stripped) < 0.7:
+    if not _is_wordlike(stripped):
         return token
     if stripped.lower() in LEXICON:
         return token  # already a real word; never second-guess it

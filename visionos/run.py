@@ -101,7 +101,7 @@ def ensure_python() -> None:
     say(f"Python {platform.python_version()} on {platform.system()}")
 
 
-def ensure_venv(assume_yes: bool) -> None:
+def ensure_venv() -> None:
     requirements = ROOT / "requirements.txt"
     stamp = VENV / ".installed"
     digest = hashlib.sha256(requirements.read_bytes()).hexdigest()[:16]
@@ -281,7 +281,7 @@ def main() -> int:
         fail("Node.js was not found. Install it from https://nodejs.org (LTS) and run this again.")
     say(f"Node at {node_dir}")
 
-    ensure_venv(args.yes)
+    ensure_venv()
     ensure_client(node_dir)
     ensure_env_file()
 

@@ -1,9 +1,11 @@
 /**
- * Push-to-talk speech input.
+ * Tap-to-talk speech input: one tap starts listening, recognition ends itself
+ * after one utterance, a second tap ends it early.
  *
- * Push-to-talk rather than a wake word: continuous listening drains the
- * battery, fires on other people's conversation, and on iOS pops a permission
- * prompt the user cannot see. Holding a button is unambiguous.
+ * A tap rather than a wake word: continuous listening drains the battery,
+ * fires on other people's conversation, and on iOS pops a permission prompt
+ * the user cannot see. It is a tap rather than a held button because phones
+ * cancel a held press as a scroll or a long-press before the user has spoken.
  *
  * Web Speech recognition is Chrome and Safari only, and both keep it behind a
  * vendor prefix, so callers must check `isSupported` and offer another route
@@ -61,8 +63,8 @@ export class Voice {
     const recognition = new Ctor();
     recognition.lang = this.lang;
     recognition.continuous = false;
-    // Interim results let us show progress, but only a final result is sent.
-    recognition.interimResults = true;
+    // Only a final result is ever used, so interim ones are not requested.
+    recognition.interimResults = false;
     recognition.maxAlternatives = 1;
 
     this.settled = false;

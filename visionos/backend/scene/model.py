@@ -42,10 +42,6 @@ class SceneObject:
     hit_count: int = 1
 
     @property
-    def age_s(self) -> float:
-        return max(0.0, time.monotonic() - self.first_seen)
-
-    @property
     def clock(self) -> str:
         return clock_position(self.azimuth_deg)
 
@@ -93,10 +89,8 @@ class SceneModel:
 
     memory_s: float = 20.0
     objects: dict[int, SceneObject] = field(default_factory=dict)
-    _last_update: float = field(default_factory=time.monotonic)
 
     def update(self, visible: list[Track], remembered: list[Track]) -> None:
-        self._last_update = time.monotonic()
         seen_ids: set[int] = set()
 
         for track, is_visible in [(t, True) for t in visible] + [
@@ -158,6 +152,3 @@ class SceneModel:
             "object_count": len(self.objects),
             "objects": [o.to_dict(self.memory_s) for o in objects],
         }
-
-    def reset(self) -> None:
-        self.objects.clear()
