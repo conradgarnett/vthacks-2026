@@ -101,7 +101,7 @@ function show(text: string, kind: "speech" | "hazard" = "speech"): void {
 // What this backend can do, in one sentence, before the user commits to
 // starting. The same facts are spoken once connected; showing them here too
 // means a sighted helper can see at a glance whether a key is missing.
-type Health = { provider_active?: string; ocr?: string };
+type Health = { provider_active?: string; ocr?: string; lan_address?: string | null };
 
 function describeMode(health: Health | null): string {
   if (!health) return "Backend not reachable yet. It will keep trying once you start.";
@@ -124,7 +124,14 @@ function describeMode(health: Health | null): string {
 async function showMode(): Promise<void> {
   try {
     const response = await fetch("/health", { cache: "no-store" });
-    modeLine.textContent = describeMode(response.ok ? ((await response.json()) as Health) : null);
+    const health = response.ok ? ((await response.json()) as Health) : null;
+    modeLine.textContent = describeMode(health);
+    // On the computer that runs the servers, say where a phone should go.
+    // The phone needs the HTTPS port; the address changes with the network.
+    const local = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+    if (health?.lan_address && local) {
+      modeLine.textContent += ` Phone on the same Wi-Fi: https://${health.lan_address}:5173`;
+    }
   } catch {
     modeLine.textContent = describeMode(null);
   }

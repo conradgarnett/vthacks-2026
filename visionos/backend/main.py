@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
+import socket
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -47,6 +48,22 @@ OCR_CONSENSUS_FRAMES = 3
 # escalating to the vision model. Real signage and packaging clear this.
 WEAK_READ_CHARS = 5
 NO_CAMERA = "I'm not receiving the camera yet."
+
+
+def lan_address() -> str | None:
+    """This machine's address on the local network, for the phone to open.
+
+    Changes with the network, so it is looked up per request rather than
+    once at startup; a laptop that moves from a guest Wi-Fi to a hotspot
+    should show the new address on the next reload.
+    """
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect(("8.8.8.8", 80))
+            address = probe.getsockname()[0]
+        return None if address.startswith("127.") else address
+    except OSError:
+        return None
 
 
 def read_is_weak(lines) -> bool:
@@ -136,6 +153,7 @@ async def health() -> JSONResponse:
             "provider_active": app.state.effective_provider,
             "ocr": app.state.ocr.name,
             "device": app.state.perception.device,
+            "lan_address": lan_address(),
             "model": settings.visionos_model,
             "prompt_version": PROMPT_VERSION,
             "demo_mode": settings.demo_mode,
