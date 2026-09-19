@@ -20,7 +20,25 @@ export class TtsPlayer {
   private queue: Utterance[] = [];
   private speaking: Utterance | null = null;
   private primed = false;
-  private rate = 1.05;
+  // Slightly under 1 reads as considered rather than hurried. Default browser
+  // rates sound clipped, which is tiring over a long session.
+  private rate = 0.98;
+  // Below 1 deepens the voice. Much lower starts sounding synthetic.
+  private pitch = 0.88;
+  private voice: SpeechSynthesisVoice | null = null;
+
+  /** Apply a chosen voice. Null falls back to the browser default. */
+  setVoice(voice: SpeechSynthesisVoice | null): void {
+    this.voice = voice;
+  }
+
+  get voiceName(): string {
+    return this.voice?.name ?? "default";
+  }
+
+  setPitch(pitch: number): void {
+    this.pitch = Math.min(2, Math.max(0.5, pitch));
+  }
 
   /**
    * iOS refuses to speak unless the first utterance follows a user gesture.
@@ -67,7 +85,15 @@ export class TtsPlayer {
     this.speaking = next;
 
     const utterance = new SpeechSynthesisUtterance(next.text);
-    utterance.rate = next.priority === SpeechPriority.Hazard ? 1.15 : this.rate;
+    if (this.voice) {
+      utterance.voice = this.voice;
+      // Safari can mismatch voice and lang and fall back to a default voice.
+      utterance.lang = this.voice.lang;
+    }
+    // Hazards speak faster and flatter: urgency, not warmth.
+    const urgent = next.priority === SpeechPriority.Hazard;
+    utterance.rate = urgent ? 1.12 : this.rate;
+    utterance.pitch = urgent ? 1.0 : this.pitch;
     const finish = () => {
       this.speaking = null;
       this.pump();

@@ -5,6 +5,7 @@
 import { Camera } from "./camera";
 import { SpatialAudio } from "./audio/spatial";
 import { SpeechPriority, TtsPlayer } from "./audio/tts-player";
+import { onVoicesReady, pickVoice, rankVoices, saveVoiceName } from "./audio/voices";
 import { Voice } from "./voice";
 import { Connection, type ServerEvent } from "./ws";
 
@@ -49,6 +50,10 @@ let started = false;
 // overwrite the hi-res one a read depends on.
 let readPending = false;
 const READ_TIMEOUT_MS = 6000;
+
+let voiceIndex = 0;
+const VOICE_SAMPLE =
+  "This is how I'll sound. A doorway is about three meters ahead, at your two o'clock.";
 
 const setStatus = (text: string): void => {
   status.textContent = text;
@@ -276,6 +281,47 @@ async function sendDetailedThen(intent: string): Promise<void> {
   }
 }
 
+/**
+ * Voices load asynchronously; reading getVoices() once at startup usually
+ * returns an empty list.
+ */
+function applyBestVoice(): void {
+  const override = new URLSearchParams(location.search).get("voice");
+  const chosen = pickVoice(override);
+  if (!chosen) return;
+
+  tts.setVoice(chosen);
+  voiceIndex = Math.max(
+    0,
+    rankVoices().findIndex((entry) => entry.voice.name === chosen.name)
+  );
+  console.info(
+    "[voices] using %s — available: %s",
+    chosen.name,
+    rankVoices().map((entry) => `${entry.voice.name} (${entry.score})`).join(", ")
+  );
+}
+
+/** Cycle to the next-best voice and speak a sample so it can be judged. */
+function cycleVoice(): void {
+  const ranked = rankVoices();
+  if (ranked.length === 0) {
+    reportFailure("No speech voices are available in this browser.");
+    return;
+  }
+
+  voiceIndex = (voiceIndex + 1) % ranked.length;
+  const chosen = ranked[voiceIndex].voice;
+
+  tts.setVoice(chosen);
+  saveVoiceName(chosen.name);
+  tts.stopAll();
+  setStatus(`Voice: ${chosen.name}`);
+  tts.say(`${chosen.name}. ${VOICE_SAMPLE}`, SpeechPriority.Answer);
+}
+
+onVoicesReady(applyBestVoice);
+
 startButton.addEventListener("click", begin);
 tapLayer.addEventListener("click", () => connection.sendIntent("scan"));
 el("scan").addEventListener("click", (e) => {
@@ -285,6 +331,10 @@ el("scan").addEventListener("click", (e) => {
 el("read").addEventListener("click", (e) => {
   e.stopPropagation();
   void sendDetailedThen("read");
+});
+el("voice").addEventListener("click", (e) => {
+  e.stopPropagation();
+  cycleVoice();
 });
 el("stop").addEventListener("click", (e) => {
   e.stopPropagation();
