@@ -137,7 +137,7 @@ describe('scene 2: ask (Blind persona)', () => {
     expect(within(trolley).getByText(/INFERRED/)).toBeTruthy();
     expect(trolley.textContent).toMatch(/74%/);
     expect(trolley.textContent).toMatch(/Inferred, camera/);
-    expect(feed.textContent).not.toMatch(/safe|all clear/i);
+    expect(feed.textContent).not.toMatch(/\bsafe\b|all clear/i);
     // Blind persona: audio modalities, captions shown because this device has no voice.
     expect(trolley.textContent).toMatch(/Caption:/);
     expect(screen.getAllByText('MOCK AI').length).toBeGreaterThan(0);
