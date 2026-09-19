@@ -86,12 +86,6 @@ export class SwitchScanDriver extends BaseDevice {
   }
 }
 
-/** Where pointer samples come from: eye gaze, head pose, a hand landmark, or a stand-in. */
-export interface PointerSource {
-  readonly available: boolean;
-  readonly unavailableReason?: string;
-}
-
 /**
  * Dwell-to-select over a pointer stream (gaze, head or hand). Includes tremor smoothing, an
  * adjustable dwell time, calibration, and a false-activation guard. Samples are fed with `feed()`.
@@ -221,7 +215,7 @@ export class ScriptedDriver extends BaseDevice {
  * Webcam head/eye/hand tracking seam. Real tracking needs a landmark model (for example MediaPipe
  * Tasks) whose model files were NOT vendored in this build, so this device reports itself as
  * unavailable with the reason and never emits anything. Switch scanning, the keyboard and the
- * scripted driver are the working alternatives. A landmark-based `PointerSource` can be plugged
+ * scripted driver are the working alternatives. A landmark-based pointer stream (gaze, head or hand) can be fed
  * into `DwellGazeDriver.feed()` without any other change.
  */
 export class WebcamHeadDriver extends BaseDevice {

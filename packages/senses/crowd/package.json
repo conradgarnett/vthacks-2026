@@ -9,5 +9,8 @@
   },
   "dependencies": {
     "@sense/protocol": "*"
+  },
+  "devDependencies": {
+    "@sense/render": "*"
   }
 }

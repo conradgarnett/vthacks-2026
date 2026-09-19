@@ -15,3 +15,7 @@ coverage/
 .vite/
 playwright-report/
 test-results/
+
+# scratch output of the create-sense-agent test
+.sense/tmp/
+agents/

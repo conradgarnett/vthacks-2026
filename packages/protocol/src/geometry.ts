@@ -44,7 +44,3 @@ export function describeDirection(bearingDeg: number): string {
   if (b < 292.5) return 'to your left';
   return 'ahead left';
 }
-
-export function coarseDistance(m: number): 'near' | 'mid' | 'far' {
-  return m < 3 ? 'near' : m < 10 ? 'mid' : 'far';
-}

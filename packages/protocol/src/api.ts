@@ -60,16 +60,6 @@ export interface ActionDto {
   detail: string;
 }
 
-export interface SoundEventDto {
-  id: string;
-  timestamp: string;
-  label: string;
-  confidence: number;
-  bearingDeg?: number;
-  directionKnown: boolean;
-  provider: string;
-}
-
 export interface ScentStatusDto {
   level: 0 | 1 | 2 | 3 | 4;
   summary: string;

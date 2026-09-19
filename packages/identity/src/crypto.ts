@@ -65,8 +65,6 @@ export function randomB64(bytes: number): string {
 
 // ── Certificates ─────────────────────────────────────────────────────────────────────────────
 
-export type CertRole = 'ca' | 'server' | 'identity';
-
 export interface CertOptions {
   serialNumber: string;
   commonName: string;

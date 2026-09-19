@@ -28,7 +28,8 @@
     "demo": "tsx scripts/demo.ts",
     "demo:verify": "tsx scripts/demo-verify.ts",
     "demo:cli": "tsx scripts/demo-cli.ts",
-    "create-sense-agent": "tsx scripts/create-sense-agent.ts"
+    "create-sense-agent": "tsx scripts/create-sense-agent.ts",
+    "latency": "tsx scripts/measure-latency.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",

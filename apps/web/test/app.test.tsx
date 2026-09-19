@@ -333,6 +333,40 @@ describe('scene 6: touchless close-out (Motor-limited persona)', () => {
   });
 });
 
+describe('whole-page accessibility (axe with page-level rules, every persona)', () => {
+  it('has no violations on the full document for all five personas in a populated state', async () => {
+    const user = userEvent.setup();
+    document.title = 'SENSE';
+    const { ctx } = await mountApp();
+    await user.click(await screen.findByRole('button', { name: /arrive at riverside hall/i }));
+    await screen.findAllByText('Riverside Hall: Verified, 7 of 7 checks.');
+    await ctx.world.trigger('fire-alarm');
+    await waitFor(() => expect(document.querySelector('#alert-region')?.textContent).toContain('Fire alarm'));
+    await user.click(screen.getByRole('button', { name: /^ask$/i }));
+    await user.click(screen.getByRole('button', { name: /play simulated soundscape/i }));
+    await screen.findAllByText(/Knock-like sound/);
+    for (const label of [/Blind/, /Deaf/, /Motor-limited/, /Cannot smell/, /Impaired taste/]) {
+      await user.click(screen.getByLabelText(label));
+      await waitFor(() => expect((screen.getByLabelText(label) as HTMLInputElement).checked).toBe(true));
+      const results = await axe.run(document, { rules: { 'color-contrast': { enabled: false } } });
+      const bad = results.violations.map(
+        (v) =>
+          `${v.id}: ${v.help} (${v.nodes
+            .map((n) => n.target.join(' '))
+            .slice(0, 3)
+            .join(' | ')})`,
+      );
+      expect(bad, String(label)).toEqual([]);
+    }
+    // page-level expectations that only make sense on the whole document
+    expect(document.documentElement.lang).toBe('en');
+    expect(document.querySelectorAll('main')).toHaveLength(1);
+    expect(document.querySelectorAll('h1')).toHaveLength(1);
+    const headings = Array.from(document.querySelectorAll('h1,h2')).map((h) => h.tagName);
+    expect(headings[0]).toBe('H1');
+  }, 60_000);
+});
+
 describe('profile controls', () => {
   it('switches all five personas, keeps allergens, and applies display preferences', async () => {
     const user = userEvent.setup();
