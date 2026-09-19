@@ -146,6 +146,18 @@ Things learned getting it up on Windows, each of which cost time:
   filename under a deep folder fails to import with no useful error; keep the
   checkout somewhere short like `C:/Users/<you>/vthacks-2026`.
 - **Python 3.10 runs the whole suite.** The doctor's floor is 3.10, not 3.11.
+- **RapidOCR on a CPU: detect small, recognize full.** Its detector scales with
+  pixel count (3.3 s on a 1080p frame). Capping the whole read at 1280 px cut
+  that to 1.7 s but the recognizer then read downscaled crops and lost the
+  spaces between words (CER 0.022 -> 0.043, exact 90% -> 82%). Detection runs
+  on the small copy; recognition crops come from the full frame: 657 ms per
+  frame, spaces intact. A burst also stops after two agreeing frames on a
+  costly engine (`costly_frames`), and the client sends live frames every
+  1.5 s instead of 0.7 s when the backend reports `device: cpu`.
+- **Benchmarks starve the live app.** Run them at idle priority on a shared
+  machine (the scratch `idle_run.py` pattern: `SetPriorityClass` then spawn).
+  Corpus rendering is ~5 s per sample and dominates a run; keep it out of
+  read timings.
 
 ## Working in parallel
 
@@ -175,6 +187,15 @@ tested.
 
 ## Log
 
+- **2026-09-19, later, visionOS-2:** merged fa27618, a3537c5 and 2362b03 from
+  `main-project` (all ported onto `TextReader`); RapidOCR reads 13 s -> 2.3 s
+  live; digit-in-word fix-up; five-button client restored for parity with the
+  Mac; `scene/inference.py` (room guess, hedged unconfirmed objects, landmark
+  reminders) in on-device scans; bundled display fonts under `eval/fonts/`
+  with `typefaces.py` (`--fonts bundled` compares across machines);
+  `run_packaging_eval.py`, `run_font_eval.py`. RapidOCR signage, Windows fonts,
+  n=60: CER 0.022, exact 90%, silent 0, hallucinated 0/8 at full resolution.
+  The thread on PR #2 has the running numbers.
 - **2026-09-19, visionOS-2:** merged `main-project` at 65d5953 (tiling gate,
   position dedupe, plausibility ordering, `run_ocr` thread) under a
   `TextReader` base with `AppleVisionOCR` and `RapidOCR` engines; added
