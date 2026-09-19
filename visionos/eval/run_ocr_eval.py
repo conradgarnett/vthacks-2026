@@ -10,22 +10,27 @@ and a blind user cannot tell the difference by glancing at the sign.
 Do not replace CER with a "does the output contain the word" check. That check
 passes "Room 204B" read as "Room 2048", which is how the first version of this
 pipeline shipped looking fine and performed badly.
+
+The engine under test is whichever `build_reader()` picks on this machine --
+Apple Vision on macOS, RapidOCR elsewhere -- so numbers are comparable only
+across runs on the same engine and font set. The report names both.
 """
 
 from __future__ import annotations
 
+import platform
 import sys
 from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from corpus import build_corpus, build_textureless_corpus, cer, normalize_output
+from corpus import FONTS, build_corpus, build_textureless_corpus, cer, normalize_output
 
-from backend.ai.ocr import AppleVisionOCR, format_for_speech
+from backend.ai.ocr import TextReader, build_reader, format_for_speech
 
 
-def evaluate(ocr: AppleVisionOCR, samples, label: str):
+def evaluate(ocr: TextReader, samples, label: str):
     rows = []
     for sample in samples:
         spoken = format_for_speech(ocr.read_consensus_sync(sample.frames))
@@ -55,7 +60,7 @@ def evaluate(ocr: AppleVisionOCR, samples, label: str):
     return rows, mean_cer
 
 
-def evaluate_hallucination(ocr: AppleVisionOCR, count: int = 8):
+def evaluate_hallucination(ocr: TextReader, count: int = 8):
     """Surfaces with no text. Anything spoken here is invented."""
     samples = build_textureless_corpus(count)
     spoke = 0
@@ -72,13 +77,20 @@ def evaluate_hallucination(ocr: AppleVisionOCR, count: int = 8):
 def main() -> int:
     count = int(sys.argv[1]) if len(sys.argv) > 1 else 60
 
-    ocr = AppleVisionOCR()
+    ocr = build_reader()
     if not ocr.available:
-        print("Apple Vision unavailable; this eval only runs on macOS.")
+        print("No OCR engine available: install pyobjc-framework-Vision (macOS) "
+              "or rapidocr-onnxruntime.")
         return 1
     ocr.warmup()
 
-    rows, mean_cer = evaluate(ocr, build_corpus(count), f"OCR EVAL  (n={count})")
+    import time
+
+    started = time.perf_counter()
+    label = f"OCR EVAL  (n={count}, engine={ocr.name}, {platform.system()}, {len(FONTS)} fonts)"
+    rows, mean_cer = evaluate(ocr, build_corpus(count), label)
+    elapsed = time.perf_counter() - started
+    print(f"  read time     {elapsed / count * 1000:.0f} ms mean per sample (3-frame burst)")
 
     print(f"\n{'=' * 72}\nNO-TEXT SURFACES\n{'=' * 72}")
     evaluate_hallucination(ocr)
@@ -90,7 +102,7 @@ def main() -> int:
             f"{sample.font[:20]:<20} want={sample.truth!r:<22} got={prediction[:32]!r}"
         )
 
-    print(f"\n  reference: CER 0.182, exact 70%, silent 2% as of 2026-09-19")
+    print(f"\n  reference (apple-vision, macOS fonts): CER 0.182, exact 70%, silent 2% as of 2026-09-19")
     return 0
 
 

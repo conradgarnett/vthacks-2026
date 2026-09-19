@@ -25,8 +25,10 @@ def _line(status: str, label: str, detail: str = "") -> None:
 
 def check_python() -> bool:
     major, minor = sys.version_info[:2]
-    if (major, minor) < (3, 11):
-        _line(FAIL, f"Python {major}.{minor}", "need >= 3.11")
+    # 3.10 is the floor the code actually needs (slots dataclasses, X | Y in
+    # annotations under the __future__ import); the full suite runs on it.
+    if (major, minor) < (3, 10):
+        _line(FAIL, f"Python {major}.{minor}", "need >= 3.10")
         return False
     if (major, minor) >= (3, 13):
         _line(WARN, f"Python {major}.{minor}", "ML wheels are spotty; 3.12 preferred")

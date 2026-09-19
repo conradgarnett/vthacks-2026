@@ -11,13 +11,18 @@ from __future__ import annotations
 
 import io
 import math
+import os
 import random
+import sys
 from dataclasses import dataclass
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-FONTS = [
+# Real system fonts, per platform, so the corpus renders on whichever machine
+# runs it. Numbers are comparable only across runs on the same font set and
+# engine; the report names both.
+_MAC_FONTS = [
     "/System/Library/Fonts/Helvetica.ttc",
     "/System/Library/Fonts/Supplemental/Arial.ttf",
     "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
@@ -35,6 +40,40 @@ FONTS = [
     "/System/Library/Fonts/Supplemental/Palatino.ttc",
     "/System/Library/Fonts/Supplemental/Rockwell.ttc",
 ]
+_WINDOWS_FONTS = [
+    "C:/Windows/Fonts/arial.ttf",
+    "C:/Windows/Fonts/arialbd.ttf",
+    "C:/Windows/Fonts/calibri.ttf",
+    "C:/Windows/Fonts/segoeui.ttf",
+    "C:/Windows/Fonts/verdana.ttf",
+    "C:/Windows/Fonts/tahoma.ttf",
+    "C:/Windows/Fonts/trebuc.ttf",
+    "C:/Windows/Fonts/georgia.ttf",
+    "C:/Windows/Fonts/times.ttf",
+    "C:/Windows/Fonts/cour.ttf",
+    "C:/Windows/Fonts/consola.ttf",
+    "C:/Windows/Fonts/impact.ttf",
+    "C:/Windows/Fonts/bahnschrift.ttf",
+    "C:/Windows/Fonts/candara.ttf",
+    "C:/Windows/Fonts/constan.ttf",
+    "C:/Windows/Fonts/pala.ttf",
+]
+_LINUX_FONTS = [
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+]
+_PLATFORM_FONTS = (
+    _MAC_FONTS if sys.platform == "darwin"
+    else _WINDOWS_FONTS if sys.platform == "win32"
+    else _LINUX_FONTS
+)
+FONTS = [f for f in _PLATFORM_FONTS if os.path.exists(f)] or _PLATFORM_FONTS[:1]
 
 # What signage actually says.
 PHRASES = [
@@ -68,10 +107,12 @@ class Sample:
 
 
 def _load_font(path: str, px: int):
-    try:
-        return ImageFont.truetype(path, px)
-    except OSError:
-        return ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", px)
+    for candidate in (path, *FONTS):
+        try:
+            return ImageFont.truetype(candidate, px)
+        except OSError:
+            continue
+    return ImageFont.load_default(size=px)  # Pillow >= 10.1; last resort
 
 
 def _perspective(img: Image.Image, strength: float) -> Image.Image:

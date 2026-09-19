@@ -52,6 +52,7 @@ const controls = el<HTMLDivElement>("controls");
 const askButton = el<HTMLButtonElement>("ask");
 const status = el<HTMLParagraphElement>("status");
 const transcript = el<HTMLDivElement>("transcript");
+const modeLine = el<HTMLElement>("mode");
 
 const tts = new TtsPlayer();
 const spatial = new SpatialAudio();
@@ -97,6 +98,35 @@ window.addEventListener("unhandledrejection", (event) => {
   console.error(event.reason);
   setStatus(`Error: ${String(event.reason)}`);
 });
+
+// What this backend can do, in one sentence, before the user commits to
+// starting. The same facts are spoken once connected; showing them here too
+// means a sighted helper can see at a glance whether a key is missing.
+type Health = { provider_active?: string; ocr?: string };
+
+function describeMode(health: Health | null): string {
+  if (!health) return "Backend not reachable yet. It will keep trying once you start.";
+  const ocr = health.ocr && health.ocr !== "none" ? `Reads text on-device (${health.ocr}).` : "No on-device text reader.";
+  switch (health.provider_active) {
+    case "ClaudeVisionProvider":
+      return `Full mode: Claude describes the scene and answers questions. ${ocr}`;
+    case "ReplayVisionProvider":
+      return `Replay mode: scripted descriptions that ignore the camera. ${ocr}`;
+    case "LocalSceneProvider":
+      return `On-device mode: describes recognized objects and reads text, no open questions. ${ocr} Add an Anthropic key to the backend .env for full descriptions.`;
+    default:
+      return ocr;
+  }
+}
+
+async function showMode(): Promise<void> {
+  try {
+    const response = await fetch("/health", { cache: "no-store" });
+    modeLine.textContent = describeMode(response.ok ? ((await response.json()) as Health) : null);
+  } catch {
+    modeLine.textContent = describeMode(null);
+  }
+}
 
 const socketUrl = (): string => {
   const override = new URLSearchParams(location.search).get("backend");
@@ -359,6 +389,7 @@ function cycleVoice(): void {
 // --- Wiring -----------------------------------------------------------------
 
 onVoicesReady(applyBestVoice);
+void showMode();
 
 startButton.addEventListener("click", () => void begin());
 tapLayer.addEventListener("click", scan);

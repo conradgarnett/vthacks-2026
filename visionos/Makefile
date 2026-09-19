@@ -1,4 +1,4 @@
-.PHONY: help setup precache dev backend client test lint demo doctor clean
+.PHONY: help setup precache dev run backend client test lint demo doctor clean
 .DEFAULT_GOAL := help
 
 VENV    := .venv
@@ -13,6 +13,7 @@ help:
 	@echo "  make precache  Download ML weights now (do this BEFORE demo day)"
 	@echo "  make doctor    Diagnose credentials, weights, and ports"
 	@echo "  make dev       Run backend + client (HTTPS, LAN-accessible)"
+	@echo "  make run       Same, via the cross-platform launcher (also: python run.py)"
 	@echo "  make test      Run the test suite"
 	@echo "  make demo      Deterministic replay mode -- no network, no keys"
 	@echo ""
@@ -42,6 +43,11 @@ doctor:
 
 dev:
 	@$(MAKE) -j2 backend client
+
+# Works without make too: `python run.py` on Windows, macOS or Linux. Checks
+# the machine, asks what it needs to, and starts both servers.
+run:
+	python3 run.py
 
 backend:
 	$(PY) -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload

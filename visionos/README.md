@@ -4,6 +4,19 @@ Point a phone at the room and hear what is there: objects with direction and
 distance, obstacles before you reach them, and any sign or label in view.
 
 ```
+python run.py   # any OS: sets up, checks the machine, asks, starts everything
+```
+
+`run.py` creates the venv and installs dependencies the first time, finds
+Node even when it is not on PATH, downloads the model weights, works out which
+vision provider and OCR engine this machine can use, and starts the backend
+and the client. It asks whether you will use a phone on the Wi-Fi (HTTPS) or a
+browser on this computer (HTTP on localhost), and defaults sensibly with
+`--yes`. The start screen then shows which mode the backend is in.
+
+The same steps by hand, on macOS or Linux:
+
+```
 make setup      # venv + backend + client deps
 make precache   # model weights, before demo day
 make doctor     # credentials, weights, OCR engine, ports

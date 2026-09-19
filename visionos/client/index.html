@@ -54,6 +54,7 @@
         z-index: 40;
       }
       #start small { font-size: 16px; font-weight: 500; color: #aaa; max-width: 20rem; }
+      #start #mode { color: var(--fg); font-size: 15px; }
 
       /* Three large targets along the bottom edge, found by thumb. */
       #controls {
@@ -147,6 +148,7 @@
 
     <button id="start" aria-describedby="start-help">
       Start VisionOS
+      <small id="mode" aria-live="polite">Checking what this machine can do…</small>
       <small>Tap anywhere to scan. An assistive tool, not a replacement for a cane or guide dog.</small>
     </button>
     <p id="start-help" class="sr-only">

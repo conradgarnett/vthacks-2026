@@ -1,12 +1,19 @@
 import basicSsl from "@vitejs/plugin-basic-ssl";
 import { defineConfig } from "vite";
 
-// HTTPS is not optional: getUserMedia refuses to hand over the camera on a
-// non-secure origin, and a phone reaching this over LAN is not localhost.
-// basicSsl generates a self-signed cert so this works with no tunnel and no
-// network access -- which matters when the venue WiFi is the thing failing.
+// HTTPS is not optional for a phone: getUserMedia refuses to hand over the
+// camera on a non-secure origin, and a phone reaching this over LAN is not
+// localhost. basicSsl generates a self-signed cert so this works with no
+// tunnel and no network access -- which matters when the venue WiFi is the
+// thing failing.
+//
+// VISIONOS_HTTP=1 serves plain HTTP instead, for a browser on this machine:
+// localhost is a secure context already, and some embedded browsers refuse
+// a self-signed certificate outright.
+const plainHttp = process.env.VISIONOS_HTTP === "1";
+
 export default defineConfig({
-  plugins: [basicSsl()],
+  plugins: plainHttp ? [] : [basicSsl()],
   server: {
     host: true, // bind 0.0.0.0 so the phone can reach it
     port: 5173,

@@ -42,6 +42,11 @@ export class Connection {
   private socket: WebSocket | null = null;
   private backoff = 500;
   private closedByUs = false;
+  // True once the server has actually spoken. The dev proxy accepts the
+  // socket before the backend does, so onopen alone proves nothing: with the
+  // backend down, every attempt opened and closed, and each one re-announced
+  // "I lost connection" and reset the backoff to half a second.
+  private established = false;
 
   constructor(private url: string, private handlers: Handlers) {}
 
@@ -50,22 +55,29 @@ export class Connection {
     this.socket = new WebSocket(this.url);
     this.socket.binaryType = "arraybuffer";
 
-    this.socket.onopen = () => {
-      this.backoff = 500;
-      this.handlers.onConnectionChange(true);
-    };
-
     this.socket.onmessage = (event) => {
       if (typeof event.data !== "string") return;
+      let parsed: ServerEvent;
       try {
-        this.handlers.onEvent(JSON.parse(event.data) as ServerEvent);
+        parsed = JSON.parse(event.data) as ServerEvent;
       } catch {
-        // A malformed frame is not worth tearing down the session for.
+        return; // A malformed frame is not worth tearing down the session for.
       }
+      if (!this.established) {
+        this.established = true;
+        this.backoff = 500;
+        this.handlers.onConnectionChange(true);
+      }
+      this.handlers.onEvent(parsed);
     };
 
     this.socket.onclose = () => {
-      this.handlers.onConnectionChange(false);
+      // Only a connection we had is a connection we lost. A failed attempt
+      // is retried quietly, with growing backoff.
+      if (this.established) {
+        this.established = false;
+        this.handlers.onConnectionChange(false);
+      }
       if (!this.closedByUs) this.scheduleReconnect();
     };
 
@@ -79,7 +91,7 @@ export class Connection {
   }
 
   get isOpen(): boolean {
-    return this.socket?.readyState === WebSocket.OPEN;
+    return this.established && this.socket?.readyState === WebSocket.OPEN;
   }
 
   /** Live frame for perception. */
