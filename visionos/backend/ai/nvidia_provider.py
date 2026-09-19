@@ -62,7 +62,9 @@ GROUNDING = (
     "detector is at least 80% sure of are facts. Below 80%, say 'may be'. If "
     "the picture shows something the detector did not list, say 'I think I "
     "see'. If neither the list nor the picture shows what was asked about, say "
-    "you can't see it. Never invent an object."
+    "you can't see it. Never invent an object. Never mention the detector, the "
+    "list, the scene model or percentages: the listener is blind and hears only "
+    "your words, so say 'may be' or 'I think' instead."
 )
 
 
@@ -126,7 +128,12 @@ class NvidiaVisionProvider(VisionProvider):
         scene = self._scene()
         if scene is None or find_object(scene, label):
             return None
-        return f"The detector knows what {with_article(label)} looks like and found none in view."
+        # The detector finds about half of what is there, so its silence is
+        # evidence, not proof: the picture stays the tiebreaker.
+        return (
+            f"The detector did not list {with_article(label)}. If the picture clearly "
+            f"shows one, say 'I think I see' and answer; if not, say you can't see one."
+        )
 
     @property
     def model(self) -> str:

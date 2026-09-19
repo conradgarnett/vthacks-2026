@@ -180,7 +180,7 @@ async def test_the_model_is_told_when_the_detector_found_none_of_what_was_asked(
     fake = FakeNvidia()
     await collect(provider(fake), "Is there a dog in the room?", "ask")
     text = json.loads(fake.requests[0].content)["messages"][-1]["content"][0]["text"]
-    assert "The detector knows what a dog looks like and found none in view." in text
+    assert "The detector did not list a dog." in text and "picture stays" not in text
 
 
 def test_the_scene_context_carries_the_detector_confidence():
