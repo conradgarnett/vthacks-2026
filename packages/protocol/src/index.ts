@@ -13,6 +13,7 @@ export * from './sensecard';
 export * from './payloads';
 export * from './messages';
 export * from './module';
+export * from './api';
 export * from './transport';
 export * from './geometry';
 export * from './personas';
