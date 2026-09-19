@@ -18,7 +18,7 @@ from dataclasses import dataclass
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-from fonts import platform_fonts
+from typefaces import platform_fonts
 
 # Real system fonts on this machine by default. `--fonts bundled` on the
 # runner renders with the display faces committed under eval/fonts/ instead,

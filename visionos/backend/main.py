@@ -43,7 +43,22 @@ READ_TAG = b"READ"
 # Three is the useful minimum for majority agreement; more costs latency the
 # read budget cannot spare.
 OCR_CONSENSUS_FRAMES = 3
+# Total characters below which a local read is treated as a failure worth
+# escalating to the vision model. Real signage and packaging clear this.
+WEAK_READ_CHARS = 5
 NO_CAMERA = "I'm not receiving the camera yet."
+
+
+def read_is_weak(lines) -> bool:
+    """Is a local read poor enough that a vision model should try instead?
+
+    Empty is obviously weak. So is a handful of characters: a real sign or
+    label carries more than a scrap, and a scrap is what a hard typeface
+    produces right before it produces nonsense.
+    """
+    if not lines:
+        return True
+    return sum(len(line.text.strip()) for line in lines) < WEAK_READ_CHARS
 
 
 def pack_read_frames(frames: list[bytes]) -> bytes:
@@ -195,20 +210,21 @@ class Session:
         with trace.stage("ocr"):
             lines = await self.ocr.read_consensus(frames)
 
-        if lines:
-            await self._say(format_for_speech(lines))
-            await self._finish(trace)
-            log.info(
-                "read: %d line(s) via %s from %d frame(s)", len(lines), self.ocr.name, len(frames)
-            )
-            return
-
-        if self.provider.reads_text:
-            # Claude handles the layouts and handwriting OCR misses.
+        # Escalate on a poor read, not only an empty one. Connected script and
+        # decorative faces are where OCR fails hardest, and it fails in two
+        # ways: returning nothing, or a short implausible scrap. Both mean a
+        # vision model should look instead, when there is one.
+        if self.provider.reads_text and read_is_weak(lines):
             await self._stream_answer(frames[-1], READ_PROMPT, None, "read", trace)
             return
 
-        await self._say(NO_TEXT_FOUND)
+        if lines:
+            await self._say(format_for_speech(lines))
+            log.info(
+                "read: %d line(s) via %s from %d frame(s)", len(lines), self.ocr.name, len(frames)
+            )
+        else:
+            await self._say(NO_TEXT_FOUND)
         await self._finish(trace)
 
     # --- Questions and scans ----------------------------------------------

@@ -23,6 +23,7 @@ from backend.ai.ocr import (
     TextReader,
     _accept,
     _dedupe,
+    _drop_overlapping_fragments,
     _fix_digit_confusions,
     _merge,
     _needs_tiles,
@@ -237,6 +238,33 @@ class TestEarlyAgreement:
         merged = Noisy().read_consensus_sync([b"a", b"b", b"c"])
         assert len(calls) == 3
         assert texts(merged) == ["Departures"]
+
+
+class TestOverlappingFragments:
+    """Tiles cut a word apart on hard typefaces and each piece was spoken."""
+
+    def test_pieces_of_a_longer_line_are_dropped(self):
+        kept = _drop_overlapping_fragments(
+            [line("Fire CXLE", 0.4, left=0.1), line("ire Cxi", 0.5, left=0.6)]
+        )
+        assert texts(kept) == ["Fire CXLE"]
+
+    def test_different_words_both_survive(self):
+        kept = _drop_overlapping_fragments([line("Reception", 0.2), line("Restroom", 0.6)])
+        assert len(kept) == 2
+
+    def test_a_similar_real_word_survives(self):
+        """"Receipt" beside "Reception" shares only "rece", four of seven
+        characters, so it is kept. The rule needs most of the short line to
+        be one contiguous run, not merely a shared stem."""
+        kept = _drop_overlapping_fragments([line("Reception", 0.2), line("Receipt", 0.6)])
+        assert len(kept) == 2
+
+    def test_spoken_output_says_the_word_once(self):
+        spoken = format_for_speech(
+            [line("Reception", 0.4, left=0.1), line("ion", 0.42, left=0.6), line("Rec", 0.44, left=0.8)]
+        )
+        assert spoken == "It reads: Reception."
 
 
 class TestTileGate:

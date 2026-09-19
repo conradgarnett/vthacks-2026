@@ -25,7 +25,7 @@ import random
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-from fonts import bundled_fonts
+from typefaces import bundled_fonts
 
 W, H = 1600, 1200
 

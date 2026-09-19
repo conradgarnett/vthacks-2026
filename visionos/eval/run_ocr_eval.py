@@ -27,7 +27,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from corpus import build_corpus, build_textureless_corpus, cer, normalize_output
-from fonts import font_set
+from typefaces import font_set
 
 from backend.ai.ocr import TextReader, build_reader, format_for_speech
 
@@ -99,12 +99,13 @@ def main() -> int:
 
     import time
 
-    started = time.perf_counter()
     label = (
         f"OCR EVAL  (n={count}, engine={ocr.name}, {platform.system()}, "
         f"{args.fonts} fonts: {len(fonts)})"
     )
-    rows, mean_cer = evaluate(ocr, build_corpus(count, fonts=fonts), label)
+    samples = build_corpus(count, fonts=fonts)  # rendering is slow; keep it out of the timing
+    started = time.perf_counter()
+    rows, mean_cer = evaluate(ocr, samples, label)
     elapsed = time.perf_counter() - started
     print(f"  read time     {elapsed / count * 1000:.0f} ms mean per sample (3-frame burst)")
 

@@ -20,6 +20,7 @@ from backend.main import (  # noqa: E402
     READ_TAG,
     app,
     pack_read_frames,
+    read_is_weak,
     unpack_read_frames,
 )
 
@@ -71,6 +72,25 @@ class TestReadFraming:
 
     def test_empty_burst_unpacks_to_nothing(self):
         assert unpack_read_frames(READ_TAG) == []
+
+
+class TestWeakReads:
+    """A scrap from a hard typeface means the same as an empty read."""
+
+    @staticmethod
+    def line(text: str):
+        from backend.ai.ocr import TextLine
+
+        return TextLine(text=text, confidence=0.5, top=0.5, left=0.1)
+
+    def test_empty_is_weak(self):
+        assert read_is_weak([])
+
+    def test_a_scrap_is_weak(self):
+        assert read_is_weak([self.line("4r"), self.line("ai")])
+
+    def test_a_real_sign_is_not(self):
+        assert not read_is_weak([self.line("Reception")])
 
 
 def test_health_reports_configured_and_active_provider(client):
