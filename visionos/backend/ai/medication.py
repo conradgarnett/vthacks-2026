@@ -75,6 +75,13 @@ def guard(spoken: str, lines) -> str:
 
     Non-medical text passes through untouched -- this must not make street
     signs or packaging more timid.
+
+    A number is spoken only if several frames agreed on the line it sits
+    in, and a dose only if the dose line itself was agreed on. That keeps
+    the strength ("500 MG") and the quantity when they were read the same
+    way twice, while a dose seen once is still withheld: with a fixed-focus
+    webcam the small dose line is the one that rarely agrees, and stripping
+    every digit on the label left the user hearing no numbers at all.
     """
     if not looks_medical(spoken):
         return spoken
@@ -84,11 +91,27 @@ def guard(spoken: str, lines) -> str:
         return spoken
 
     # A dose was read but only once, or numbers appear with no dose line to
-    # anchor them. Neither is safe to speak.
-    return f"{_strip_numbers(spoken)} {UNREADABLE_DOSE}".strip()
+    # anchor them. Neither is safe to speak as a dose; numbers that several
+    # frames agreed on, outside any dose phrase, are.
+    return f"{_strip_numbers(spoken, corroborated_numbers(lines))} {UNREADABLE_DOSE}".strip()
 
 
-def _strip_numbers(text: str) -> str:
-    """Keep the words, drop every digit run and the dose phrase around it."""
+def corroborated_numbers(lines, minimum_agreement: int = 2) -> frozenset[str]:
+    """Digit runs from lines several frames agreed on, dose lines excluded."""
+    kept: set[str] = set()
+    for line in lines:
+        text = getattr(line, "text", "")
+        if getattr(line, "agreement", 1) < minimum_agreement:
+            continue
+        if _DOSE_PATTERN.search(text):
+            continue
+        kept.update(_ANY_NUMBER.findall(text))
+    return frozenset(kept)
+
+
+def _strip_numbers(text: str, keep: frozenset[str] = frozenset()) -> str:
+    """Keep the words and the corroborated numbers; drop every other digit
+    run and the dose phrase around it."""
     without_dose = _DOSE_PATTERN.sub("take an unclear number of", text)
-    return re.sub(r"\s+", " ", _ANY_NUMBER.sub("", without_dose)).strip()
+    stripped = _ANY_NUMBER.sub(lambda m: m.group(0) if m.group(0) in keep else "", without_dose)
+    return re.sub(r"\s+", " ", stripped).strip()

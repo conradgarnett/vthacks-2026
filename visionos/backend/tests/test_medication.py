@@ -69,6 +69,32 @@ class TestDoseGuard:
         out = guard("It reads: IBUPROF3N 600 MG QTY 30 REFILLS.", lines)
         assert UNREADABLE_DOSE in out
 
+    def test_a_strength_agreed_across_frames_is_spoken_while_the_dose_is_withheld(self):
+        """Numbers several frames agreed on are real; only the dose seen once
+        is withheld. Otherwise a fixed-focus webcam leaves the user hearing
+        no numbers at all."""
+        lines = [
+            Line("AMOXICILLIN 500 MG", agreement=3),
+            Line("QTY 30 REFILLS 2", agreement=2),
+            Line("TAKE 1 TABLET BY MOUTH DAILY", agreement=1),
+        ]
+        out = guard("It reads: AMOXICILLIN 500 MG. QTY 30 REFILLS 2. TAKE 1 TABLET BY MOUTH DAILY.", lines)
+        assert "500 MG" in out and "QTY 30" in out
+        assert "TAKE 1" not in out and "take an unclear number of" in out
+        assert UNREADABLE_DOSE in out
+
+    def test_a_number_seen_once_is_still_withheld(self):
+        lines = [Line("AMOXICILLIN 500 MG", agreement=1), Line("TAKE 1 TABLET DAILY", agreement=1)]
+        out = guard("It reads: AMOXICILLIN 500 MG. TAKE 1 TABLET DAILY.", lines)
+        assert "500" not in out and "1" not in out
+
+    def test_a_number_inside_an_uncorroborated_dose_line_never_leaks(self):
+        """The dose line's own digits are never corroborating evidence for
+        themselves, however many frames agreed on the rest."""
+        lines = [Line("TAKE 2 TABLETS DAILY", agreement=1), Line("REFILLS 2", agreement=3)]
+        out = guard("It reads: TAKE 2 TABLETS DAILY. REFILLS 2.", lines)
+        assert "TAKE 2" not in out and "REFILLS 2" in out
+
     def test_the_refusal_says_what_to_do(self):
         """Silence is indistinguishable from a crash; the user needs to know
         the label was seen and could not be trusted."""
