@@ -5,6 +5,7 @@ import { SenseBroker, type DisclosureEntry, type VerificationView } from '@sense
 import { WorldSim } from '@sense/world-sim';
 import { createProviders, type Providers } from '@sense/providers';
 import { VisionSense, type MapSource } from '@sense/vision';
+import { EchoSense } from '@sense/hearing';
 import { ProfileStore } from './profile-store';
 
 export interface ContextOptions {
@@ -51,6 +52,15 @@ export function mapSourceFor(broker: SenseBroker, fqdn: string): MapSource | und
   };
 }
 
+/** An ACTIVE alarm reported by a VERIFIED source right now, if any. Inferred sounds defer to it. */
+export function activeVerifiedAlarm(broker: SenseBroker): { label: string; fqdn: string } | undefined {
+  for (const d of broker.latestFor('alarm-feed')) {
+    const alarms = (d.payload as { alarms: { state: string }[] }).alarms;
+    if (d.tier === 'VERIFIED' && alarms.some((a) => a.state === 'active')) return { label: d.label, fqdn: d.fqdn };
+  }
+  return undefined;
+}
+
 const toDisclosureDto = (d: DisclosureEntry): DisclosureDto => d;
 
 /**
@@ -70,6 +80,7 @@ export class SenseContext {
     readonly mode: ModeDto,
     readonly providers: Providers,
     readonly vision: VisionSense,
+    readonly echo: EchoSense,
     /** Owner key for the signed portable profile. Stays on this device. */
     readonly ownerKeys: KeyPair,
   ) {
@@ -108,7 +119,13 @@ export class SenseContext {
       getPose: () => ({ position: world.user.position, headingDeg: world.user.headingDeg }),
       getMap: () => mapSourceFor(broker, `${world.user.place}.sim`),
     });
-    return new SenseContext(clock, world, broker, profiles, mode, providers, vision, await generateKeyPair());
+    const echo = new EchoSense({
+      clock,
+      nextId: () => broker.nextPerceptId(),
+      getProfile: () => profiles.current(),
+      verifiedAlarm: () => activeVerifiedAlarm(broker),
+    });
+    return new SenseContext(clock, world, broker, profiles, mode, providers, vision, echo, await generateKeyPair());
   }
 
   // ── Events and audit trail ────────────────────────────────────────────────────────────────

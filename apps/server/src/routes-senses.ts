@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import type { LlmImage } from '@sense/providers';
+import { SOUND_LABELS, type LlmImage } from '@sense/providers';
+import { DEMO_SOUNDSCAPE, ScriptedSoundscape } from '@sense/hearing';
 import { parseBody, viaOf } from './routes-core';
 import type { SenseContext } from './context';
 
@@ -38,5 +39,54 @@ export function registerVisionRoutes(app: FastifyInstance, ctx: SenseContext): v
     const percepts = await ctx.vision.ask(body.question, hasFrame ? frameOf(body) : undefined);
     for (const p of percepts) ctx.broker.publishPercept(p);
     return { percepts };
+  });
+}
+
+const SoundBody = z.strictObject({
+  label: z.enum(SOUND_LABELS),
+  confidence: z.number().min(0).max(1),
+  bearingDeg: z.number().min(0).max(360).optional(),
+  directionKnown: z.boolean(),
+  provider: z.enum(['local-heuristic', 'scripted']),
+  at: z.number().min(0).max(86_400).optional(),
+});
+const SoundscapeBody = z.strictObject({ instant: z.boolean().optional() });
+
+/**
+ * Hearing routes. Audio itself is analysed on the user's device (browser) or by the scripted
+ * soundscape; only the resulting sound EVENTS (label, confidence, direction) reach this server.
+ */
+export function registerHearingRoutes(app: FastifyInstance, ctx: SenseContext): void {
+  app.post('/api/sound', async (req, reply) => {
+    const body = parseBody(SoundBody, req, reply);
+    if (!body) return;
+    ctx.record('sound', viaOf(req), `${body.label} ${Math.round(body.confidence * 100)}%`);
+    const percept = ctx.echo.ingest({
+      label: body.label,
+      confidence: body.confidence,
+      ...(body.directionKnown && body.bearingDeg !== undefined ? { bearingDeg: body.bearingDeg } : {}),
+      directionKnown: body.directionKnown && body.bearingDeg !== undefined,
+      provider: body.provider,
+      at: body.at ?? 0,
+    });
+    if (percept) ctx.broker.publishPercept(percept);
+    return { percept: percept ?? null };
+  });
+
+  app.post('/api/soundscape', async (req, reply) => {
+    const body = parseBody(SoundscapeBody, req, reply);
+    if (!body) return;
+    ctx.record('soundscape', viaOf(req), 'simulated soundscape');
+    const scape = new ScriptedSoundscape(DEMO_SOUNDSCAPE);
+    const emit = (e: ReturnType<ScriptedSoundscape['due']>[number]) => {
+      const p = ctx.echo.ingest(e);
+      if (p) ctx.broker.publishPercept(p);
+    };
+    if (body.instant) {
+      for (const e of scape.due(1e9)) emit(e);
+    } else {
+      for (const e of scape.due(1e9)) setTimeout(() => emit(e), e.at * 1000).unref();
+    }
+    return { events: DEMO_SOUNDSCAPE.length, simulated: true };
   });
 }

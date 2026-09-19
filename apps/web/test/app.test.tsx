@@ -145,6 +145,32 @@ describe('scene 2: ask (Blind persona)', () => {
   });
 });
 
+describe('Echo: sounds (Deaf persona)', () => {
+  it('runs the real DSP on a synthetic siren on this device and shows an inferred, directional, hedged alert', async () => {
+    const user = userEvent.setup();
+    const { container } = await mountApp();
+    await user.click(await screen.findByLabelText(/Deaf \/ hard of hearing/));
+    await user.click(screen.getByRole('button', { name: /analyse a synthetic siren on this device/i }));
+    const feed = await screen.findByRole('list', { name: /percepts, newest first/i });
+    await waitFor(() => expect(within(feed).getAllByText('Siren-like sound, left. Inferred, microphone.').length).toBeGreaterThan(0));
+    const card = within(feed).getAllByText('Siren-like sound, left. Inferred, microphone.')[0]?.closest('li') as HTMLElement;
+    expect(within(card).getByText(/INFERRED \d+%/)).toBeTruthy();
+    expect(card.textContent).toMatch(/Vibration:/);
+    expect(card.textContent).toMatch(/Direction: .*bearing/);
+    expect(screen.getByText(/Analysed a synthetic sample on this device: siren/)).toBeTruthy();
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it('plays the simulated soundscape, labelled simulated', async () => {
+    const user = userEvent.setup();
+    await mountApp();
+    await user.click(await screen.findByRole('button', { name: /play simulated soundscape/i }));
+    const feed = await screen.findByRole('list', { name: /percepts, newest first/i });
+    await waitFor(() => expect(within(feed).getAllByText(/Knock-like sound/).length).toBeGreaterThan(0));
+    expect(within(feed).getAllByText('SIMULATED').length).toBeGreaterThan(0);
+  });
+});
+
 describe('profile controls', () => {
   it('switches all five personas, keeps allergens, and applies display preferences', async () => {
     const user = userEvent.setup();

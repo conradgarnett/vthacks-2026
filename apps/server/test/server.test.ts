@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { ManualClock, type ServerEvent, type StateSnapshot } from '@sense/protocol';
-import { SenseContext, attachWebSocket, buildServer, registerVisionRoutes } from '../src';
+import { SenseContext, attachWebSocket, buildServer, registerHearingRoutes, registerVisionRoutes } from '../src';
 
 const cleanups: Array<() => Promise<void> | void> = [];
 afterEach(async () => {
@@ -14,7 +14,10 @@ afterEach(async () => {
 
 async function start(opts: { manual?: boolean; webDist?: string } = {}) {
   const ctx = await SenseContext.create({ env: {}, ...(opts.manual === false ? {} : { clock: new ManualClock() }), online: false });
-  const app = await buildServer(ctx, { extra: [registerVisionRoutes], ...(opts.webDist ? { webDist: opts.webDist } : {}) });
+  const app = await buildServer(ctx, {
+    extra: [registerVisionRoutes, registerHearingRoutes],
+    ...(opts.webDist ? { webDist: opts.webDist } : {}),
+  });
   cleanups.push(() => app.close());
   const get = async (url: string) => (await app.inject({ method: 'GET', url })).json();
   const post = async (url: string, payload?: unknown, headers: Record<string, string> = {}) =>
@@ -192,6 +195,50 @@ describe('vision routes', () => {
     await post('/api/see', { fixture: 'lobby' });
     const { percepts } = (await post('/api/ask', { question: 'Where is the nearest exit?' })).json();
     expect(percepts[0].short).toBe('No verified map here. Inferred, SENSE.');
+  });
+});
+
+describe('hearing routes', () => {
+  const siren = { label: 'siren', confidence: 0.78, bearingDeg: 270, directionKnown: true, provider: 'local-heuristic' };
+
+  it('turns a sound event into an INFERRED percept with confidence, and validates input', async () => {
+    const { post, state } = await start();
+    await post('/api/profile/persona', { personaId: 'deaf' });
+    const res = await post('/api/sound', siren, { 'x-sense-via': 'keyboard' });
+    expect(res.statusCode).toBe(200);
+    const p = res.json().percept;
+    expect(p).toMatchObject({ short: 'Siren-like sound, left. Inferred, microphone.', urgency: 3 });
+    expect(p.provenance).toMatchObject({ tier: 'INFERRED', confidence: 0.78 });
+    expect((await state()).percepts.at(-1)?.id).toBe(p.id);
+    expect((await post('/api/sound', { ...siren, label: 'unicorn' })).statusCode).toBe(400);
+    expect((await post('/api/sound', { ...siren, confidence: 7 })).statusCode).toBe(400);
+    expect((await post('/api/sound', { ...siren, provider: 'trusted-oracle' })).statusCode).toBe(400);
+  });
+
+  it('a verified building alarm dominates an inferred siren', async () => {
+    const { post, state, settle } = await start();
+    await post('/api/arrive', { area: 'riverside' });
+    await settle();
+    await post('/api/world/event', { name: 'fire-alarm' });
+    await settle();
+    const res = await post('/api/sound', { ...siren, bearingDeg: 100 });
+    const p = res.json().percept;
+    expect(p.urgency).toBe(1);
+    expect(p.kind).toBe('status');
+    expect(p.long).toMatch(/authoritative/);
+    const s = await state();
+    expect(s.percepts.filter((x) => x.urgency === 4)).toHaveLength(1);
+    expect(s.percepts.find((x) => x.urgency === 4)?.provenance.tier).toBe('VERIFIED');
+  });
+
+  it('plays the simulated soundscape instantly and labels it simulated', async () => {
+    const { post, state } = await start();
+    const res = await post('/api/soundscape', { instant: true });
+    expect(res.json()).toMatchObject({ simulated: true });
+    const s = await state();
+    const sounds = s.percepts.filter((p) => p.sense === 'hearing');
+    expect(sounds.length).toBeGreaterThanOrEqual(3);
+    expect(sounds.every((p) => p.simulated === true && p.provenance.tier === 'INFERRED')).toBe(true);
   });
 });
 

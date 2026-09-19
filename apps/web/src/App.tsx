@@ -8,6 +8,7 @@ import { TrustInspector } from './ui/TrustInspector';
 import { DisclosureLog, SecurityLog } from './ui/Logs';
 import { PersonaSwitcher, SceneControls } from './ui/Controls';
 import { VisionPanel } from './ui/VisionPanel';
+import { HearingPanel } from './ui/HearingPanel';
 
 /** Apply the profile's display preferences (contrast, text size, motion) to the page. */
 function useDisplayPrefs(profile: SensoryProfile | undefined): void {
@@ -104,6 +105,7 @@ export function App({ store }: { store: Store }) {
               <PersonaSwitcher profile={snap.profile} post={post} />
               <SceneControls post={post} />
               <VisionPanel post={post} aiLabel={snap.mode.ai} />
+              <HearingPanel post={post} />
               <TrustInspector verifications={snap.verifications} selected={ui.selectedAgent} onSelect={store.select} />
             </div>
           </>
