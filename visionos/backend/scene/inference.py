@@ -264,6 +264,20 @@ _GROUP_DISTANCE_RATIO = 1.6
 _GROUP_DISTANCE_M = 1.5
 # A person's box overlapping a seat's by this much means they are in it.
 _SITTING_OVERLAP = 0.05
+# What a person is doing, read from the object in their hands or in front
+# of them. Spoken as "it looks like" and only when the detector was sure
+# of both the person and the object, since it is a prediction, not a
+# sighting. The object counts as theirs when its centre falls inside the
+# person's box widened by this fraction on each side.
+_ACTIVITIES = (
+    ("laptop", "using a laptop"),
+    ("keyboard", "typing at a keyboard"),
+    ("cell phone", "on their phone"),
+    ("book", "reading"),
+    ("cup", "having a drink"),
+    ("bowl", "eating"),
+)
+_IN_REACH = 0.25
 
 
 def _about(distance_m: float | None) -> str:
@@ -315,6 +329,27 @@ def _is_sitting(person: Seen, seats: list[Seen]) -> bool:
     return any(seat.box is not None and _overlap(person.box, seat.box) >= _SITTING_OVERLAP for seat in seats)
 
 
+def _in_reach(person: Seen, item: Seen) -> bool:
+    if person.box is None or item.box is None:
+        return False
+    x1, y1, x2, y2 = person.box
+    dx, dy = (x2 - x1) * _IN_REACH, (y2 - y1) * _IN_REACH
+    cx, cy = (item.box[0] + item.box[2]) / 2, (item.box[1] + item.box[3]) / 2
+    return x1 - dx <= cx <= x2 + dx and y1 - dy <= cy <= y2 + dy
+
+
+def _activity(people: list[Seen], items: list[Seen]) -> tuple[str, Seen] | None:
+    """The first activity a sure person and a sure object in reach justify."""
+    for person in people:
+        if person.confidence < _TENTATIVE_MIN_CONFIDENCE:
+            continue
+        for label, doing in _ACTIVITIES:
+            for item in items:
+                if item.label == label and item.confidence >= _TENTATIVE_MIN_CONFIDENCE and _in_reach(person, item):
+                    return doing, item
+    return None
+
+
 def _counted(items: list[Seen]) -> str:
     counts = Counter(s.label for s in items)
     parts = [with_article(label) if n == 1 else pluralize(n, label) for label, n in counts.items()]
@@ -336,6 +371,23 @@ def describe_group(group: list[Seen]) -> str:
     sitting = any(_is_sitting(p, seats) for p in people)
     verb = "sitting" if sitting else "standing"
     phrase = subject
+
+    activity = _activity(people, rest)
+    if activity:
+        doing, item = activity
+        rest = [s for s in rest if s is not item]
+        phrase = f"it looks like {subject} {doing}"
+        if tables:
+            phrase += f" at {with_article(tables[0].label)}"
+        extra_seats = len(seats) - (len(people) if sitting else 0)
+        if extra_seats > 0:
+            phrase += f", with {pluralize(extra_seats, seats[0].label) if extra_seats > 1 else 'an empty ' + seats[0].label}"
+            if extra_seats > 1:
+                phrase += " empty"
+        if rest:
+            phrase += f", and {_counted(rest)}"
+        return phrase
+
     if tables and seats:
         phrase += f" {verb} at {with_article(tables[0].label)} with {pluralize(len(seats), seats[0].label) if len(seats) > 1 else with_article(seats[0].label)}"
     elif tables:

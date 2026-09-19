@@ -80,6 +80,45 @@ def text(line, left, top, height=0.03):
     return TextLine(text=line, confidence=0.9, top=top, left=left, height=height)
 
 
+class TestActivity:
+    """A prediction of what a person is doing, only when the detector was sure
+    of both the person and the thing in their hands."""
+
+    DESK = [
+        seen("person", 0.0, 2.0, 0.92, box=(0.40, 0.30, 0.60, 0.85)),
+        seen("laptop", 2.0, 1.9, 0.88, box=(0.44, 0.55, 0.58, 0.68)),
+        seen("desk", 1.0, 2.0, 0.81, box=(0.20, 0.60, 0.80, 0.90)),
+        seen("chair", -6.0, 2.1, 0.7, box=(0.15, 0.55, 0.28, 0.85)),
+    ]
+
+    def test_a_person_with_a_laptop_at_a_desk_is_using_it(self):
+        assert describe_group(self.DESK) == "it looks like a person using a laptop at a desk, with an empty chair"
+
+    def test_the_whole_scan_reads_as_a_picture(self):
+        spoken = describe_scan(SceneModel(), self.DESK)
+        assert spoken == (
+            "This looks like an office. About 2 meters straight ahead, "
+            "it looks like a person using a laptop at a desk, with an empty chair."
+        )
+
+    def test_an_unsure_laptop_is_only_listed(self):
+        group = [replace_conf(self.DESK[0], 0.92), replace_conf(self.DESK[1], 0.6), self.DESK[2]]
+        assert describe_group(group) == "a person standing at a desk, and a laptop"
+
+    def test_a_laptop_out_of_reach_is_only_listed(self):
+        far = seen("laptop", 15.0, 2.0, 0.9, box=(0.85, 0.55, 0.95, 0.65))
+        group = [self.DESK[0], far, self.DESK[2]]
+        assert describe_group(group) == "a person standing at a desk, and a laptop"
+
+    def test_a_phone_in_hand_is_a_prediction_too(self):
+        group = [seen("person", 0, 1.5, 0.9, box=(0.4, 0.2, 0.6, 0.9)), seen("cell phone", 1.0, 1.4, 0.85, box=(0.5, 0.5, 0.55, 0.58))]
+        assert describe_group(group) == "it looks like a person on their phone"
+
+
+def replace_conf(item, confidence):
+    return Seen(item.label, confidence, item.azimuth_deg, item.distance_m, item.frames, item.box)
+
+
 class TestCues:
     """What is read off an object beats what its outline suggests."""
 
