@@ -77,6 +77,11 @@ _SUBSTANTIAL_LINE_CHARS = 4
 # number like "B12" must survive beside a longer line.
 _FRAGMENT_CHARS = 4
 _FRAGMENT_RESCUE_SCORE = 0.45
+# Fraction of a short line's characters that must appear as one run inside
+# a longer line for it to count as a piece of that line rather than new
+# text. Tuned so "ire Cxi" collapses into "Fire CXLE" while genuinely
+# different words that happen to share a stem do not.
+_FRAGMENT_OVERLAP = 0.7
 
 
 @dataclass(slots=True)
@@ -548,6 +553,57 @@ def _merge(readings: list[list[TextLine]]) -> list[TextLine]:
     return _dedupe(merged)
 
 
+def _longest_common_run(a: str, b: str) -> int:
+    """Length of the longest substring shared by a and b."""
+    if not a or not b:
+        return 0
+    previous = [0] * (len(b) + 1)
+    best = 0
+    for i in range(1, len(a) + 1):
+        current = [0] * (len(b) + 1)
+        for j in range(1, len(b) + 1):
+            if a[i - 1] == b[j - 1]:
+                current[j] = previous[j - 1] + 1
+                best = max(best, current[j])
+        previous = current
+    return best
+
+
+def _drop_overlapping_fragments(lines: list[TextLine]) -> list[TextLine]:
+    """Remove pieces of a word that a longer line already contains.
+
+    Hard typefaces make the full-frame pass return little, which triggers tile
+    escalation, and tiles then cut the word apart. Observed on script and
+    decorative faces: "Fire Exit" came back as "Fire CXLE  ire Cxi", and
+    "Reception" as "ion  Rec  on" -- the same word spoken two or three times
+    in pieces.
+
+    Position dedupe cannot see this: the fragments sit in different tiles and
+    disagree on characters, so they are neither the same place nor similar
+    text. What identifies them is that a short line's characters are mostly a
+    run inside a longer one.
+    """
+    if len(lines) < 2:
+        return lines
+
+    ordered = sorted(lines, key=lambda l: -len(l.text.strip()))
+    kept: list[TextLine] = []
+
+    for line in ordered:
+        key = normalize(line.text)
+        if not key:
+            continue
+        contained = any(
+            _longest_common_run(key, normalize(other.text)) / len(key)
+            >= _FRAGMENT_OVERLAP
+            for other in kept
+        )
+        if not contained:
+            kept.append(line)
+
+    return kept
+
+
 def _drop_fragments(lines: list[TextLine]) -> list[TextLine]:
     """Discard scraps sitting beside a substantial reading.
 
@@ -609,7 +665,9 @@ def format_for_speech(lines: list[TextLine]) -> str:
     # comma" -- so they are stripped rather than passed through.
     parts = [
         clean_for_speech(line.text)
-        for line in sort_reading_order(_drop_fragments(lines))
+        for line in sort_reading_order(
+            _drop_overlapping_fragments(_drop_fragments(lines))
+        )
     ]
     body = ". ".join(part for part in parts if part)
     if not body:

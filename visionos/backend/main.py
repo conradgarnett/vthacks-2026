@@ -13,10 +13,6 @@ from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-# Three is the useful minimum for majority agreement; more costs latency the
-# read budget cannot spare.
-OCR_CONSENSUS_FRAMES = 3
-
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -34,6 +30,13 @@ from backend.telemetry import LatencyTrace, metrics_snapshot
 log = logging.getLogger(__name__)
 
 CLIENT_DIR = Path(__file__).resolve().parents[1] / "client"
+
+# Three is the useful minimum for majority agreement; more costs latency the
+# read budget cannot spare.
+OCR_CONSENSUS_FRAMES = 3
+# Total characters below which a local read is treated as a failure worth
+# escalating to Claude. Real signage and packaging clear this easily.
+WEAK_READ_CHARS = 5
 
 
 @asynccontextmanager
@@ -102,6 +105,18 @@ async def metrics() -> JSONResponse:
 async def scene() -> JSONResponse:
     """Live scene model. Powers the judge dashboard."""
     return JSONResponse(app.state.perception.snapshot())
+
+
+def _read_is_weak(lines) -> bool:
+    """Is a local read poor enough that a vision model should try instead?
+
+    Empty is obviously weak. So is a handful of characters: a real sign or
+    label carries more than a scrap, and a scrap is what a hard typeface
+    produces right before it produces nonsense.
+    """
+    if not lines:
+        return True
+    return sum(len(line.text.strip()) for line in lines) < WEAK_READ_CHARS
 
 
 class Session:
@@ -181,9 +196,14 @@ class Session:
         with trace.stage("ocr"):
             lines = await self.ocr.read_consensus(frames)
 
-        # Escalate only if there is something better to escalate to.
+        # Escalate on a poor read, not only an empty one. Connected script and
+        # decorative faces (Brush Script, Zapfino, Snell Roundhand) are where
+        # OCR fails hardest -- measured 20% exact against 100% for grotesque
+        # and slab faces -- and it fails in two ways: returning nothing, or
+        # returning a short implausible scrap like "4r ai" for "Reception".
+        # Both mean the same thing, that a vision model should look instead.
         escalation_available = type(self.provider).__name__ == "ClaudeVisionProvider"
-        if not lines and escalation_available:
+        if escalation_available and _read_is_weak(lines):
             return False
 
         trace.mark("complete")
