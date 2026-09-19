@@ -87,7 +87,7 @@ def _is_stroke_artifact(token: str) -> bool:
     return any(all(ch in family for ch in lowered) for family in _CONFUSABLE_FAMILIES)
 
 
-def _token_is_plausible(token: str) -> bool:
+def _token_is_plausible(token: str, confidence_informative: bool = False) -> bool:
     """Could this token be a word, a number, or a code?"""
     if not token:
         return False
@@ -105,9 +105,12 @@ def _token_is_plausible(token: str) -> bool:
             return token.lower() == "a" or token == "I"
         # A run of letters with no vowel is not a word in any language using
         # this alphabet. Observed junk is short: "JQ", "JJ", "th", "fik".
-        # Genuine vowelless signage ("WC", "ID") is matched by
-        # _MEANINGFUL_SHORT before reaching here.
-        if not any(ch in _VOWELS for ch in token):
+        #
+        # Skipped for an engine whose confidence discriminates: this rule
+        # also rejects real acronyms, and medicine labels are full of them
+        # -- NDC, QTY, RPH, DAW. Stroke artifacts ("Illl", "0000") are
+        # caught separately and for every engine.
+        if not confidence_informative and not any(ch in _VOWELS for ch in token):
             return False
         return True
     # Mixed alphanumeric like "B12" or "A-4" is common on signage.
@@ -118,9 +121,34 @@ def _token_is_plausible(token: str) -> bool:
     return False
 
 
-def assess(text: str, confidence: float) -> Plausibility:
-    """Decide whether a recognized line is worth speaking."""
+# Below this, an engine whose confidence means something is telling us it
+# does not recognise the text. Apple Vision reports ~0.5 for everything
+# including garbage, which is why this gate is opt-in per engine.
+#
+# Set from measurement rather than from the reported distribution. RapidOCR
+# speaks real packaging lines at median 0.94, and its visionOS-2 numbers put
+# the minimum at 0.51 -- which suggested a floor near 0.55. Measured here,
+# 0.55 and 0.70 give identical accuracy (receipts 67%, signage 93% / CER
+# 0.038, medicine drug names 50%) while 0.70 alone takes symbol hallucination
+# from 1/8 to 0/8. A free safety margin, so take it.
+CONFIDENT_ENGINE_FLOOR = 0.70
+
+
+def assess(
+    text: str, confidence: float, confidence_informative: bool = False
+) -> Plausibility:
+    """Decide whether a recognized line is worth speaking.
+
+    `confidence_informative` says the engine's score actually discriminates.
+    When it does, it carries the gate and the linguistic heuristics relax:
+    those heuristics exist to reconstruct a signal Vision does not provide,
+    and applying them to an engine that does provide it costs real text --
+    measured, 13 points of line recovery on receipts.
+    """
     stripped = text.strip()
+
+    if confidence_informative and confidence < CONFIDENT_ENGINE_FLOOR:
+        return Plausibility(False, 0.0, f"engine confidence {confidence:.2f}")
 
     if len(stripped) < 2:
         return Plausibility(False, 0.0, "too short")
@@ -143,21 +171,26 @@ def assess(text: str, confidence: float) -> Plausibility:
     if not tokens:
         return Plausibility(False, 0.0, "punctuation only")
 
-    plausible = [t for t in tokens if _token_is_plausible(t)]
+    plausible = [t for t in tokens if _token_is_plausible(t, confidence_informative)]
     ratio = len(plausible) / len(tokens)
 
     # A single junk token in an otherwise good line is tolerable; half of them
-    # is not, because the user cannot tell which half was wrong.
-    if ratio < 0.6:
+    # is not, because the user cannot tell which half was wrong. An engine
+    # that has already vouched for the line gets a looser bar.
+    if ratio < (0.4 if confidence_informative else 0.6):
         return Plausibility(False, ratio, "mostly implausible tokens")
 
+    # Skipped entirely for a confident engine: a line of legitimate
+    # acronyms ("RX 8830021 NDC") has a vowel ratio of zero, and the
+    # token checks plus the stroke-artifact rule already cover that case.
     letters = sum(ch.isalpha() for ch in stripped)
-    if letters >= 4:
+    if letters >= 4 and not confidence_informative:
         vowels = sum(ch in _VOWELS for ch in stripped)
         vowel_ratio = vowels / letters
         # English runs ~38%. Outside this band it is not prose, though short
         # codes legitimately have no vowels and are handled above.
-        if vowel_ratio < 0.12 or vowel_ratio > 0.72:
+        low, high = (0.05, 0.85) if confidence_informative else (0.12, 0.72)
+        if vowel_ratio < low or vowel_ratio > high:
             return Plausibility(False, ratio, f"vowel ratio {vowel_ratio:.2f}")
 
     return Plausibility(True, round(ratio * max(confidence, 0.3), 3), "ok")

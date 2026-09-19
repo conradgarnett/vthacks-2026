@@ -457,11 +457,18 @@ class TextReader:
         return []
 
 
-def _accept(text: str, confidence: float) -> bool:
-    """The gate every engine's output passes through before it is a line."""
+def _accept(text: str, confidence: float, confidence_informative: bool = False) -> bool:
+    """The gate every engine's output passes through before it is a line.
+
+    `confidence_informative` hands the gate to the engine's own score where
+    that score discriminates. The linguistic heuristics exist to reconstruct
+    a signal Apple Vision does not provide -- it reports ~0.5 for everything,
+    garbage included -- and applying them to an engine that does provide one
+    costs real text: 13 points of line recovery on receipts.
+    """
     if confidence < _MIN_CONFIDENCE:
         return False
-    verdict = assess(text, confidence)
+    verdict = assess(text, confidence, confidence_informative)
     if not verdict.keep:
         log.debug("OCR rejected %r: %s", text, verdict.reason)
     return verdict.keep
@@ -640,7 +647,7 @@ class RapidOCR(TextReader):
         lines: list[TextLine] = []
         for box, text, score in self._detect_small_recognize_full(image):
             text = _fix_digit_confusions(_split_letter_digit_runs(str(text).strip()))
-            if not _accept(text, score):
+            if not _accept(text, score, self.confidence_informative):
                 continue
             xs = [float(point[0]) for point in box]
             ys = [float(point[1]) for point in box]
