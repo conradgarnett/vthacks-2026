@@ -199,7 +199,9 @@ def credentials_available() -> bool:
         return False
 
 
-def build_provider(settings: Settings, scene_getter=None) -> VisionProvider:
+def build_provider(
+    settings: Settings, scene_getter=None, detections_getter=None
+) -> VisionProvider:
     if settings.vision_provider == "replay":
         log.warning(
             "Vision provider: REPLAY -- canned text, unrelated to the camera. "
@@ -211,7 +213,7 @@ def build_provider(settings: Settings, scene_getter=None) -> VisionProvider:
         from backend.ai.local_provider import LocalSceneProvider
 
         log.info("Vision provider: local scene model (no credentials required)")
-        return LocalSceneProvider(scene_getter)
+        return LocalSceneProvider(scene_getter, detections_getter)
 
     if not credentials_available():
         from backend.ai.local_provider import LocalSceneProvider
@@ -221,7 +223,7 @@ def build_provider(settings: Settings, scene_getter=None) -> VisionProvider:
             "Run `ant auth login` for full vision. Descriptions will be limited "
             "to recognized objects and cannot include text."
         )
-        return LocalSceneProvider(scene_getter)
+        return LocalSceneProvider(scene_getter, detections_getter)
 
     log.info("Vision provider: Claude (%s)", settings.visionos_model)
     return ClaudeVisionProvider(settings)

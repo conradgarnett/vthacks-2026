@@ -83,7 +83,9 @@ async def lifespan(app: FastAPI):
     app.state.perception.warmup()
 
     app.state.provider = build_provider(
-        settings, scene_getter=lambda: app.state.perception.scene
+        settings,
+        scene_getter=lambda: app.state.perception.scene,
+        detections_getter=lambda: app.state.perception.last_detections,
     )
     app.state.effective_provider = type(app.state.provider).__name__
 

@@ -44,6 +44,10 @@ class PerceptionPipeline:
         self.scene = SceneModel(memory_s=settings.object_memory_s)
 
         self.dropoffs: list[DropoffHint] = []
+        # Every detection from the latest frame, confirmed or not. The scene
+        # model only admits what the tracker has seen twice; inference reads
+        # the rest as hints, spoken as guesses.
+        self.last_detections: list = []
         self.last_trace: dict = {}
         self.dropped_frames = 0
         self._frame_index = 0
@@ -88,6 +92,7 @@ class PerceptionPipeline:
 
             with trace.stage("detect"):
                 detections = await self.detector.detect(frame)
+            self.last_detections = detections
 
             with trace.stage("track"):
                 visible = self.tracker.update(detections)
@@ -120,7 +125,10 @@ class PerceptionPipeline:
             self.dropoffs = []
 
     def snapshot(self) -> dict:
+        from backend.scene.inference import snapshot_extras
+
         state = self.scene.snapshot()
+        state.update(snapshot_extras(self.scene, self.last_detections))
         state["dropoff_hints"] = [
             {"azimuth_deg": round(h.azimuth_deg, 1), "severity": round(h.severity, 2)}
             for h in self.dropoffs

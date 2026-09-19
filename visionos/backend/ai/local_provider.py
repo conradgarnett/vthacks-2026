@@ -13,12 +13,14 @@ is rule 4 of the system prompt enforced in code.
 from __future__ import annotations
 
 import logging
+import re
 from typing import AsyncIterator, Callable
 
 from backend.ai.vision import VisionProvider
 from backend.perception.detector import CLASS_HEIGHTS_M
 from backend.perception.geometry import steps_away
 from backend.speech.phrasing import with_article
+from backend.scene.inference import describe_scene, room_sentence
 from backend.scene.model import SceneModel
 from backend.scene.queries import (
     _ALIASES,
@@ -48,13 +50,26 @@ _READ_UNAVAILABLE = (
 )
 _PATH_WORDS = ("path", "clear", "ahead", "walk", "go", "safe", "obstacle")
 _CHANGE_WORDS = ("change", "changed", "new", "happened")
+# "What room is this" and "where am I" ask for the kind of space, which is an
+# inference from what is in it. "Describe this room" is an inventory request
+# and must not match: the word "room" alone is not the question.
+_ROOM_QUESTION = re.compile(
+    r"\b(what (kind|sort|type) of (room|place|space)|what room|which room|"
+    r"where am i|what is this place|what place is this)\b"
+)
 
 
 class LocalSceneProvider(VisionProvider):
     """Answers from the tracked scene model alone."""
 
-    def __init__(self, scene_getter: Callable[[], SceneModel]) -> None:
+    def __init__(
+        self,
+        scene_getter: Callable[[], SceneModel],
+        detections_getter: Callable[[], list] | None = None,
+    ) -> None:
         self._scene = scene_getter
+        # The latest frame's raw detections, confirmed or not, for hedged hints.
+        self._detections = detections_getter or (lambda: [])
 
     async def describe(
         self,
@@ -75,10 +90,18 @@ class LocalSceneProvider(VisionProvider):
         if intent == "read":
             return _READ_UNAVAILABLE
         if intent == "scan":
-            return summarize(scene)
+            return describe_scene(scene, self._detections())
 
         if "read" in lowered and "text" in lowered:
             return _READ_UNAVAILABLE
+
+        if _ROOM_QUESTION.search(lowered):
+            visible = [o.label for o in scene.all_objects() if o.visible]
+            return room_sentence(visible) or (
+                "I can't tell what kind of place this is yet; I only recognize "
+                + (", ".join(sorted(set(visible))) if visible else "nothing specific")
+                + "."
+            )
 
         if any(word in lowered for word in _CHANGE_WORDS):
             return self._describe_changes(scene)

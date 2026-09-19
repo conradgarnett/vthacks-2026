@@ -51,12 +51,28 @@ def scene_context(snapshot: dict) -> str:
     are paid repeatedly.
     """
     objects = snapshot.get("objects") or []
-    if not objects:
+    tentative = snapshot.get("tentative") or []
+    room = snapshot.get("room")
+    if not objects and not tentative:
         return "SCENE MODEL: no tracked objects yet."
 
     lines = [
         f"- {o['label']} at {o['clock']}, about {o['distance_m']:.1f} m"
         f"{'' if o.get('visible', True) else ' (remembered, no longer in view)'}"
         for o in objects
+        if o.get("distance_m") is not None
+    ] + [
+        f"- {o['label']} at {o['clock']}, distance unknown"
+        for o in objects
+        if o.get("distance_m") is None
     ]
-    return "SCENE MODEL (tracked geometry, trust over pixels):\n" + "\n".join(lines)
+    text = "SCENE MODEL (tracked geometry, trust over pixels):\n" + "\n".join(lines)
+    if room:
+        text += f"\nLikely a {room}, inferred from the objects above."
+    if tentative:
+        text += "\nUNCONFIRMED, seen once and possibly wrong: " + "; ".join(
+            f"{t['label']} at {t['clock']}"
+            + (f", about {t['distance_m']:.0f} m" if t.get("distance_m") is not None else "")
+            for t in tentative
+        )
+    return text
