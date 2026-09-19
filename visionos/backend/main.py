@@ -16,9 +16,10 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.ai.prompts import PROMPT_VERSION, READ_PROMPT, SCAN_PROMPT
+from backend.ai.prompts import PROMPT_VERSION, READ_PROMPT, SCAN_PROMPT, scene_context
 from backend.ai.vision import VisionProvider, build_provider
 from backend.config import get_settings
+from backend.perception.pipeline import PerceptionPipeline
 from backend.speech.chunker import SentenceChunker
 from backend.telemetry import LatencyTrace, metrics_snapshot
 
@@ -36,6 +37,12 @@ async def lifespan(app: FastAPI):
     )
     app.state.settings = settings
     app.state.provider = build_provider(settings)
+
+    # One pipeline for the process: one user, one camera. Loading weights here
+    # means the first frame of the demo is not the one paying for it.
+    app.state.perception = PerceptionPipeline(settings)
+    app.state.perception.warmup()
+
     log.info("VisionOS ready on %s:%s", settings.host, settings.port)
     yield
     await app.state.provider.aclose()
@@ -72,16 +79,26 @@ async def metrics() -> JSONResponse:
     return JSONResponse(metrics_snapshot())
 
 
+@app.get("/scene")
+async def scene() -> JSONResponse:
+    """Live scene model. Powers the judge dashboard."""
+    return JSONResponse(app.state.perception.snapshot())
+
+
 class Session:
     """Per-connection state. One phone, one session."""
 
-    def __init__(self, socket: WebSocket, provider: VisionProvider) -> None:
+    def __init__(
+        self, socket: WebSocket, provider: VisionProvider, perception: PerceptionPipeline
+    ) -> None:
         self.socket = socket
         self.provider = provider
+        self.perception = perception
         self.latest_frame: bytes | None = None
 
     async def handle_frame(self, frame: bytes) -> None:
         self.latest_frame = frame
+        await self.perception.process(frame)
 
     async def handle_intent(self, kind: str, text: str | None) -> None:
         if self.latest_frame is None:
@@ -98,7 +115,11 @@ class Session:
         chunker = SentenceChunker()
         spoke = False
 
-        async for delta in self.provider.describe(self.latest_frame, prompt):
+        # Ground the answer in tracked geometry rather than pixels alone.
+        # Skipped for OCR, where the scene model has nothing to contribute.
+        context = None if kind == "read" else scene_context(self.perception.snapshot())
+
+        async for delta in self.provider.describe(self.latest_frame, prompt, context):
             for sentence in chunker.feed(delta):
                 if not spoke:
                     # The number that matters: frame -> first spoken word.
@@ -119,7 +140,7 @@ class Session:
 @app.websocket("/ws")
 async def websocket_endpoint(socket: WebSocket) -> None:
     await socket.accept()
-    session = Session(socket, app.state.provider)
+    session = Session(socket, app.state.provider, app.state.perception)
     settings = get_settings()
 
     await socket.send_json(
