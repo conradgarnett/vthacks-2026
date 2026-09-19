@@ -396,11 +396,15 @@ class Session:
 
     async def handle_frame(self, frame: bytes) -> None:
         self.latest_frame = frame
-        await self.perception.process(frame)
-        await self.socket.send_json({
-            "type": "detections",
-            "items": detection_items(self.perception.last_detections, self.perception.last_frame_size),
-        })
+        processed = await self.perception.process(frame)
+        # Boxes only from a frame that was actually looked at. A dropped
+        # frame used to resend the previous frame's boxes, so a box could
+        # outlive the thing it was drawn around.
+        if processed:
+            await self.socket.send_json({
+                "type": "detections",
+                "items": detection_items(self.perception.last_detections, self.perception.last_frame_size),
+            })
 
         # Deterministic and ahead of everything else: nothing on this path
         # can be delayed by an API call.

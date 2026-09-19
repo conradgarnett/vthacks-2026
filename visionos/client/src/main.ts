@@ -21,8 +21,9 @@ const DISCLAIMER =
 const FRAME_INTERVAL_MS = 700;
 // Detection is ~30 ms on this CPU; the old 1500 ms was set when the depth
 // pass still ran behind every frame, and it left the boxes a second and a
-// half behind the picture.
-const FRAME_INTERVAL_CPU_MS = 500;
+// half behind the picture. Four frames a second keeps the boxes on the
+// picture and costs about a fifth of one core.
+const FRAME_INTERVAL_CPU_MS = 250;
 let frameIntervalMs = FRAME_INTERVAL_MS;
 // A detailed frame for the background reader every few seconds, so Read
 // answers from what is already known. Rarer on a CPU, where each costs
@@ -397,82 +398,21 @@ async function scanScene(): Promise<void> {
   connection.sendScanFrames(captured);
 }
 
-// How long a scan's boxes stay up before the live ones take over again.
+// The last detections drawn, so a resize can redraw them, and how long a
+// scan's boxes stay up before the live ones take over again.
+let drawn: Boxed[] = [];
 let scanBoxesUntil = 0;
 const SCAN_BOXES_MS = 4000;
-// A box eases from where it was to where it is next over roughly the time
-// until the next update, and appears or disappears over a fade rather than
-// popping, so the overlay moves with the picture instead of stepping.
-const BOX_FADE_MS = 300;
-const BOX_MATCH_DISTANCE = 0.25;
-
-type Box = [number, number, number, number];
-type BoxTrack = {
-  label: string;
-  confidence: number;
-  from: Box;
-  to: Box;
-  movedAt: number;
-  bornAt: number;
-  fadingSince: number | null;
-};
-let boxTracks: BoxTrack[] = [];
-let boxFrame: number | null = null;
-
-function easeOut(t: number): number {
-  return 1 - Math.pow(1 - Math.min(1, Math.max(0, t)), 3);
-}
-
-function boxAt(track: BoxTrack, now: number): Box {
-  const t = easeOut((now - track.movedAt) / Math.max(120, frameIntervalMs));
-  return track.from.map((v, i) => v + (track.to[i] - v) * t) as Box;
-}
-
-function boxCenterDistance(a: Box, b: Box): number {
-  const ax = (a[0] + a[2]) / 2, ay = (a[1] + a[3]) / 2;
-  const bx = (b[0] + b[2]) / 2, by = (b[1] + b[3]) / 2;
-  return Math.hypot(ax - bx, ay - by);
-}
 
 /**
  * A red outline and label around everything the detector believes it
- * sees, for a sighted helper checking the glasses. Each new set of boxes is
- * matched to the boxes already on screen by label and nearness; matched
- * ones glide, new ones fade in, lost ones fade out.
+ * sees, for a sighted helper checking the glasses. Each set replaces the
+ * last outright: a box that is not in the newest frame is gone. Boxes
+ * arrive normalized to the frame; the frame is letterboxed on screen, so
+ * they are mapped through the same geometry as the read area.
  */
 function drawBoxes(items: Boxed[]): void {
-  const now = performance.now();
-  const unmatched = boxTracks.filter((t) => t.fadingSince === null);
-  const next: BoxTrack[] = boxTracks.filter((t) => t.fadingSince !== null);
-  for (const item of items) {
-    let best: BoxTrack | null = null;
-    let bestDistance = BOX_MATCH_DISTANCE;
-    for (const track of unmatched) {
-      if (track.label !== item.label) continue;
-      const distance = boxCenterDistance(boxAt(track, now), item.box);
-      if (distance < bestDistance) {
-        best = track;
-        bestDistance = distance;
-      }
-    }
-    if (best) {
-      unmatched.splice(unmatched.indexOf(best), 1);
-      next.push({ ...best, confidence: item.confidence, from: boxAt(best, now), to: item.box, movedAt: now });
-    } else {
-      next.push({ label: item.label, confidence: item.confidence, from: item.box, to: item.box, movedAt: now, bornAt: now, fadingSince: null });
-    }
-  }
-  for (const track of unmatched) {
-    const here = boxAt(track, now);
-    next.push({ ...track, from: here, to: here, movedAt: now, fadingSince: now });
-  }
-  boxTracks = next;
-  if (boxFrame === null) boxFrame = requestAnimationFrame(renderBoxes);
-}
-
-function renderBoxes(): void {
-  boxFrame = null;
-  const now = performance.now();
+  drawn = items;
   const frame = camera.frameOnScreen();
   const scale = window.devicePixelRatio || 1;
   boxes.width = Math.round(window.innerWidth * scale);
@@ -481,26 +421,18 @@ function renderBoxes(): void {
   if (!ctx) return;
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
   ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
-  boxTracks = boxTracks.filter((t) => t.fadingSince === null || now - t.fadingSince < BOX_FADE_MS);
   if (!frame) return;
   ctx.lineWidth = 2;
+  ctx.strokeStyle = "#e53935";
   ctx.font = "13px system-ui, sans-serif";
-  let animating = false;
-  for (const track of boxTracks) {
-    const fadeIn = Math.min(1, (now - track.bornAt) / BOX_FADE_MS);
-    const fadeOut = track.fadingSince === null ? 1 : 1 - (now - track.fadingSince) / BOX_FADE_MS;
-    const alpha = Math.max(0, Math.min(fadeIn, fadeOut));
-    const moving = now - track.movedAt < Math.max(120, frameIntervalMs);
-    if (moving || fadeIn < 1 || track.fadingSince !== null) animating = true;
-    const [x1, y1, x2, y2] = boxAt(track, now);
+  for (const item of items) {
+    const [x1, y1, x2, y2] = item.box;
     const left = frame.left + x1 * frame.width;
     const top = frame.top + y1 * frame.height;
     const width = (x2 - x1) * frame.width;
     const height = (y2 - y1) * frame.height;
-    ctx.globalAlpha = alpha;
-    ctx.strokeStyle = "#e53935";
     ctx.strokeRect(left, top, width, height);
-    const text = `${track.label} ${Math.round(track.confidence * 100)}%`;
+    const text = `${item.label} ${Math.round(item.confidence * 100)}%`;
     const pad = 4;
     const textWidth = ctx.measureText(text).width;
     const tagTop = top >= 18 ? top - 18 : top;
@@ -509,12 +441,8 @@ function renderBoxes(): void {
     ctx.fillStyle = "#fff";
     ctx.fillText(text, left + pad, tagTop + 13);
   }
-  ctx.globalAlpha = 1;
-  if (animating) boxFrame = requestAnimationFrame(renderBoxes);
 }
-window.addEventListener("resize", () => {
-  if (boxFrame === null) boxFrame = requestAnimationFrame(renderBoxes);
-});
+window.addEventListener("resize", () => drawBoxes(drawn));
 
 /** Draw the read area over the preview, wherever the frame landed on screen. */
 function placeReadArea(): void {

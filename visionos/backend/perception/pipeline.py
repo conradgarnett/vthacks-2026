@@ -80,7 +80,7 @@ class PerceptionPipeline:
         """Where the detector runs: cpu, cuda or mps."""
         return getattr(self.detector, "_device", "cpu")
 
-    async def process(self, frame_jpeg: bytes) -> None:
+    async def process(self, frame_jpeg: bytes) -> bool:
         """Decode, detect, track, integrate. Safe to call at frame rate.
 
         Drops frames rather than queueing them. Inference is serialized on one
@@ -90,7 +90,7 @@ class PerceptionPipeline:
         """
         if not self._enabled or self._busy:
             self.dropped_frames += 1
-            return
+            return False
 
         self._busy = True
         try:
@@ -101,7 +101,7 @@ class PerceptionPipeline:
             with trace.stage("decode"):
                 frame = await loop.run_in_executor(None, _decode_jpeg, frame_jpeg)
             if frame is None:
-                return
+                return False
             self.last_frame_size = (frame.shape[1], frame.shape[0])
 
             with trace.stage("detect"):
@@ -118,6 +118,7 @@ class PerceptionPipeline:
 
             trace.mark("total")
             self.last_trace = trace.to_dict()
+            return True
         finally:
             self._busy = False
 
