@@ -103,3 +103,45 @@ class TestNormalize:
 
     def test_distinguishes_genuinely_different_text(self):
         assert normalize("EXIT") != normalize("ENTER")
+
+
+class TestStrokeArtifacts:
+    """Symbols and drawings resolved into glyphs.
+
+    Found by testing on packaging rather than signage: barcodes, nutrition
+    rings and decorative rules are not text, but an OCR engine resolves them
+    into predictable characters. Speaking those to someone who cannot see the
+    can is inventing an ingredient.
+    """
+
+    @pytest.mark.parametrize(
+        "artifact,source",
+        [
+            ("Il", "barcode bars"),
+            ("Illl", "barcode bars"),
+            ("1111", "barcode bars"),
+            ("llll", "railings or blinds"),
+            ("|||", "vertical rules"),
+            ("00", "nutrition rings"),
+            ("0000", "nutrition rings"),
+            ("OO", "circular badges"),
+            ("---", "table rules"),
+        ],
+    )
+    def test_structure_is_not_spoken_as_text(self, artifact, source):
+        assert not is_plausible(artifact), f"{source} would be spoken as {artifact!r}"
+
+    @pytest.mark.parametrize(
+        "text", ["B12", "204B", "24", "100", "2 Liter", "Room 101", "Zero Sugar"]
+    )
+    def test_real_content_survives_the_rule(self, text):
+        """Mixing character families is the tell for real content: "100"
+        spans strokes and rings, "000" does not."""
+        assert is_plausible(text), f"rejected real content: {text}"
+
+    def test_a_single_character_is_not_treated_as_an_artifact(self):
+        """One stroke is ambiguous; the rule needs a run to be confident."""
+        from backend.ai.text_quality import _is_stroke_artifact
+
+        assert not _is_stroke_artifact("l")
+        assert not _is_stroke_artifact("0")
