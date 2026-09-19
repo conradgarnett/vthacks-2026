@@ -40,9 +40,19 @@ class VisionProvider(ABC):
 
     @abstractmethod
     def describe(
-        self, frame_jpeg: bytes, prompt: str, scene_context: str | None = None
+        self,
+        frame_jpeg: bytes,
+        prompt: str,
+        scene_context: str | None = None,
+        intent: str | None = None,
     ) -> AsyncIterator[str]:
-        """Yield answer text incrementally. Must never raise -- degrade instead."""
+        """Yield answer text incrementally. Must never raise -- degrade instead.
+
+        `intent` is the structured verb ("scan" / "read" / "ask"). Providers
+        must branch on it rather than pattern-matching the prompt text: the
+        scan prompt contains the words "walking path", which silently routed
+        room scans to the path answer in two separate providers.
+        """
 
     async def aclose(self) -> None:
         return None
@@ -59,7 +69,11 @@ class ClaudeVisionProvider(VisionProvider):
         self._settings = settings
 
     async def describe(
-        self, frame_jpeg: bytes, prompt: str, scene_context: str | None = None
+        self,
+        frame_jpeg: bytes,
+        prompt: str,
+        scene_context: str | None = None,
+        intent: str | None = None,
     ) -> AsyncIterator[str]:
         content: list[dict] = [
             {
@@ -115,13 +129,16 @@ class ReplayVisionProvider(VisionProvider):
         log.warning("Replay fixture %s missing; using built-in scene", path)
         return {}
 
-    def _lookup(self, prompt: str) -> str:
-        """Longest matching key wins.
+    def _lookup(self, prompt: str, intent: str | None = None) -> str:
+        """Structured intent first, then longest matching key.
 
-        Dict order is the wrong tie-breaker: SCAN_PROMPT contains the phrase
-        "walking path", so a short "path" key would hijack every room scan --
-        which is the demo's headline moment.
+        Both tie-breakers exist because SCAN_PROMPT contains the phrase
+        "walking path": dict order let a short "path" key hijack every room
+        scan, which is the demo's headline moment.
         """
+        if intent and intent in self._scenes:
+            return self._scenes[intent]
+
         lowered = prompt.lower()
         matches = [
             (len(key), text)
@@ -137,16 +154,66 @@ class ReplayVisionProvider(VisionProvider):
         )
 
     async def describe(
-        self, frame_jpeg: bytes, prompt: str, scene_context: str | None = None
+        self,
+        frame_jpeg: bytes,
+        prompt: str,
+        scene_context: str | None = None,
+        intent: str | None = None,
     ) -> AsyncIterator[str]:
-        for word in self._lookup(prompt).split(" "):
+        for word in self._lookup(prompt, intent).split(" "):
             await asyncio.sleep(self.WORD_DELAY_S)
             yield word + " "
 
 
-def build_provider(settings: Settings) -> VisionProvider:
+def credentials_available() -> bool:
+    """Mirror the SDK's own resolution order.
+
+    An unset ANTHROPIC_API_KEY does not mean there are no credentials: the SDK
+    falls through to ANTHROPIC_AUTH_TOKEN and then an `ant auth login` profile
+    on disk.
+    """
+    import os
+    import shutil
+    import subprocess
+
+    if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
+        return True
+    if not shutil.which("ant"):
+        return False
+    try:
+        return (
+            subprocess.run(
+                ["ant", "auth", "status"], capture_output=True, timeout=10
+            ).returncode
+            == 0
+        )
+    except Exception:
+        return False
+
+
+def build_provider(settings: Settings, scene_getter=None) -> VisionProvider:
     if settings.vision_provider == "replay":
-        log.info("Vision provider: replay (no credentials required)")
+        log.warning(
+            "Vision provider: REPLAY -- canned text, unrelated to the camera. "
+            "Rehearsal only."
+        )
         return ReplayVisionProvider(settings)
+
+    if settings.vision_provider == "local":
+        from backend.ai.local_provider import LocalSceneProvider
+
+        log.info("Vision provider: local scene model (no credentials required)")
+        return LocalSceneProvider(scene_getter)
+
+    if not credentials_available():
+        from backend.ai.local_provider import LocalSceneProvider
+
+        log.warning(
+            "No credentials resolved -- falling back to the local scene model. "
+            "Run `ant auth login` for full vision. Descriptions will be limited "
+            "to recognized objects and cannot include text."
+        )
+        return LocalSceneProvider(scene_getter)
+
     log.info("Vision provider: Claude (%s)", settings.visionos_model)
     return ClaudeVisionProvider(settings)

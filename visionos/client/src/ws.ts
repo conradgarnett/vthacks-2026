@@ -6,7 +6,7 @@
  */
 
 export type ServerEvent =
-  | { type: "ready"; provider: string; demo_mode: boolean }
+  | { type: "ready"; provider: string; provider_active: string; demo_mode: boolean }
   | { type: "speech"; text: string }
   | { type: "trace"; trace_id: number; label: string; stages: Record<string, number>; total_ms: number }
   | { type: "hazard"; text: string; azimuth_deg: number; distance_m: number };

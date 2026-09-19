@@ -30,9 +30,16 @@ class Settings(BaseSettings):
     visionos_max_tokens: int = 1024
 
     # --- Vision provider --------------------------------------------------
-    # "claude" hits the API. "replay" serves canned scenes: no credentials, no
-    # network, deterministic. The demo fallback when hackathon WiFi dies.
-    vision_provider: Literal["claude", "replay"] = "claude"
+    # "claude"  full open-vocabulary vision; needs credentials.
+    # "local"   describes the real scene model from YOLO alone. Truthful with
+    #           no network, but limited to 80 COCO classes and cannot read text.
+    # "replay"  canned scenes. Deterministic, and the only mode that can be
+    #           confidently WRONG -- it will describe a living room while the
+    #           camera points at a parking lot. Rehearsal and tests only.
+    #
+    # "claude" degrades to "local", not "replay", when no credentials resolve:
+    # a truthful partial answer beats a confident fabrication.
+    vision_provider: Literal["claude", "local", "replay"] = "claude"
     replay_fixture: str = "assets/replay/livingroom.json"
 
     # --- Local perception -------------------------------------------------

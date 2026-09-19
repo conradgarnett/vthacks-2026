@@ -36,12 +36,16 @@ async def lifespan(app: FastAPI):
         format="%(asctime)s %(levelname)-7s %(name)s  %(message)s",
     )
     app.state.settings = settings
-    app.state.provider = build_provider(settings)
 
-    # One pipeline for the process: one user, one camera. Loading weights here
-    # means the first frame of the demo is not the one paying for it.
+    # Perception first: the provider may need to read the scene model, because
+    # the no-credentials fallback answers from it.
     app.state.perception = PerceptionPipeline(settings)
     app.state.perception.warmup()
+
+    app.state.provider = build_provider(
+        settings, scene_getter=lambda: app.state.perception.scene
+    )
+    app.state.effective_provider = type(app.state.provider).__name__
 
     log.info("VisionOS ready on %s:%s", settings.host, settings.port)
     yield
@@ -66,7 +70,10 @@ async def health() -> JSONResponse:
     return JSONResponse(
         {
             "status": "ok",
-            "provider": settings.vision_provider,
+            "provider_configured": settings.vision_provider,
+            # What is actually serving, which differs when credentials are
+            # missing and the configured provider fell back.
+            "provider_active": app.state.effective_provider,
             "model": settings.visionos_model,
             "prompt_version": PROMPT_VERSION,
             "demo_mode": settings.demo_mode,
@@ -119,7 +126,9 @@ class Session:
         # Skipped for OCR, where the scene model has nothing to contribute.
         context = None if kind == "read" else scene_context(self.perception.snapshot())
 
-        async for delta in self.provider.describe(self.latest_frame, prompt, context):
+        async for delta in self.provider.describe(
+            self.latest_frame, prompt, context, intent=kind
+        ):
             for sentence in chunker.feed(delta):
                 if not spoke:
                     # The number that matters: frame -> first spoken word.
@@ -147,6 +156,7 @@ async def websocket_endpoint(socket: WebSocket) -> None:
         {
             "type": "ready",
             "provider": settings.vision_provider,
+            "provider_active": app.state.effective_provider,
             "demo_mode": settings.demo_mode,
         }
     )

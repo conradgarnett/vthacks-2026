@@ -53,11 +53,25 @@ function show(text: string): void {
 
 function onServerEvent(event: ServerEvent): void {
   switch (event.type) {
-    case "ready":
-      setStatus(
-        event.provider === "replay" ? "Connected (replay mode)" : "Connected"
-      );
+    case "ready": {
+      // Replay is the one mode that can be confidently wrong, so it says so
+      // out loud. A user who cannot see the status line would otherwise have
+      // no way to know the description is unrelated to the camera.
+      const modes: Record<string, { label: string; spoken?: string }> = {
+        ReplayVisionProvider: {
+          label: "Connected — REPLAY (scripted, ignores camera)",
+          spoken: "Replay mode. Descriptions are scripted and do not match your camera.",
+        },
+        LocalSceneProvider: {
+          label: "Connected — local detection only",
+          spoken: "Running on local detection only. I can describe objects I recognize, but I can't read text.",
+        },
+      };
+      const mode = modes[event.provider_active];
+      setStatus(mode?.label ?? "Connected");
+      if (mode?.spoken) tts.say(mode.spoken, SpeechPriority.Answer);
       break;
+    }
     case "speech":
       tts.say(event.text, SpeechPriority.Answer);
       show(event.text);

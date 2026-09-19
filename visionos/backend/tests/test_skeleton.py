@@ -32,10 +32,13 @@ def client():
         yield test_client
 
 
-def test_health_reports_replay_provider(client):
+def test_health_reports_configured_and_active_provider(client):
+    """These differ when credentials are missing and the provider fell back,
+    so the dashboard must show what is actually serving."""
     body = client.get("/health").json()
     assert body["status"] == "ok"
-    assert body["provider"] == "replay"
+    assert body["provider_configured"] == "replay"
+    assert body["provider_active"] == "ReplayVisionProvider"
 
 
 def test_frame_then_scan_returns_spoken_sentences(client):
