@@ -30,7 +30,7 @@ make test
 | ------------- | --------------------------------------------------------- |
 | tap anywhere, or Scan | describes the room, nearest things first          |
 | Read          | reads any text in view (a three-frame burst)              |
-| hold Ask      | speak a question, or a command such as "take me to the door" or "stop" |
+| tap Ask       | speak a question, or a command such as "take me to the door" or "stop"; it stops by itself when you pause, or tap again |
 | Voice         | cycles the speaking voice and plays a sample              |
 | Stop          | silences speech and any active beacon                     |
 

@@ -10,8 +10,9 @@ import { Voice } from "./voice";
 import { Connection, type ServerEvent } from "./ws";
 
 const DISCLAIMER =
-  "VisionOS ready. Tap anywhere to scan. This is an assistive tool, not a " +
-  "replacement for your cane or guide dog. Distances are estimates.";
+  "VisionOS ready. Tap anywhere to scan, tap Ask to speak. This is an " +
+  "assistive tool, not a replacement for your cane or guide dog. Distances " +
+  "are estimates.";
 
 // Live frames go to the detector at this rate. On a GPU it is idle most of
 // the time; on a CPU-only backend a frame every 700 ms keeps the cores busy
@@ -238,7 +239,7 @@ const voice = new Voice({
       // Stop talking before listening, or the mic hears the assistant.
       tts.stopAll();
       spatial.play("info", 0, 1);
-      setStatus("Listening…");
+      setStatus("Listening… tap Ask again to stop");
     } else {
       setStatus("Connected");
     }
@@ -418,17 +419,18 @@ el("stop").addEventListener("click", (e) => {
   connection.sendIntent("stop_beacon");
 });
 
-// Push to talk. Pointer events cover touch and mouse; releasing anywhere ends
-// the capture so a drag off the button cannot leave the mic open.
-askButton.addEventListener("pointerdown", (e) => {
-  e.preventDefault();
+// Tap to toggle, not push-to-talk. A held button fails on phones: the
+// browser cancels the press the moment it takes it for a scroll or a
+// long-press, so recognition stopped before the user had said a word.
+// Recognition ends itself after one utterance; a second tap ends it early.
+askButton.addEventListener("click", (e) => {
   e.stopPropagation();
-  voice.start();
+  if (voice.isListening) {
+    voice.stop();
+  } else {
+    voice.start();
+  }
 });
-const endCapture = () => voice.isListening && voice.stop();
-askButton.addEventListener("pointerup", endCapture);
-askButton.addEventListener("pointercancel", endCapture);
-window.addEventListener("pointerup", endCapture);
 
 if (!tts.isSupported) {
   setStatus("This browser has no speech synthesis. Try Safari or Chrome.");

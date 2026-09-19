@@ -66,6 +66,7 @@
         z-index: 30;
       }
       #controls button {
+        touch-action: manipulation; /* no double-tap zoom, no press delay on phones */
         width: 62px; height: 62px;
         border-radius: 50%;
         border: 2px solid rgba(255, 255, 255, 0.55);
@@ -133,7 +134,7 @@
     <div id="transcript" role="log" aria-live="polite" aria-label="Spoken history"></div>
 
     <div id="controls" hidden>
-      <button id="ask" aria-label="Hold to ask a question about your surroundings">
+      <button id="ask" aria-label="Tap to ask a question about your surroundings; tap again to stop listening">
         <span class="glyph" aria-hidden="true">&#127908;</span>Ask
       </button>
       <button id="read" aria-label="Read any text or sign in view">
@@ -157,7 +158,8 @@
     </button>
     <p id="start-help" class="sr-only">
       Starts the camera and speaks a description of your surroundings.
-      Once running, tap anywhere on the screen to scan the room.
+      Once running, tap anywhere on the screen to scan the room, or tap Ask
+      to speak a question.
     </p>
 
     <script type="module" src="/src/main.ts"></script>
