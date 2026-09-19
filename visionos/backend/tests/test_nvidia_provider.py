@@ -80,6 +80,33 @@ async def test_a_scan_and_a_read_stay_on_device():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "question",
+    [
+        "How many pills do I take?",
+        "What is the dose on this bottle?",
+        "How much of this medicine should I take",
+        "Where are my meds?",
+        "How many mg is this",
+    ],
+)
+async def test_a_medicine_question_never_goes_online_and_points_to_read(question):
+    fake = FakeNvidia()
+    scene = build_scene([make_detection(label="pill bottle", distance=0.6, azimuth=0.0)])
+    spoken = await collect(provider(fake, scene), question, "ask")
+    assert fake.requests == [], question
+    assert spoken.endswith("press Read: I only speak doses that several frames agree on."), spoken
+
+
+@pytest.mark.asyncio
+async def test_the_model_is_told_never_to_state_a_dose():
+    fake = FakeNvidia()
+    await collect(provider(fake), "What colour is the door?", "ask")
+    system = json.loads(fake.requests[0].content)["messages"][0]["content"]
+    assert "Never state a medication dose" in system
+
+
+@pytest.mark.asyncio
 async def test_an_online_failure_falls_back_to_the_scene_answer_with_a_warning():
     fake = FakeNvidia(status=500)
     spoken = await collect(provider(fake), "Where is the chair?", "ask")

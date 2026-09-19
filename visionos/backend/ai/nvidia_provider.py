@@ -20,6 +20,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import re
 from typing import AsyncIterator
 
 import httpx
@@ -35,6 +36,24 @@ MAX_IMAGE_B64 = 170_000
 OFFLINE_PREFIX = "The online helper didn't answer, so from what I can see: "
 CUT_OFF = " I lost the online helper mid-answer."
 TIMEOUT_S = 30.0
+
+# A question about medicine never goes to a general model. Doses come from
+# Read, where several frames have to agree before a number is spoken; a
+# model guessing "take two" from one picture is the failure this whole
+# project is built to avoid. Such a question gets the on-device answer
+# (which can still say where the pill bottle is) and a pointer to Read.
+MEDICAL_QUESTION = re.compile(
+    r"\b(dose|dosage|dosing|mg|milligrams?|tablets?|pills?|capsules?|prescription|"
+    r"medication|medicine|meds|how (?:many|much) .{0,24}\btake\b)",
+    re.IGNORECASE,
+)
+READ_FOR_LABELS = " For what a medicine label says, press Read: I only speak doses that several frames agree on."
+# Told to the model with every question, in case the question is medical in
+# a way the pattern misses.
+NO_DOSES = (
+    "Never state a medication dose, strength, or how many to take, even if "
+    "asked; say to press Read instead."
+)
 
 
 def shrink_jpeg(frame_jpeg: bytes, limit_b64: int = MAX_IMAGE_B64) -> bytes:
@@ -120,7 +139,7 @@ class NvidiaVisionProvider(VisionProvider):
         return {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": SYSTEM_PROMPT + "\n10. " + NO_DOSES},
                 {
                     "role": "user",
                     "content": f'{text} <img src="data:image/jpeg;base64,{image_b64}" />',
@@ -138,9 +157,11 @@ class NvidiaVisionProvider(VisionProvider):
         scene_context: str | None = None,
         intent: str | None = None,
     ) -> AsyncIterator[str]:
-        if intent != "ask":
+        if intent != "ask" or MEDICAL_QUESTION.search(prompt):
             async for chunk in self._local.describe(frame_jpeg, prompt, scene_context, intent):
                 yield chunk
+            if intent == "ask":
+                yield READ_FOR_LABELS
             return
 
         spoke = False
