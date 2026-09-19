@@ -324,6 +324,18 @@ async function begin(): Promise<void> {
   }
 }
 
+/** The next camera, spoken by name, and remembered for next time. */
+async function switchCamera(): Promise<void> {
+  if (!started) return;
+  try {
+    const label = await camera.next();
+    setStatus(`Camera: ${label}`);
+    tts.say(`Using ${label}.`, SpeechPriority.Answer);
+  } catch (err) {
+    reportFailure((err as Error).message);
+  }
+}
+
 async function readText(): Promise<void> {
   if (!connection.isOpen) {
     reportFailure("Not connected yet.");
@@ -417,6 +429,7 @@ const actions = {
   // Recognition ends itself after one utterance; a second tap ends it early.
   ask: () => (voice.isListening ? voice.stop() : voice.start()),
   voice: () => cycleVoice(),
+  switch: () => void switchCamera(),
   stop: () => {
     tts.stopAll();
     spatial.stopBeacon();
@@ -444,6 +457,7 @@ const KEYS: Record<string, Action> = {
   "2": "read", r: "read",
   "3": "ask", a: "ask",
   "4": "voice", v: "voice",
+  "5": "switch", c: "switch",
   "0": "stop", x: "stop", Escape: "stop",
 };
 window.addEventListener("keydown", (event) => {

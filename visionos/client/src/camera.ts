@@ -9,11 +9,11 @@
  *
  * Which camera matters as much as how it is read. On a phone the rear camera
  * is the one pointed at the world. On a laptop wearing a webcam on a pair of
- * glasses, the camera above the screen is the wrong one and `facingMode`
- * says nothing useful, so an external camera is preferred whenever there is
- * one, and `?camera=<part of its name>` pins a camera by name. The caller
- * speaks the choice: a wrong camera is invisible to someone who cannot see
- * the preview.
+ * glasses, the camera above the screen is the wrong one, and Windows even
+ * reports it as facing the "user", so an external camera is preferred
+ * whenever there is one, `next()` cycles through the rest, and the last
+ * choice is remembered. The caller speaks every choice: a wrong camera is
+ * invisible to someone who cannot see the preview.
  */
 
 const FAST_WIDTH = 640;
@@ -22,18 +22,18 @@ const HIRES_WIDTH = 1920;
 const HIRES_QUALITY = 0.85;
 
 // Cameras that live in the machine rather than on the user.
-const BUILT_IN = /integrated|built-?in|facetime|internal/i;
-// A phone names its cameras by where they point; a computer never does.
-const PHONE_CAMERA = /\b(back|rear|front)\b/i;
+const BUILT_IN = /integrated|built-?in|facetime|internal|easycamera|true ?vision|wide ?vision|user.facing|front/i;
+// Cameras that plug in, by the names they tend to carry.
+const EXTERNAL = /usb|logitech|brio|uvc|razer|elgato|obsbot|insta360|external|kiyo|c9\d\d/i;
 // USB vendor:product ids that browsers append to a webcam's name.
 const VENDOR_ID = /\s*\([0-9a-f]{4}:[0-9a-f]{4}\)/i;
+const REMEMBERED = "visionos.camera";
 
 export class Camera {
   private video: HTMLVideoElement;
   private canvas = document.createElement("canvas");
   private stream: MediaStream | null = null;
-  /** How many cameras the browser offered, once started. */
-  count = 0;
+  private cameras: MediaDeviceInfo[] = [];
 
   constructor(video: HTMLVideoElement) {
     this.video = video;
@@ -52,29 +52,37 @@ export class Camera {
 
     // Permission first: camera names are blank until it has been granted.
     this.stream = await this.open({ facingMode: { ideal: "environment" } });
+    await this.refreshList();
 
-    const chosen = await this.choose(preferred);
+    const chosen = this.choose(preferred);
     if (chosen && chosen.deviceId !== this.currentDeviceId()) {
-      const fallback = this.stream;
-      try {
-        this.stream = await this.open({ deviceId: { exact: chosen.deviceId } });
-        fallback.getTracks().forEach((track) => track.stop());
-      } catch {
-        // A working camera beats the preferred one that would not open.
-        this.stream = fallback;
-      }
+      await this.switchTo(chosen);
     }
+    await this.show();
+  }
 
-    this.video.srcObject = this.stream;
-    this.video.setAttribute("playsinline", "true");
-    this.video.muted = true;
-    await this.video.play();
+  /** Switch to the next camera and return its name. Throws if it fails. */
+  async next(): Promise<string> {
+    await this.refreshList();
+    if (this.cameras.length < 2) {
+      throw new Error("This is the only camera.");
+    }
+    const current = this.cameras.findIndex((camera) => camera.deviceId === this.currentDeviceId());
+    const following = this.cameras[(current + 1) % this.cameras.length];
+    await this.switchTo(following);
+    await this.show();
+    return this.label;
+  }
+
+  /** How many cameras the browser offered, once started. */
+  get count(): number {
+    return this.cameras.length;
   }
 
   /** The camera in use, named for speech; empty before start. */
   get label(): string {
     const raw = this.stream?.getVideoTracks()[0]?.label ?? "";
-    return raw.replace(VENDOR_ID, "").trim();
+    return raw.replace(VENDOR_ID, "").trim() || "camera";
   }
 
   private async open(video: MediaTrackConstraints): Promise<MediaStream> {
@@ -95,20 +103,41 @@ export class Camera {
     }
   }
 
+  private async switchTo(camera: MediaDeviceInfo): Promise<void> {
+    const fallback = this.stream;
+    this.stream = await this.open({ deviceId: { exact: camera.deviceId } });
+    fallback?.getTracks().forEach((track) => track.stop());
+    try {
+      localStorage.setItem(REMEMBERED, camera.deviceId);
+    } catch {
+      // Private browsing or blocked storage: the choice just is not kept.
+    }
+  }
+
+  private async show(): Promise<void> {
+    this.video.srcObject = this.stream;
+    this.video.setAttribute("playsinline", "true");
+    this.video.muted = true;
+    await this.video.play();
+  }
+
+  private async refreshList(): Promise<void> {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      this.cameras = devices.filter((device) => device.kind === "videoinput");
+    } catch {
+      this.cameras = [];
+    }
+  }
+
   private currentDeviceId(): string | undefined {
     return this.stream?.getVideoTracks()[0]?.getSettings().deviceId;
   }
 
   /** The camera to switch to, or null to keep the browser's choice. */
-  private async choose(preferred: string | null): Promise<MediaDeviceInfo | null> {
-    let cameras: MediaDeviceInfo[] = [];
-    try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      cameras = devices.filter((device) => device.kind === "videoinput");
-    } catch {
-      return null;
-    }
-    this.count = cameras.length;
+  private choose(preferred: string | null): MediaDeviceInfo | null {
+    const cameras = this.cameras;
+    if (cameras.length < 2) return null;
 
     if (preferred) {
       const wanted = preferred.toLowerCase();
@@ -116,15 +145,26 @@ export class Camera {
       if (match) return match;
     }
 
-    // A phone's rear camera already faces the world. Only a computer needs
-    // steering away from the camera above its own screen, and only when
-    // there is somewhere else to steer to.
-    const settings = this.stream?.getVideoTracks()[0]?.getSettings();
-    if (settings?.facingMode || cameras.some((camera) => PHONE_CAMERA.test(camera.label))) {
-      return null;
+    let remembered: string | null = null;
+    try {
+      remembered = localStorage.getItem(REMEMBERED);
+    } catch {
+      remembered = null;
     }
-    if (cameras.length < 2) return null;
-    return cameras.find((camera) => camera.label && !BUILT_IN.test(camera.label)) ?? null;
+    const kept = cameras.find((camera) => camera.deviceId === remembered);
+    if (kept) return kept;
+
+    // A phone's rear camera already faces the world; leave it alone. A
+    // computer's own camera faces the user, or reports nothing, and either
+    // way the one worn on the glasses is somewhere else in the list.
+    const facing = this.stream?.getVideoTracks()[0]?.getSettings().facingMode;
+    if (facing === "environment") return null;
+
+    return (
+      cameras.find((camera) => EXTERNAL.test(camera.label)) ??
+      cameras.find((camera) => camera.label && !BUILT_IN.test(camera.label)) ??
+      null
+    );
   }
 
   get isRunning(): boolean {
