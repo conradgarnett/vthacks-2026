@@ -38,7 +38,6 @@ def make_detection(
         azimuth_deg=azimuth,
         elevation_deg=0.0,
         distance_m=distance,
-        distance_is_estimated=distance is not None,
     )
 
 

@@ -6,9 +6,21 @@
  */
 
 export type ServerEvent =
-  | { type: "ready"; provider: string; provider_active: string; demo_mode: boolean }
+  | {
+      type: "ready";
+      provider: string;
+      provider_active: string;
+      ocr?: string;
+      demo_mode: boolean;
+    }
   | { type: "speech"; text: string }
-  | { type: "trace"; trace_id: number; label: string; stages: Record<string, number>; total_ms: number }
+  | {
+      type: "trace";
+      trace_id: number;
+      label: string;
+      stages: Record<string, number>;
+      total_ms: number;
+    }
   | { type: "hazard"; text: string; severity: number; azimuth_deg: number; distance_m: number }
   | { type: "beacon"; label: string; azimuth_deg: number; distance_m: number; visible: boolean }
   | { type: "beacon_stop" };
@@ -19,6 +31,12 @@ type Handlers = {
 };
 
 const MAX_BACKOFF_MS = 8000;
+
+// A read burst is one tagged message so the server reads it directly instead
+// of feeding it to perception. Live frames are bare JPEGs, which start with
+// 0xFFD8, so the tag can never be mistaken for one. Mirrors
+// pack_read_frames() in backend/main.py.
+const READ_TAG = new TextEncoder().encode("READ");
 
 export class Connection {
   private socket: WebSocket | null = null;
@@ -64,10 +82,37 @@ export class Connection {
     return this.socket?.readyState === WebSocket.OPEN;
   }
 
+  /** Live frame for perception. */
   sendFrame(blob: Blob): void {
     if (!this.isOpen) return;
     blob.arrayBuffer().then((buf) => {
       if (this.isOpen) this.socket!.send(buf);
+    });
+  }
+
+  /**
+   * A burst of detailed frames to read text from, as one message:
+   * READ, then each frame as a big-endian u32 length plus its JPEG bytes.
+   * Answered with speech.
+   */
+  sendReadFrames(blobs: Blob[]): void {
+    if (!this.isOpen || blobs.length === 0) return;
+    Promise.all(blobs.map((blob) => blob.arrayBuffer())).then((buffers) => {
+      if (!this.isOpen) return;
+      const total =
+        READ_TAG.length + buffers.reduce((sum, buf) => sum + 4 + buf.byteLength, 0);
+      const message = new Uint8Array(total);
+      const view = new DataView(message.buffer);
+
+      message.set(READ_TAG, 0);
+      let offset = READ_TAG.length;
+      for (const buf of buffers) {
+        view.setUint32(offset, buf.byteLength); // big-endian by default
+        offset += 4;
+        message.set(new Uint8Array(buf), offset);
+        offset += buf.byteLength;
+      }
+      this.socket!.send(message);
     });
   }
 

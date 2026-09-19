@@ -76,20 +76,25 @@ def check_weights() -> bool:
     settings = get_settings()
     ok = True
 
-    if Path(settings.detector_weights).exists():
-        _line(OK, "Detector weights", settings.detector_weights)
+    weights = (
+        settings.open_vocab_weights
+        if settings.detector_mode == "open"
+        else settings.detector_weights
+    )
+    if Path(weights).exists():
+        _line(OK, "Detector weights", weights)
     else:
         try:
             from ultralytics.utils import SETTINGS as ULTRA  # noqa: N811
 
-            cached = Path(ULTRA.get("weights_dir", "")) / settings.detector_weights
+            cached = Path(ULTRA.get("weights_dir", "")) / weights
             if cached.exists():
                 _line(OK, "Detector weights", str(cached))
             else:
-                _line(WARN, "Detector weights", "not cached -- run: make precache")
+                _line(WARN, "Detector weights", f"{weights} not cached -- run: make precache")
                 ok = False
         except Exception:
-            _line(WARN, "Detector weights", "not cached -- run: make precache")
+            _line(WARN, "Detector weights", f"{weights} not cached -- run: make precache")
             ok = False
 
     hf_cache = Path.home() / ".cache" / "huggingface" / "hub"
@@ -100,6 +105,23 @@ def check_weights() -> bool:
         ok = False
 
     return ok
+
+
+def check_ocr() -> bool:
+    """Without a local engine every read costs a network round trip."""
+    from backend.ai.ocr import build_reader
+
+    reader = build_reader(get_settings().ocr_engine)
+    if reader.available:
+        _line(OK, "OCR engine", reader.name)
+        return True
+    _line(
+        WARN,
+        "OCR engine",
+        "none loaded -- pip install rapidocr-onnxruntime "
+        "(or pyobjc-framework-Vision on macOS)",
+    )
+    return False
 
 
 def check_port() -> bool:
@@ -114,7 +136,13 @@ def check_port() -> bool:
 
 def main() -> int:
     print("VisionOS pre-flight\n")
-    results = [check_python(), check_credentials(), check_weights(), check_port()]
+    results = [
+        check_python(),
+        check_credentials(),
+        check_weights(),
+        check_ocr(),
+        check_port(),
+    ]
     print()
     if all(results):
         print("All clear.")

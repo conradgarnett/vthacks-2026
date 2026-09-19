@@ -7,6 +7,11 @@ python-multipart>=0.0.12
 
 anthropic>=0.40
 
+# On-device text reading. RapidOCR runs everywhere on CPU; Apple Vision is
+# preferred on macOS when pyobjc is present.
+rapidocr-onnxruntime>=1.3
+pyobjc-framework-Vision>=10.0; sys_platform == "darwin"
+
 # Local perception. Pinned to the CPU/MPS-friendly stack; see docs/ARCHITECTURE.md
 # for why these run on a thread pool rather than the event loop.
 ultralytics>=8.3

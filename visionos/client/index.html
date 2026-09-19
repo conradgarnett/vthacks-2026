@@ -13,12 +13,12 @@
         --accent: #ffd400;
         --danger: #ff4b3e;
         --fg: #fff;
-        --scrim: rgba(0, 0, 0, 0.62);
+        --scrim: rgba(0, 0, 0, 0.66);
+        --bar-height: 84px;
+        --inset-bottom: max(12px, env(safe-area-inset-bottom));
       }
       * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-      /* Must outrank the id selectors below. `#controls { display: flex }` has
-         specificity 1,0,0 and silently beat the UA's `[hidden]` rule at 0,1,0,
-         so hidden elements rendered anyway. */
+      /* Must outrank the id selectors below, or hidden elements render anyway. */
       [hidden] { display: none !important; }
       html, body {
         margin: 0; height: 100%; overflow: hidden;
@@ -35,8 +35,7 @@
         background: #000;
       }
 
-      /* The primary action for a user who cannot see the buttons: tap
-         anywhere. Corner targets are hard to find by touch. */
+      /* The primary action needs no aiming: tap anywhere to scan. */
       #tap-layer {
         position: fixed; inset: 0;
         border: 0; padding: 0; background: transparent;
@@ -56,29 +55,31 @@
       }
       #start small { font-size: 16px; font-weight: 500; color: #aaa; max-width: 20rem; }
 
-      /* Compact controls, thumb-reachable in the bottom corner. */
+      /* Three large targets along the bottom edge, found by thumb. */
       #controls {
-        position: fixed;
-        right: max(12px, env(safe-area-inset-right));
-        bottom: max(14px, env(safe-area-inset-bottom));
-        display: flex; flex-direction: column; gap: 9px;
+        position: fixed; left: 0; right: 0; bottom: 0;
+        display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;
+        padding: 10px max(12px, env(safe-area-inset-right)) var(--inset-bottom)
+                 max(12px, env(safe-area-inset-left));
         z-index: 30;
       }
       #controls button {
-        width: 62px; height: 62px;
-        border-radius: 50%;
+        height: var(--bar-height);
+        border-radius: 18px;
         border: 2px solid rgba(255, 255, 255, 0.55);
         background: var(--scrim);
         color: var(--fg);
         backdrop-filter: blur(8px);
-        font: 600 10px/1.15 system-ui, sans-serif;
+        font: 700 15px/1.2 system-ui, sans-serif;
         display: flex; flex-direction: column;
-        align-items: center; justify-content: center; gap: 2px;
+        align-items: center; justify-content: center; gap: 4px;
         cursor: pointer;
       }
-      #controls button .glyph { font-size: 21px; line-height: 1; }
+      #controls button .glyph { font-size: 26px; line-height: 1; }
       #controls button:active { background: var(--accent); color: #000; border-color: var(--accent); }
       #controls button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+      /* Held, not tapped: the browser must not start a scroll or a long-press. */
+      #ask { touch-action: none; user-select: none; -webkit-user-select: none; }
       #ask[data-listening="true"] { background: var(--danger); border-color: var(--danger); }
       #stop { border-color: rgba(255, 75, 62, 0.75); }
 
@@ -86,30 +87,32 @@
         position: fixed;
         top: max(10px, env(safe-area-inset-top));
         left: max(10px, env(safe-area-inset-left));
-        margin: 0; padding: 6px 11px;
+        margin: 0; padding: 6px 12px;
         background: var(--scrim); backdrop-filter: blur(8px);
         border-radius: 999px;
-        font-size: 12.5px; color: var(--accent);
-        max-width: 68vw;
+        font-size: 13px; color: var(--accent);
+        max-width: 80vw;
         z-index: 30;
       }
+      #status:empty { display: none; }
 
+      /* The last thing said, large, with two earlier lines faded beneath it. */
       #transcript {
         position: fixed;
-        left: max(10px, env(safe-area-inset-left));
-        bottom: max(14px, env(safe-area-inset-bottom));
-        width: min(60vw, 30rem);
-        max-height: 34vh; overflow-y: auto;
-        padding: 10px 12px;
+        left: max(12px, env(safe-area-inset-left));
+        right: max(12px, env(safe-area-inset-right));
+        bottom: calc(var(--bar-height) + var(--inset-bottom) + 22px);
+        margin: 0; padding: 12px 14px;
         background: var(--scrim); backdrop-filter: blur(8px);
-        border-radius: 12px;
-        font-size: 14px; line-height: 1.4;
+        border-radius: 14px;
+        font-size: 15px; line-height: 1.35;
         z-index: 20;
       }
       #transcript:empty { display: none; }
-      #transcript p { margin: 0 0 7px; }
+      #transcript p { margin: 0 0 6px; opacity: 0.6; }
+      #transcript p:first-child { font-size: 20px; font-weight: 600; opacity: 1; }
       #transcript p:last-child { margin-bottom: 0; }
-      #transcript p.hazard { color: var(--danger); font-weight: 700; }
+      #transcript p.hazard { color: var(--danger); font-weight: 700; opacity: 1; }
 
       .sr-only {
         position: absolute; width: 1px; height: 1px;
@@ -123,7 +126,6 @@
 
     <video id="camera" playsinline muted aria-hidden="true"></video>
 
-    <!-- Full-screen tap target, so the primary action needs no aiming. -->
     <button id="tap-layer" hidden aria-label="Scan the room and describe it">
       Scan the room
     </button>
@@ -132,17 +134,11 @@
     <div id="transcript" role="log" aria-live="polite" aria-label="Spoken history"></div>
 
     <div id="controls" hidden>
-      <button id="ask" aria-label="Hold to ask a question about your surroundings">
-        <span class="glyph" aria-hidden="true">&#127908;</span>Ask
-      </button>
       <button id="read" aria-label="Read any text or sign in view">
         <span class="glyph" aria-hidden="true">&#128196;</span>Read
       </button>
-      <button id="scan" aria-label="Scan the room and describe it">
-        <span class="glyph" aria-hidden="true">&#128301;</span>Scan
-      </button>
-      <button id="voice" aria-label="Change the speaking voice">
-        <span class="glyph" aria-hidden="true">&#127911;</span>Voice
+      <button id="ask" aria-label="Hold to ask a question or give a command">
+        <span class="glyph" aria-hidden="true">&#127908;</span>Hold to ask
       </button>
       <button id="stop" aria-label="Stop speaking">
         <span class="glyph" aria-hidden="true">&#9632;</span>Stop
@@ -155,7 +151,8 @@
     </button>
     <p id="start-help" class="sr-only">
       Starts the camera and speaks a description of your surroundings.
-      Once running, tap anywhere on the screen to scan the room.
+      Once running, tap anywhere to scan, press Read to read a sign, or hold
+      Ask to speak a question.
     </p>
 
     <script type="module" src="/src/main.ts"></script>

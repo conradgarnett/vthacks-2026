@@ -15,6 +15,9 @@ help:
 	@echo "  make dev       Run backend + client (HTTPS, LAN-accessible)"
 	@echo "  make test      Run the test suite"
 	@echo "  make demo      Deterministic replay mode -- no network, no keys"
+	@echo ""
+	@echo "Text is read on-device (RapidOCR, or Apple Vision on macOS) and"
+	@echo "only falls back to Claude when the local engine finds nothing."
 
 # uv pins 3.12 deliberately: torch/ultralytics wheels are still unreliable on
 # 3.13, and a wheel build failure mid-hackathon is not a recoverable event.
@@ -29,8 +32,9 @@ setup:
 
 precache:
 	@echo "Downloading model weights so a dead network can't kill perception..."
-	$(PY) -c "from ultralytics import YOLO; YOLO('yolo11n.pt')"
-	$(PY) -c "from transformers import pipeline; pipeline('depth-estimation', model='depth-anything/Depth-Anything-V2-Small-hf')"
+	$(PY) -c "from backend.config import get_settings; from backend.perception.vocabulary import CLASS_NAMES; from ultralytics import YOLO, YOLOWorld; s = get_settings(); YOLOWorld(s.open_vocab_weights).set_classes(CLASS_NAMES); YOLO(s.detector_weights)"
+	$(PY) -c "from backend.config import get_settings; from transformers import pipeline; pipeline('depth-estimation', model=get_settings().depth_model)"
+	$(PY) -c "from backend.config import get_settings; from backend.ai.ocr import build_reader; build_reader(get_settings().ocr_engine).warmup()"
 	@echo "Weights cached."
 
 doctor:
@@ -49,7 +53,7 @@ test:
 	$(PY) -m pytest backend/tests -v
 
 lint:
-	$(PY) -m compileall -q backend ../shared
+	$(PY) -m compileall -q backend
 
 demo:
 	VISION_PROVIDER=replay DEMO_MODE=true $(MAKE) dev

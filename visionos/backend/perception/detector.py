@@ -27,7 +27,6 @@ from backend.config import Settings
 from backend.perception.runtime import run_inference
 from backend.perception.geometry import (
     BoundingBox,
-    clock_position,
     pixel_to_azimuth,
     pixel_to_elevation,
     vertical_fov_deg,
@@ -35,7 +34,6 @@ from backend.perception.geometry import (
 from backend.perception.vocabulary import (
     CLASS_HEIGHTS_M,
     CLASS_NAMES,
-    LANDMARK_CLASSES,
     OBSTACLE_CLASSES,
     confidence_floor,
     height_for,
@@ -63,20 +61,13 @@ class Detection:
     box: BoundingBox
     azimuth_deg: float
     elevation_deg: float
+    # None when the vocabulary has no height prior for this class: direction
+    # is still reported, distance is not.
     distance_m: float | None
-    distance_is_estimated: bool
-
-    @property
-    def clock(self) -> str:
-        return clock_position(self.azimuth_deg)
 
     @property
     def is_obstacle(self) -> bool:
         return is_obstacle(self.label)
-
-    @property
-    def is_landmark(self) -> bool:
-        return self.label in LANDMARK_CLASSES
 
 
 def distance_from_height(
@@ -184,7 +175,6 @@ class Detector:
                         ),
                         elevation_deg=pixel_to_elevation(center_y, height, vfov),
                         distance_m=distance,
-                        distance_is_estimated=distance is not None,
                     )
                 )
         return detections

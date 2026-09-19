@@ -4,9 +4,10 @@ This is the degraded mode that matters. It speaks only what the local detector
 actually sees, so it is never wrong in the way canned text is wrong -- replay
 will happily describe a living room while the camera points at a parking lot.
 
-It cannot do open-vocabulary queries or read text; COCO has 80 classes and no
-door among them. When asked for something it cannot know, it says so rather
-than guessing, which is rule 4 of the system prompt enforced in code.
+It cannot answer open-vocabulary questions or questions about text; reading
+itself is handled by on-device OCR before this provider is ever asked. When
+asked for something it cannot know, it says so rather than guessing, which
+is rule 4 of the system prompt enforced in code.
 """
 
 from __future__ import annotations
@@ -42,8 +43,8 @@ _KNOWN_LABELS: tuple[str, ...] = tuple(
 log = logging.getLogger(__name__)
 
 _READ_UNAVAILABLE = (
-    "I can't read text without a connection. I can still tell you about "
-    "objects I recognize."
+    "I can't read text from a question without a connection. Press Read, "
+    "or say read the sign, and I'll read what's in view."
 )
 _PATH_WORDS = ("path", "clear", "ahead", "walk", "go", "safe", "obstacle")
 _CHANGE_WORDS = ("change", "changed", "new", "happened")

@@ -18,7 +18,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from backend.config import Settings
-from backend.perception.geometry import BoundingBox, pixel_to_azimuth
+from backend.perception.geometry import pixel_to_azimuth
 from backend.perception.runtime import run_inference
 
 log = logging.getLogger(__name__)
@@ -81,22 +81,6 @@ class DepthEstimator:
         # Same single-thread pool as the detector: two threads encoding to one
         # Metal command buffer is a hard crash. See perception/runtime.py.
         return await run_inference(self.estimate_sync, image)
-
-
-def relative_depth_in_box(depth: np.ndarray, box: BoundingBox) -> float:
-    """Median inverse depth inside a box.
-
-    Median, not mean: a bounding box always contains some background, and the
-    mean drags toward it.
-    """
-    height, width = depth.shape[:2]
-    x1 = max(0, min(int(box.x1), width - 1))
-    x2 = max(x1 + 1, min(int(box.x2), width))
-    y1 = max(0, min(int(box.y1), height - 1))
-    y2 = max(y1 + 1, min(int(box.y2), height))
-
-    patch = depth[y1:y2, x1:x2]
-    return float(np.median(patch)) if patch.size else 0.0
 
 
 def find_dropoffs(

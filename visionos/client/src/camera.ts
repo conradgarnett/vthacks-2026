@@ -1,18 +1,17 @@
 /**
  * Rear camera capture with downscaling.
  *
- * Frames are compressed hard (640px wide, JPEG q0.6) for the fast path: the
- * detector doesn't need more, and bytes on a congested hotspot are latency.
- * Hi-res capture is a separate call, used only for reading text.
+ * The stream is requested at 1080p so a read has real pixels to work with:
+ * OCR needs the strokes, and text photographed from across a room occupies
+ * very few of them. The fast path downscales every frame to 640 px, JPEG
+ * q0.6, because the detector needs no more and bytes on a congested hotspot
+ * are latency. Full resolution is captured only on request, for reading.
  */
 
 const FAST_WIDTH = 640;
 const FAST_QUALITY = 0.6;
-// Reading is resolution-bound: OCR needs the strokes, and text photographed
-// from across a room occupies very few pixels. Worth the extra bytes on a
-// once-per-request capture, unlike the per-frame fast path.
-const HIRES_WIDTH = 1600;
-const HIRES_QUALITY = 0.9;
+const HIRES_WIDTH = 1920;
+const HIRES_QUALITY = 0.85;
 
 export class Camera {
   private video: HTMLVideoElement;
@@ -35,17 +34,15 @@ export class Camera {
       this.stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: "environment" },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
         },
         audio: false,
       });
     } catch (err) {
       const name = (err as DOMException)?.name;
       if (name === "NotAllowedError") {
-        throw new Error(
-          "Camera permission was denied. Allow camera access and reload."
-        );
+        throw new Error("Camera permission was denied. Allow camera access and reload.");
       }
       if (name === "NotFoundError") {
         throw new Error("No camera found on this device.");
@@ -67,7 +64,7 @@ export class Camera {
     return this.capture(FAST_WIDTH, FAST_QUALITY);
   }
 
-  /** Higher resolution, for OCR only -- costs bytes and time. */
+  /** Full resolution, for reading text. Costs bytes and time; use on request. */
   captureDetailed(): Promise<Blob | null> {
     return this.capture(HIRES_WIDTH, HIRES_QUALITY);
   }

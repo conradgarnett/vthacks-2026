@@ -38,6 +38,10 @@ DEGRADED_MESSAGE = (
 class VisionProvider(ABC):
     """Turns a camera frame plus a question into streamed speech text."""
 
+    # Whether a "read" should escalate here when local OCR finds nothing.
+    # The local scene provider cannot read at all, so it stays False there.
+    reads_text: bool = False
+
     @abstractmethod
     def describe(
         self,
@@ -59,6 +63,8 @@ class VisionProvider(ABC):
 
 
 class ClaudeVisionProvider(VisionProvider):
+    reads_text = True
+
     def __init__(self, settings: Settings) -> None:
         from anthropic import AsyncAnthropic
 
@@ -114,6 +120,8 @@ class ClaudeVisionProvider(VisionProvider):
 
 class ReplayVisionProvider(VisionProvider):
     """Deterministic canned responses, streamed word by word."""
+
+    reads_text = True  # the fixture carries a canned "read" line
 
     # Chosen to feel like a real stream without inventing latency we don't have.
     WORD_DELAY_S = 0.012

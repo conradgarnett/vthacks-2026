@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     vision_provider: Literal["claude", "local", "replay"] = "claude"
     replay_fixture: str = "assets/replay/livingroom.json"
 
+    # --- Text reading -----------------------------------------------------
+    # "auto" takes the first engine that loads: Apple Vision on macOS (needs
+    # pyobjc), then RapidOCR anywhere. "none" sends every read to the vision
+    # provider, which costs a network round trip.
+    ocr_engine: Literal["auto", "apple-vision", "rapidocr", "none"] = "auto"
+
     # --- Local perception -------------------------------------------------
     # "open" detects the curated vocabulary in vocabulary.py, including doors,
     # stairs and handrails that COCO lacks entirely. Measured cheaper than the

@@ -45,11 +45,6 @@ def nearest_objects(scene: SceneModel, count: int = 3) -> list[SceneObject]:
     return [o for o in scene.all_objects() if o.distance_m is not None][:count]
 
 
-def describe_region(scene: SceneModel, region: str) -> list[SceneObject]:
-    wanted = region.strip().lower()
-    return [o for o in scene.all_objects() if o.region == wanted]
-
-
 def check_path_clearance(
     scene: SceneModel, width_m: float = 1.0, distance_m: float = 3.0
 ) -> dict[str, Any]:

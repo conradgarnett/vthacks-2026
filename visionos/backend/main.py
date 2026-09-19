@@ -1,27 +1,33 @@
 """FastAPI app: frames up over WebSocket, speech events down.
 
-Phase 1 walking skeleton -- camera -> provider -> streamed speech, with a
-latency trace on every hop. Perception, scene model, and hazards land in later
-phases behind the same socket.
+Wire protocol, one phone per socket:
+
+  binary  JPEG                         live frame for perception (small, frequent)
+  binary  b"READ" + (u32 len + JPEG)*  a burst of detailed frames to read text from
+  text    {"type": "scan"}             describe the room from the latest live frame
+  text    {"type": "read"}             read text from the latest live frame
+  text    {"type": "ask", "text": "..."}
+  text    {"type": "locate", "text": "..."}   start an audio beacon
+  text    {"type": "stop_beacon"}
+
+Read frames arrive in one tagged message so they never touch the perception
+pipeline: a full-resolution frame run through the tracker breaks every box
+association made on the small live frames and fills the scene model with
+duplicates. A burst rather than one frame because hand-held capture blurs and
+glares differently each time, and OCR keeps only what the frames agree on.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from collections import deque
 from contextlib import asynccontextmanager
-from pathlib import Path
-
-# Three is the useful minimum for majority agreement; more costs latency the
-# read budget cannot spare.
-OCR_CONSENSUS_FRAMES = 3
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.ai.ocr import AppleVisionOCR, format_for_speech
+from backend.ai.ocr import NO_TEXT_FOUND, TextReader, build_reader, format_for_speech
 from backend.ai.prompts import PROMPT_VERSION, READ_PROMPT, SCAN_PROMPT, scene_context
 from backend.ai.vision import VisionProvider, build_provider
 from backend.config import get_settings
@@ -33,7 +39,34 @@ from backend.telemetry import LatencyTrace, metrics_snapshot
 
 log = logging.getLogger(__name__)
 
-CLIENT_DIR = Path(__file__).resolve().parents[1] / "client"
+READ_TAG = b"READ"
+# Three is the useful minimum for majority agreement; more costs latency the
+# read budget cannot spare.
+OCR_CONSENSUS_FRAMES = 3
+NO_CAMERA = "I'm not receiving the camera yet."
+
+
+def pack_read_frames(frames: list[bytes]) -> bytes:
+    """READ tag, then each frame as a big-endian u32 length plus JPEG bytes.
+
+    Mirrors sendReadFrames() in client/src/ws.ts.
+    """
+    return READ_TAG + b"".join(len(frame).to_bytes(4, "big") + frame for frame in frames)
+
+
+def unpack_read_frames(payload: bytes) -> list[bytes]:
+    """Inverse of pack_read_frames. A truncated tail is dropped, not guessed at."""
+    frames: list[bytes] = []
+    offset = len(READ_TAG)
+    while offset + 4 <= len(payload):
+        length = int.from_bytes(payload[offset : offset + 4], "big")
+        offset += 4
+        frame = payload[offset : offset + length]
+        if len(frame) != length:
+            break
+        frames.append(frame)
+        offset += length
+    return frames[-OCR_CONSENSUS_FRAMES:]
 
 
 @asynccontextmanager
@@ -45,8 +78,7 @@ async def lifespan(app: FastAPI):
     )
     app.state.settings = settings
 
-    # Perception first: the provider may need to read the scene model, because
-    # the no-credentials fallback answers from it.
+    # Perception first: the no-credentials provider answers from its scene model.
     app.state.perception = PerceptionPipeline(settings)
     app.state.perception.warmup()
 
@@ -55,8 +87,7 @@ async def lifespan(app: FastAPI):
     )
     app.state.effective_provider = type(app.state.provider).__name__
 
-    # 13 ms steady state, but 315 ms on the first call. Pay it here.
-    app.state.ocr = AppleVisionOCR()
+    app.state.ocr = build_reader(settings.ocr_engine)
     app.state.ocr.warmup()
 
     log.info("VisionOS ready on %s:%s", settings.host, settings.port)
@@ -67,7 +98,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="VisionOS", lifespan=lifespan)
 
 # The client is served from a different origin during development (Vite on
-# :5173, backend on :8000). Locked to local dev use only.
+# :5173, backend on :8000). Local development only.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -86,6 +117,7 @@ async def health() -> JSONResponse:
             # What is actually serving, which differs when credentials are
             # missing and the configured provider fell back.
             "provider_active": app.state.effective_provider,
+            "ocr": app.state.ocr.name,
             "model": settings.visionos_model,
             "prompt_version": PROMPT_VERSION,
             "demo_mode": settings.demo_mode,
@@ -100,7 +132,7 @@ async def metrics() -> JSONResponse:
 
 @app.get("/scene")
 async def scene() -> JSONResponse:
-    """Live scene model. Powers the judge dashboard."""
+    """Live scene model, for debugging and the judge dashboard."""
     return JSONResponse(app.state.perception.snapshot())
 
 
@@ -112,17 +144,13 @@ class Session:
         socket: WebSocket,
         provider: VisionProvider,
         perception: PerceptionPipeline,
-        ocr: AppleVisionOCR,
+        ocr: TextReader,
     ) -> None:
         self.socket = socket
         self.provider = provider
         self.perception = perception
         self.ocr = ocr
         self.latest_frame: bytes | None = None
-        # Recent frames for OCR consensus. Hand-held capture blurs and glares
-        # differently frame to frame, and OCR noise moves with it while real
-        # text stays put -- so agreement across frames is what separates them.
-        self.recent_frames: deque[bytes] = deque(maxlen=OCR_CONSENSUS_FRAMES)
 
         settings = get_settings()
         self.hazards_enabled = settings.hazards_enabled
@@ -135,19 +163,122 @@ class Session:
         )
         self.beacon_label: str | None = None
 
+    # --- Live frames ------------------------------------------------------
+
     async def handle_frame(self, frame: bytes) -> None:
         self.latest_frame = frame
-        self.recent_frames.append(frame)
         await self.perception.process(frame)
 
-        # Deterministic, microseconds, and ahead of everything else. Nothing
-        # on this path can be delayed by an API call.
+        # Deterministic and ahead of everything else: nothing on this path
+        # can be delayed by an API call.
         if self.hazards_enabled:
             for alert in self.hazards.evaluate(
                 self.perception.scene, self.perception.dropoffs
             ):
                 await self.socket.send_json(alert.to_dict())
 
+        await self._update_beacon()
+
+    # --- Reading text -----------------------------------------------------
+
+    async def handle_read(self, frames: list[bytes]) -> None:
+        """Local OCR over the burst first; the vision provider only if that
+        finds nothing."""
+        frames = [frame for frame in frames if frame]
+        if not frames:
+            await self._say(NO_CAMERA)
+            return
+
+        trace = LatencyTrace(label="read")
+        with trace.stage("ocr"):
+            lines = await self.ocr.read_consensus(frames)
+
+        if lines:
+            await self._say(format_for_speech(lines))
+            await self._finish(trace)
+            log.info(
+                "read: %d line(s) via %s from %d frame(s)", len(lines), self.ocr.name, len(frames)
+            )
+            return
+
+        if self.provider.reads_text:
+            # Claude handles the layouts and handwriting OCR misses.
+            await self._stream_answer(frames[-1], READ_PROMPT, None, "read", trace)
+            return
+
+        await self._say(NO_TEXT_FOUND)
+        await self._finish(trace)
+
+    # --- Questions and scans ----------------------------------------------
+
+    async def handle_intent(self, kind: str, text: str | None) -> None:
+        if kind == "read":
+            await self.handle_read([self.latest_frame] if self.latest_frame else [])
+            return
+
+        if self.latest_frame is None:
+            await self._say(NO_CAMERA)
+            return
+
+        prompt = SCAN_PROMPT if kind == "scan" else (text or SCAN_PROMPT)
+        # Ground the answer in tracked geometry rather than pixels alone.
+        context = scene_context(self.perception.snapshot())
+        await self._stream_answer(
+            self.latest_frame, prompt, context, kind, LatencyTrace(label=kind)
+        )
+
+    async def _stream_answer(
+        self,
+        frame: bytes,
+        prompt: str,
+        context: str | None,
+        intent: str,
+        trace: LatencyTrace,
+    ) -> None:
+        """Speak each sentence the moment it completes, not when the answer ends."""
+        chunker = SentenceChunker()
+        spoke = False
+
+        async for delta in self.provider.describe(frame, prompt, context, intent=intent):
+            for sentence in chunker.feed(delta):
+                if not spoke:
+                    # The number that matters: frame -> first spoken word.
+                    trace.mark("first_sentence")
+                    spoke = True
+                await self._say(sentence)
+
+        if remainder := chunker.flush():
+            if not spoke:
+                trace.mark("first_sentence")
+            await self._say(remainder)
+
+        await self._finish(trace)
+
+    # --- Beacons ----------------------------------------------------------
+
+    async def handle_locate(self, label: str | None) -> None:
+        """Start an audio beacon toward a named object."""
+        if not label:
+            return
+
+        matches = find_object(self.perception.scene, label)
+        if not matches:
+            self.beacon_label = None
+            await self._say(f"I can't see a {label} to guide you to.")
+            return
+
+        target = matches[0]
+        self.beacon_label = target.label
+        distance = target.distance_m
+        where = (
+            f"about {distance:.1f} meters away"
+            if distance is not None
+            else "somewhere ahead"
+        )
+        await self._say(
+            f"Guiding you to the {target.label}, at your {target.clock}, {where}. "
+            "Turn until the sound is centered."
+        )
         await self._update_beacon()
 
     async def _update_beacon(self) -> None:
@@ -170,113 +301,25 @@ class Session:
             }
         )
 
-    async def _read_locally(self) -> bool:
-        """Read text with on-device OCR. False means nothing found, escalate.
-
-        Assumes latest_frame is the detailed capture the client sends ahead of
-        a read: the 640px fast-path frame loses the strokes OCR needs.
-        """
-        trace = LatencyTrace(label="read_local")
-        frames = list(self.recent_frames) or ([self.latest_frame] if self.latest_frame else [])
-        with trace.stage("ocr"):
-            lines = await self.ocr.read_consensus(frames)
-
-        # Escalate only if there is something better to escalate to.
-        escalation_available = type(self.provider).__name__ == "ClaudeVisionProvider"
-        if not lines and escalation_available:
-            return False
-
-        trace.mark("complete")
-        await self.socket.send_json({"type": "speech", "text": format_for_speech(lines)})
-        await self.socket.send_json({"type": "trace", **trace.to_dict()})
-        log.info("read: %d line(s) in %.0f ms", len(lines), trace.total_ms)
-        return True
-
-    async def handle_locate(self, label: str | None) -> None:
-        """Start an audio beacon toward a named object."""
-        if not label:
-            return
-
-        matches = find_object(self.perception.scene, label)
-        if not matches:
-            self.beacon_label = None
-            await self.socket.send_json(
-                {"type": "speech", "text": f"I can't see a {label} to guide you to."}
-            )
-            return
-
-        target = matches[0]
-        self.beacon_label = target.label
-        distance = target.distance_m
-        where = (
-            f"about {distance:.1f} meters away"
-            if distance is not None
-            else "somewhere ahead"
-        )
-        await self.socket.send_json(
-            {
-                "type": "speech",
-                "text": f"Guiding you to the {target.label}, at your "
-                f"{target.clock}, {where}. Turn until the sound is centered.",
-            }
-        )
-        await self._update_beacon()
-
     async def stop_beacon(self) -> None:
         self.beacon_label = None
         await self.socket.send_json({"type": "beacon_stop"})
 
-    async def handle_intent(self, kind: str, text: str | None) -> None:
-        if self.latest_frame is None:
-            await self.socket.send_json(
-                {"type": "speech", "text": "I'm not receiving the camera yet."}
-            )
-            return
+    # --- Output -----------------------------------------------------------
 
-        if kind == "read" and self.ocr.available:
-            if await self._read_locally():
-                return
-            # Nothing found: fall through so Claude can try, since it handles
-            # layouts and handwriting that OCR misses.
+    async def _say(self, text: str) -> None:
+        await self.socket.send_json({"type": "speech", "text": text})
 
-        prompt = {"scan": SCAN_PROMPT, "read": READ_PROMPT}.get(kind) or (
-            text or SCAN_PROMPT
-        )
-
-        trace = LatencyTrace(label=kind)
-        chunker = SentenceChunker()
-        spoke = False
-
-        # Ground the answer in tracked geometry rather than pixels alone.
-        # Skipped for OCR, where the scene model has nothing to contribute.
-        context = None if kind == "read" else scene_context(self.perception.snapshot())
-
-        async for delta in self.provider.describe(
-            self.latest_frame, prompt, context, intent=kind
-        ):
-            for sentence in chunker.feed(delta):
-                if not spoke:
-                    # The number that matters: frame -> first spoken word.
-                    trace.mark("first_sentence")
-                    spoke = True
-                await self.socket.send_json({"type": "speech", "text": sentence})
-
-        if remainder := chunker.flush():
-            if not spoke:
-                trace.mark("first_sentence")
-            await self.socket.send_json({"type": "speech", "text": remainder})
-
+    async def _finish(self, trace: LatencyTrace) -> None:
         trace.mark("complete")
         await self.socket.send_json({"type": "trace", **trace.to_dict()})
-        log.info("%s complete in %.0f ms", kind, trace.total_ms)
+        log.info("%s complete in %.0f ms", trace.label, trace.total_ms)
 
 
 @app.websocket("/ws")
 async def websocket_endpoint(socket: WebSocket) -> None:
     await socket.accept()
-    session = Session(
-        socket, app.state.provider, app.state.perception, app.state.ocr
-    )
+    session = Session(socket, app.state.provider, app.state.perception, app.state.ocr)
     settings = get_settings()
 
     await socket.send_json(
@@ -284,6 +327,7 @@ async def websocket_endpoint(socket: WebSocket) -> None:
             "type": "ready",
             "provider": settings.vision_provider,
             "provider_active": app.state.effective_provider,
+            "ocr": app.state.ocr.name,
             "demo_mode": settings.demo_mode,
         }
     )
@@ -293,7 +337,10 @@ async def websocket_endpoint(socket: WebSocket) -> None:
             message = await socket.receive()
 
             if (frame := message.get("bytes")) is not None:
-                await session.handle_frame(frame)
+                if frame.startswith(READ_TAG):
+                    await session.handle_read(unpack_read_frames(frame))
+                else:
+                    await session.handle_frame(frame)
                 continue
 
             if (payload := message.get("text")) is None:
