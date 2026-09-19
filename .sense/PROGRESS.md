@@ -75,3 +75,9 @@ Append one entry per milestone: date, what was done, verify result, tag.
 - README (thesis, quickstart, mode table of what is real vs simulated, limitations notice, repo map), docs/ARCHITECTURE.md (Mermaid: components, verification sequence, remote-content pipeline), THREAT_MODEL.md (assets, adversaries, the eight attacks with tests, DNS/CA dependence, residual risk), DEMO_SCRIPT.md (3-minute and 60-second), PITCH.md (only supportable claims), ROADMAP.md, PUBLISH_AN_AGENT.md (measured onboarding timing, and what was NOT measured), SENSE_CARD_SPEC.md, SCENTGUARD_RULES.md, ANS_NOTES.md.
 - `scripts/docs.test.ts` keeps docs honest: every `npm run` mentioned exists, every relative link resolves, README carries the limitations notice and mode labels, threat model covers all eight attacks, `.env.example` matches the env vars the code reads, JSON Schemas on disk match the code.
 - Scale seams proven: `packages/senses/crowd` (64 lines, imports only @sense/protocol) and `create-sense-agent` (generates a working agent that passes 7/7 in ~2 s of machine time).
+
+## M14 — Hardening and final report (done)
+- Dependency audit: 0 vulnerabilities. Dead code removed (CertRole, SoundEventDto, coarseDistance, PointerSource). `.env.example` rewritten to match the code (removed unimplemented SENSE_LIVE_AIR; added SENSE_OFFLINE, SENSE_DEMO); a test keeps it in sync.
+- Whole-document axe with page-level rules across all five personas: no violations. Coverage: identity 92.8%, core 90.3%, trust engine 97.2% (targets >= 90%); web app 70.8% (noted as a gap).
+- Clean-clone check: `npm ci` + `npm run verify` (439 tests, build) + `npm run demo:verify` (69/69) all pass; git status clean afterwards; secrets scan clean.
+- FINAL_REPORT.md written with measured results and an honest list of gaps.
