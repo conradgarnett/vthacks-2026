@@ -16,3 +16,10 @@ Append one entry per milestone: date, what was done, verify result, tag.
 - docs/ANS_NOTES.md written from 3 real fetches (governance wording differs from the brief; recorded).
 - 37 identity tests: happy path, every failure mode naming its step, UNVERIFIED degradation, Merkle tamper detection for all sizes 1..33. Coverage 92% statements / 95% lines.
 - verify green. Tag `m2-done`.
+
+## M3 — World-sim (done)
+- `apps/world-sim`: SimAgent base (validates requests, minimum-scope enforcement, signed responses/pushes, subscribe/unsubscribe, heartbeat), `WorldSim` (hostname-map transport `SimTransport`, ANS-modeled registry, deterministic seeded RNG, timeline + named scripts fire/smoke/spoof/flood, manual-clock friendly `tick()`).
+- Honest publishers: riverside-hall.sim (indoor-map, alarm-feed, air-quality, accessibility-features), bella-cucina.sim (menu-allergens), metro-transit.sim (arrivals), city-air.sim (air-quality), hall-lifts.sim (device-control).
+- Attackers (activated on demand): impersonator, revoked, codeSwap, unlogged, spoofer (rogue CA + unsolicited push), injector (VERIFIED kiosk with hostile notes), flooder (VERIFIED noisy signs).
+- HTTP view with virtual hosting (Host header or /agents/:fqdn path) + /.well-known/sense-card.json + SSE events + /sim/event control.
+- 21 world-sim tests. verify green (81 tests total). Tag `m3-done`.

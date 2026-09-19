@@ -13,6 +13,8 @@ export * from './sensecard';
 export * from './payloads';
 export * from './messages';
 export * from './module';
+export * from './transport';
+export * from './geometry';
 export * from './personas';
 
 /** All exported JSON Schemas (draft 2020-12), keyed by file name stem. See `npm run schemas`. */
