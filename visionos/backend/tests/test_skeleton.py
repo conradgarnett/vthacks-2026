@@ -59,6 +59,25 @@ def test_frame_then_scan_returns_spoken_sentences(client):
     assert "first_sentence" in trace["stages"]
 
 
+def test_scan_returns_the_room_description_not_the_path_answer(client):
+    """Regression: SCAN_PROMPT contains 'walking path', so a short 'path'
+    fixture key used to hijack the room scan -- the demo's headline moment."""
+    with client.websocket_connect("/ws") as ws:
+        ws.receive_json()
+        ws.send_bytes(FRAME)
+        ws.send_json({"type": "scan"})
+
+        speech = []
+        while True:
+            message = ws.receive_json()
+            if message["type"] == "trace":
+                break
+            speech.append(message["text"])
+
+    spoken = " ".join(speech).lower()
+    assert "living room" in spoken, f"expected the room scan, got: {spoken[:80]}"
+
+
 def test_intent_without_a_frame_says_so_instead_of_hanging(client):
     with client.websocket_connect("/ws") as ws:
         ws.receive_json()

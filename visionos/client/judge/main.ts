@@ -3,10 +3,9 @@
  * so they can see the latency and reasoning they would otherwise only hear.
  */
 
-const apiBase = (): string => {
-  const override = new URLSearchParams(location.search).get("backend");
-  return override ?? `${location.protocol}//${location.hostname}:8000`;
-};
+// Same origin; Vite proxies these to the backend. See vite.config.ts.
+const apiBase = (): string =>
+  new URLSearchParams(location.search).get("backend") ?? "";
 
 const el = (id: string) => document.getElementById(id)!;
 

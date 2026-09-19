@@ -116,10 +116,20 @@ class ReplayVisionProvider(VisionProvider):
         return {}
 
     def _lookup(self, prompt: str) -> str:
+        """Longest matching key wins.
+
+        Dict order is the wrong tie-breaker: SCAN_PROMPT contains the phrase
+        "walking path", so a short "path" key would hijack every room scan --
+        which is the demo's headline moment.
+        """
         lowered = prompt.lower()
-        for key, text in self._scenes.items():
-            if key != "default" and key.lower() in lowered:
-                return text
+        matches = [
+            (len(key), text)
+            for key, text in self._scenes.items()
+            if key != "default" and key.lower() in lowered
+        ]
+        if matches:
+            return max(matches)[1]
         return self._scenes.get(
             "default",
             "A chair is about two meters ahead at your twelve o'clock, and a "

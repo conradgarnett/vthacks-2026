@@ -32,9 +32,11 @@ const camera = new Camera(video);
 const backendUrl = (): string => {
   const override = new URLSearchParams(location.search).get("backend");
   if (override) return override;
-  // Vite serves the client on :5173; the backend listens on :8000.
+  // Same origin: Vite proxies /ws to the backend. Connecting straight to
+  // :8000 would need a second accepted certificate, which Safari will not
+  // prompt for on a WebSocket -- it just reconnects forever.
   const scheme = location.protocol === "https:" ? "wss" : "ws";
-  return `${scheme}://${location.hostname}:8000/ws`;
+  return `${scheme}://${location.host}/ws`;
 };
 
 /** Sets the visible status and announces it to screen readers. */
