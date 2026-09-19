@@ -16,6 +16,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from backend.ai.ocr import AppleVisionOCR, format_for_speech
 from backend.ai.prompts import PROMPT_VERSION, READ_PROMPT, SCAN_PROMPT, scene_context
 from backend.ai.vision import VisionProvider, build_provider
 from backend.config import get_settings
@@ -46,6 +47,10 @@ async def lifespan(app: FastAPI):
         settings, scene_getter=lambda: app.state.perception.scene
     )
     app.state.effective_provider = type(app.state.provider).__name__
+
+    # 13 ms steady state, but 315 ms on the first call. Pay it here.
+    app.state.ocr = AppleVisionOCR()
+    app.state.ocr.warmup()
 
     log.info("VisionOS ready on %s:%s", settings.host, settings.port)
     yield
@@ -96,16 +101,42 @@ class Session:
     """Per-connection state. One phone, one session."""
 
     def __init__(
-        self, socket: WebSocket, provider: VisionProvider, perception: PerceptionPipeline
+        self,
+        socket: WebSocket,
+        provider: VisionProvider,
+        perception: PerceptionPipeline,
+        ocr: AppleVisionOCR,
     ) -> None:
         self.socket = socket
         self.provider = provider
         self.perception = perception
+        self.ocr = ocr
         self.latest_frame: bytes | None = None
 
     async def handle_frame(self, frame: bytes) -> None:
         self.latest_frame = frame
         await self.perception.process(frame)
+
+    async def _read_locally(self) -> bool:
+        """Read text with on-device OCR. False means nothing found, escalate.
+
+        Assumes latest_frame is the detailed capture the client sends ahead of
+        a read: the 640px fast-path frame loses the strokes OCR needs.
+        """
+        trace = LatencyTrace(label="read_local")
+        with trace.stage("ocr"):
+            lines = await self.ocr.read(self.latest_frame or b"")
+
+        # Escalate only if there is something better to escalate to.
+        escalation_available = type(self.provider).__name__ == "ClaudeVisionProvider"
+        if not lines and escalation_available:
+            return False
+
+        trace.mark("complete")
+        await self.socket.send_json({"type": "speech", "text": format_for_speech(lines)})
+        await self.socket.send_json({"type": "trace", **trace.to_dict()})
+        log.info("read: %d line(s) in %.0f ms", len(lines), trace.total_ms)
+        return True
 
     async def handle_intent(self, kind: str, text: str | None) -> None:
         if self.latest_frame is None:
@@ -113,6 +144,12 @@ class Session:
                 {"type": "speech", "text": "I'm not receiving the camera yet."}
             )
             return
+
+        if kind == "read" and self.ocr.available:
+            if await self._read_locally():
+                return
+            # Nothing found: fall through so Claude can try, since it handles
+            # layouts and handwriting that OCR misses.
 
         prompt = {"scan": SCAN_PROMPT, "read": READ_PROMPT}.get(kind) or (
             text or SCAN_PROMPT
@@ -149,7 +186,9 @@ class Session:
 @app.websocket("/ws")
 async def websocket_endpoint(socket: WebSocket) -> None:
     await socket.accept()
-    session = Session(socket, app.state.provider, app.state.perception)
+    session = Session(
+        socket, app.state.provider, app.state.perception, app.state.ocr
+    )
     settings = get_settings()
 
     await socket.send_json(

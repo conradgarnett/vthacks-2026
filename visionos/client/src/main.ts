@@ -63,8 +63,8 @@ function onServerEvent(event: ServerEvent): void {
           spoken: "Replay mode. Descriptions are scripted and do not match your camera.",
         },
         LocalSceneProvider: {
-          label: "Connected — local detection only",
-          spoken: "Running on local detection only. I can describe objects I recognize, but I can't read text.",
+          label: "Connected — on-device only",
+          spoken: "Running on device. I can describe objects I recognize and read text, but I can't answer open questions.",
         },
       };
       const mode = modes[event.provider_active];
