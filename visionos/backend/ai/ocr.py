@@ -342,6 +342,43 @@ class TextReader:
 
         return await run_ocr(self.read_sync, frame_jpeg)
 
+    # -- background peeks --------------------------------------------------
+
+    def read_quick_sync(self, frame_jpeg: bytes) -> list[TextLine]:
+        """One whole-frame pass and nothing more: no tiles, no transforms.
+
+        For a background peek at what is in view, where the point is to be
+        cheap and current rather than thorough. The escalations cost seconds
+        on a CPU engine and are reserved for a read the user asked for.
+        """
+        if not self.available or not frame_jpeg:
+            return []
+        try:
+            return self._read_full(_prepare(frame_jpeg))
+        except Exception:
+            log.exception("OCR peek failed; treating the frame as having no text")
+            return []
+
+    async def read_quick(self, frame_jpeg: bytes) -> list[TextLine]:
+        from backend.perception.runtime import run_ocr
+
+        return await run_ocr(self.read_quick_sync, frame_jpeg)
+
+    def combine_readings(self, readings: list[list[TextLine]]) -> list[TextLine]:
+        """Consensus over readings taken one frame at a time, as a burst gets.
+
+        Peeks arrive seconds apart rather than milliseconds, but agreement
+        across them means the same thing: text that survived a different
+        blur and glare each time is real, and the medication guard's
+        corroboration counts it the same way.
+        """
+        usable = [reading for reading in readings if reading]
+        if not usable:
+            return []
+        if len(usable) == 1:
+            return [line for line in usable[0] if _keep(line)]
+        return _merge(usable)
+
     # -- multi frame -------------------------------------------------------
 
     def read_consensus_sync(self, frames: list[bytes]) -> list[TextLine]:

@@ -21,6 +21,12 @@ const DISCLAIMER =
 const FRAME_INTERVAL_MS = 700;
 const FRAME_INTERVAL_CPU_MS = 1500;
 let frameIntervalMs = FRAME_INTERVAL_MS;
+// A detailed frame for the background reader every few seconds, so Read
+// answers from what is already known. Rarer on a CPU, where each costs
+// most of a second of the reader's time.
+const PEEK_INTERVAL_MS = 2500;
+const PEEK_INTERVAL_CPU_MS = 4000;
+let peekIntervalMs = PEEK_INTERVAL_MS;
 
 // "take me to the door" should start a beacon, not narrate. Checked before
 // the question is sent, because guidance is a different mode from an answer.
@@ -164,6 +170,7 @@ function onServerEvent(event: ServerEvent): void {
       const mode = modes[event.provider_active];
       setStatus(mode?.label ?? "Connected");
       frameIntervalMs = event.device === "cpu" ? FRAME_INTERVAL_CPU_MS : FRAME_INTERVAL_MS;
+      peekIntervalMs = event.device === "cpu" ? PEEK_INTERVAL_CPU_MS : PEEK_INTERVAL_MS;
 
       // Spoken once per session, not per `ready`. The server sends `ready` on
       // every connect, so a reconnect loop repeated this announcement forever.
@@ -306,10 +313,18 @@ async function begin(): Promise<void> {
     connection.connect();
 
     let lastFrameAt = 0;
+    let lastPeekAt = 0;
     setInterval(async () => {
       if (!camera.isRunning || !connection.isOpen || readPending) return;
-      if (performance.now() - lastFrameAt < frameIntervalMs) return;
-      lastFrameAt = performance.now();
+      const now = performance.now();
+      if (now - lastPeekAt >= peekIntervalMs) {
+        lastPeekAt = now;
+        const peek = await camera.capturePeek();
+        if (peek && !readPending) connection.sendPeekFrame(peek);
+        return;
+      }
+      if (now - lastFrameAt < frameIntervalMs) return;
+      lastFrameAt = now;
       const frame = await camera.captureFast();
       // Re-checked after the await: a read may have started while capturing.
       if (frame && !readPending) connection.sendFrame(frame);

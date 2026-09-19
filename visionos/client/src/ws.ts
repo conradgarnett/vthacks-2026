@@ -38,6 +38,7 @@ const MAX_BACKOFF_MS = 8000;
 // 0xFFD8, so the tag can never be mistaken for one. Mirrors
 // pack_read_frames() in backend/main.py.
 const READ_TAG = new TextEncoder().encode("READ");
+const PEEK_TAG = new TextEncoder().encode("PEEK");
 
 export class Connection {
   private socket: WebSocket | null = null;
@@ -109,16 +110,27 @@ export class Connection {
    * Answered with speech.
    */
   sendReadFrames(blobs: Blob[]): void {
+    this.sendTagged(READ_TAG, blobs);
+  }
+
+  /**
+   * One detailed frame for the reader to look at in the background, so a
+   * Read can answer from what is already known. Never answered directly.
+   */
+  sendPeekFrame(blob: Blob): void {
+    this.sendTagged(PEEK_TAG, [blob]);
+  }
+
+  private sendTagged(tag: Uint8Array, blobs: Blob[]): void {
     if (!this.isOpen || blobs.length === 0) return;
     Promise.all(blobs.map((blob) => blob.arrayBuffer())).then((buffers) => {
       if (!this.isOpen) return;
-      const total =
-        READ_TAG.length + buffers.reduce((sum, buf) => sum + 4 + buf.byteLength, 0);
+      const total = tag.length + buffers.reduce((sum, buf) => sum + 4 + buf.byteLength, 0);
       const message = new Uint8Array(total);
       const view = new DataView(message.buffer);
 
-      message.set(READ_TAG, 0);
-      let offset = READ_TAG.length;
+      message.set(tag, 0);
+      let offset = tag.length;
       for (const buf of buffers) {
         view.setUint32(offset, buf.byteLength); // big-endian by default
         offset += 4;

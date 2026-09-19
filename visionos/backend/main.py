@@ -4,6 +4,7 @@ Wire protocol, one phone per socket:
 
   binary  JPEG                         live frame for perception (small, frequent)
   binary  b"READ" + (u32 len + JPEG)*  a burst of detailed frames to read text from
+  binary  b"PEEK" + u32 len + JPEG     one detailed frame to read in the background
   text    {"type": "scan"}             describe the room from the latest live frame
   text    {"type": "read"}             read text from the latest live frame
   text    {"type": "ask", "text": "..."}
@@ -19,9 +20,12 @@ glares differently each time, and OCR keeps only what the frames agree on.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import socket
+import time
+from collections import deque
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -47,6 +51,19 @@ from backend.telemetry import LatencyTrace, metrics_snapshot
 log = logging.getLogger(__name__)
 
 READ_TAG = b"READ"
+PEEK_TAG = b"PEEK"
+
+# Background reading. The client peeks at what is in view every few seconds
+# and the reader keeps the last few results, so a Read can answer from what
+# it already knows instead of making the user wait for a burst. Readings are
+# forgotten after PEEK_KEEP_S and never more than PEEK_KEEP_MAX are held,
+# which keeps the cache to a few kilobytes; a Read trusts only readings
+# younger than PEEK_FRESH_S, since a label the user has put down is not the
+# current moment. A soft frame is not worth the pass.
+PEEK_KEEP_S = 8.0
+PEEK_KEEP_MAX = 4
+PEEK_FRESH_S = 6.0
+PEEK_MIN_SHARPNESS = 100.0
 # Three is the useful minimum for majority agreement; more costs latency the
 # read budget cannot spare.
 OCR_CONSENSUS_FRAMES = 3
@@ -153,6 +170,21 @@ def pack_read_frames(frames: list[bytes]) -> bytes:
     Mirrors sendReadFrames() in client/src/ws.ts.
     """
     return READ_TAG + b"".join(len(frame).to_bytes(4, "big") + frame for frame in frames)
+
+
+def unpack_tagged_frames(payload: bytes, tag: bytes) -> list[bytes]:
+    """Frames after a tag, each a big-endian u32 length plus JPEG bytes.
+    A truncated tail is dropped, not guessed at."""
+    frames: list[bytes] = []
+    offset = len(tag)
+    while offset + 4 <= len(payload):
+        length = int.from_bytes(payload[offset : offset + 4], "big")
+        offset += 4
+        if offset + length > len(payload):
+            break
+        frames.append(payload[offset : offset + length])
+        offset += length
+    return frames
 
 
 def unpack_read_frames(payload: bytes) -> list[bytes]:
@@ -267,6 +299,10 @@ class Session:
             min_confidence=settings.hazard_min_confidence,
         )
         self.beacon_label: str | None = None
+        # Background reading: (monotonic time, lines) of the last few peeks.
+        self.peeks: deque[tuple[float, list]] = deque(maxlen=PEEK_KEEP_MAX)
+        self.peek_task: asyncio.Task | None = None
+        self.reading = False
 
     # --- Live frames ------------------------------------------------------
 
@@ -287,6 +323,21 @@ class Session:
     # --- Reading text -----------------------------------------------------
 
     async def handle_read(self, frames: list[bytes]) -> None:
+        """Answer from the background peeks when they are fresh and solid;
+        the burst is the slow path for when they are not."""
+        cached = self.fresh_reading()
+        if cached and not read_is_weak(cached):
+            holder = text_holder(self.perception.scene.all_objects())
+            await self._say(with_holder(format_for_speech(cached), holder))
+            log.info("read: answered from %d peek(s) via %s", len(self.peeks), self.ocr.name)
+            return
+        self.reading = True
+        try:
+            await self._read_burst(frames)
+        finally:
+            self.reading = False
+
+    async def _read_burst(self, frames: list[bytes]) -> None:
         """Local OCR over the burst first; the vision provider only if that
         finds nothing."""
         frames = [frame for frame in frames if frame]
@@ -315,6 +366,46 @@ class Session:
         else:
             await self._say(no_text_response(frames))
         await self._finish(trace)
+
+    # --- Background reading -----------------------------------------------
+
+    async def handle_peek(self, frames: list[bytes]) -> None:
+        """OCR a frame in the background, never queued and never blocking.
+
+        One peek at a time, none while a read burst is in flight, and a soft
+        frame is skipped: the point is to be cheap, and a queued peek would
+        describe a label the user has already moved.
+        """
+        frame = frames[-1] if frames else b""
+        if not frame or self.reading:
+            return
+        if self.peek_task is not None and not self.peek_task.done():
+            return
+        if _sharpness(frame) < PEEK_MIN_SHARPNESS:
+            return
+        self.peek_task = asyncio.create_task(self._peek(frame))
+
+    async def _peek(self, frame: bytes) -> None:
+        try:
+            lines = await self.ocr.read_quick(frame)
+        except Exception:
+            log.exception("peek failed")
+            return
+        self.forget_stale_peeks()
+        if lines:
+            self.peeks.append((time.monotonic(), lines))
+
+    def forget_stale_peeks(self, now: float | None = None) -> None:
+        now = time.monotonic() if now is None else now
+        while self.peeks and now - self.peeks[0][0] > PEEK_KEEP_S:
+            self.peeks.popleft()
+
+    def fresh_reading(self, now: float | None = None) -> list:
+        """What the last few seconds of peeks agree is in view; [] if nothing."""
+        now = time.monotonic() if now is None else now
+        self.forget_stale_peeks(now)
+        readings = [lines for seen_at, lines in self.peeks if now - seen_at <= PEEK_FRESH_S]
+        return self.ocr.combine_readings(readings)
 
     # --- Questions and scans ----------------------------------------------
 
@@ -451,6 +542,8 @@ async def websocket_endpoint(socket: WebSocket) -> None:
             if (frame := message.get("bytes")) is not None:
                 if frame.startswith(READ_TAG):
                     await session.handle_read(unpack_read_frames(frame))
+                elif frame.startswith(PEEK_TAG):
+                    await session.handle_peek(unpack_tagged_frames(frame, PEEK_TAG))
                 else:
                     await session.handle_frame(frame)
                 continue

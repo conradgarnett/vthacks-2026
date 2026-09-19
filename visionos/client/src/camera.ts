@@ -25,6 +25,9 @@ const FAST_WIDTH = 640;
 const FAST_QUALITY = 0.6;
 const HIRES_WIDTH = 1920;
 const HIRES_QUALITY = 0.85;
+// A background peek: enough pixels for a label, a fraction of a read's bytes.
+const PEEK_WIDTH = 1280;
+const PEEK_QUALITY = 0.75;
 // Time for a single-shot autofocus to settle before the burst is captured.
 const REFOCUS_MS = 600;
 
@@ -235,6 +238,11 @@ export class Camera {
 
   captureFast(): Promise<Blob | null> {
     return this.capture(FAST_WIDTH, FAST_QUALITY);
+  }
+
+  /** Middling resolution for the background reader. */
+  capturePeek(): Promise<Blob | null> {
+    return this.capture(PEEK_WIDTH, PEEK_QUALITY);
   }
 
   /** Full resolution, for reading text. Costs bytes and time; use on request. */
