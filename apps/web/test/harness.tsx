@@ -25,7 +25,11 @@ export async function mountApp(opts: { vibrate?: boolean; scheduler?: Scheduler;
   });
   const api: SenseApi = {
     getState: async () => (await server.inject({ method: 'GET', url: '/api/state' })).json(),
-    get: async (path) => (await server.inject({ method: 'GET', url: path })).json(),
+    get: async (path) => {
+      const res = await server.inject({ method: 'GET', url: path });
+      if (res.statusCode >= 400) throw new ApiError('not found', res.statusCode); // like the real HTTP client
+      return res.json();
+    },
     post: async (path, body, via = 'pointer') => {
       const res = await server.inject({ method: 'POST', url: path, payload: (body ?? {}) as never, headers: { 'x-sense-via': via } });
       if (res.statusCode >= 400) throw new ApiError((res.json() as { error?: string }).error ?? 'error', res.statusCode);

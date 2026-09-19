@@ -127,7 +127,7 @@ export class WorldSim {
       'spoof-false-alarm': () => this.spoofFalseAlarm(),
       flood: (n) => this.flood(n ?? 100),
       'mute-alarm-feed': () => this.muteAlarmFeed(true),
-      'activate-attackers': () => void this.activateAttackers(),
+      'activate-attackers': () => this.activateAttackers(),
     };
   }
 

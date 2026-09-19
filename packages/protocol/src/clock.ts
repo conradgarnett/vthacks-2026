@@ -19,6 +19,23 @@ export class ManualClock implements Clock {
   }
 }
 
+/**
+ * The real clock plus an adjustable offset. The live demo uses it so "skip 2 minutes" can show stale
+ * data instantly. Anything that skips time is labelled as a SIMULATED TIME SKIP in the UI.
+ */
+export class OffsetClock implements Clock {
+  private offset = 0;
+  now(): number {
+    return Date.now() + this.offset;
+  }
+  advance(ms: number): void {
+    this.offset += ms;
+  }
+  get skippedMs(): number {
+    return this.offset;
+  }
+}
+
 export function iso(clock: Clock, offsetMs = 0): string {
   return new Date(clock.now() + offsetMs).toISOString();
 }

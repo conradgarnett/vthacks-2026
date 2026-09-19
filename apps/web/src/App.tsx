@@ -12,6 +12,7 @@ import { HearingPanel } from './ui/HearingPanel';
 import { ScentPanel } from './ui/ScentPanel';
 import { TastePanel } from './ui/TastePanel';
 import { TouchlessPanel, type TouchlessHandle } from './ui/TouchlessPanel';
+import { DemoPanel } from './ui/DemoPanel';
 import { realScheduler, type Scheduler } from '@sense/touchless';
 
 /** Apply the profile's display preferences (contrast, text size, motion) to the page. */
@@ -115,6 +116,7 @@ export function App({ store, scheduler = realScheduler, touchless }: AppProps) {
             <div className="stack">
               <PersonaSwitcher profile={snap.profile} post={post} />
               <SceneControls post={post} />
+              <DemoPanel get={store.get} post={post} refreshKey={snap.actions.length} />
               <VisionPanel post={post} aiLabel={snap.mode.ai} />
               <TastePanel
                 post={post}
