@@ -110,7 +110,7 @@ interface Session {
 }
 
 const SESSION_TTL_MS = 5 * 60_000;
-const ARRIVAL_FETCH: CapabilityId[] = ['indoor-map', 'accessibility-features'];
+const ARRIVAL_FETCH: CapabilityId[] = ['indoor-map', 'accessibility-features', 'menu-allergens'];
 const ARRIVAL_SUBSCRIBE: CapabilityId[] = ['alarm-feed', 'air-quality'];
 
 /**

@@ -7,6 +7,7 @@ import { createProviders, type Providers } from '@sense/providers';
 import { VisionSense, type MapSource } from '@sense/vision';
 import { EchoSense } from '@sense/hearing';
 import { ScentGuard, type ScentAlarm, type ScentSource } from '@sense/scent';
+import { TasteLens } from '@sense/taste';
 import { ProfileStore } from './profile-store';
 
 export interface ContextOptions {
@@ -110,6 +111,7 @@ export class SenseContext {
     readonly vision: VisionSense,
     readonly echo: EchoSense,
     readonly scent: ScentGuard,
+    readonly taste: TasteLens,
     /** Owner key for the signed portable profile. Stays on this device. */
     readonly ownerKeys: KeyPair,
   ) {
@@ -170,7 +172,13 @@ export class SenseContext {
       nextId: () => broker.nextPerceptId(),
       getPose: () => ({ position: world.user.position, headingDeg: world.user.headingDeg }),
     });
-    return new SenseContext(clock, world, broker, profiles, mode, providers, vision, echo, scent, await generateKeyPair());
+    const taste = new TasteLens({
+      provider: providers.taste,
+      clock,
+      nextId: () => broker.nextPerceptId(),
+      getProfile: () => profiles.current(),
+    });
+    return new SenseContext(clock, world, broker, profiles, mode, providers, vision, echo, scent, taste, await generateKeyPair());
   }
 
   // ── Events and audit trail ────────────────────────────────────────────────────────────────

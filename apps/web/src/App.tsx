@@ -10,6 +10,7 @@ import { PersonaSwitcher, SceneControls } from './ui/Controls';
 import { VisionPanel } from './ui/VisionPanel';
 import { HearingPanel } from './ui/HearingPanel';
 import { ScentPanel } from './ui/ScentPanel';
+import { TastePanel } from './ui/TastePanel';
 
 /** Apply the profile's display preferences (contrast, text size, motion) to the page. */
 function useDisplayPrefs(profile: SensoryProfile | undefined): void {
@@ -106,6 +107,12 @@ export function App({ store }: { store: Store }) {
               <PersonaSwitcher profile={snap.profile} post={post} />
               <SceneControls post={post} />
               <VisionPanel post={post} aiLabel={snap.mode.ai} />
+              <TastePanel
+                post={post}
+                get={store.get}
+                refreshKey={snap.percepts.filter((p) => p.kind === 'status' && / checks\.$/.test(p.short)).length}
+                declared={snap.profile.allergens}
+              />
               <ScentPanel status={snap.scent} />
               <HearingPanel post={post} />
               <TrustInspector verifications={snap.verifications} selected={ui.selectedAgent} onSelect={store.select} />

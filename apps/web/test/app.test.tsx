@@ -192,6 +192,41 @@ describe('ScentGuard panel (Anosmia persona)', () => {
   });
 });
 
+describe('scene 3: eat (Impaired-taste persona, peanut allergy)', () => {
+  it('shows a VERIFIED allergen alert that overrides the photo, with a haptic pattern and voice/caption, and keeps allergens local', async () => {
+    const user = userEvent.setup();
+    const { container } = await mountApp();
+    await user.click(await screen.findByLabelText(/Impaired taste/));
+    const allergens = (await screen.findByLabelText(/declared allergens/i)) as HTMLInputElement;
+    await user.clear(allergens);
+    await user.type(allergens, 'peanut');
+    await user.click(screen.getByRole('button', { name: /save allergens/i }));
+    await user.click(screen.getByRole('button', { name: /arrive at bella cucina/i }));
+    await screen.findAllByText('Bella Cucina: Verified, 7 of 7 checks.');
+    const select = (await screen.findByLabelText(/restaurant menu item/i)) as HTMLSelectElement;
+    await waitFor(() => expect(Array.from(select.options).some((o) => /Sesame noodle bowl/.test(o.text))).toBe(true));
+    await user.selectOptions(select, 'sesame-noodles');
+    await user.click(screen.getByRole('button', { name: /describe and check allergens/i }));
+
+    const feed = screen.getByRole('list', { name: /percepts, newest first/i });
+    await waitFor(() =>
+      expect(within(feed).getAllByText('Peanut in Sesame noodle bowl. Verified, Bella Cucina.').length).toBeGreaterThan(0),
+    );
+    const card = within(feed).getAllByText('Peanut in Sesame noodle bowl. Verified, Bella Cucina.')[0]?.closest('li') as HTMLElement;
+    expect(card.getAttribute('data-urgency')).toBe('4');
+    expect(within(card).getByText('VERIFIED')).toBeTruthy();
+    expect(card.textContent).toMatch(/Vibration:/);
+    expect(card.textContent).toMatch(/Caption:/);
+    const alert = container.querySelector('#alert-region') as HTMLElement;
+    expect(alert.textContent).toContain('Peanut in Sesame noodle bowl');
+    expect(feed.textContent).not.toMatch(/\bsafe\b|all clear/i);
+    // the disclosure log shows only standard, minimal queries: no allergen, no profile
+    const log = screen.getByRole('region', { name: /disclosure log table/i });
+    expect(log.textContent?.toLowerCase()).not.toContain('peanut');
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+});
+
 describe('profile controls', () => {
   it('switches all five personas, keeps allergens, and applies display preferences', async () => {
     const user = userEvent.setup();

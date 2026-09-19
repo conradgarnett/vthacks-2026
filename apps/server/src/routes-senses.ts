@@ -2,6 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { SOUND_LABELS, type LlmImage } from '@sense/providers';
 import { DEMO_SOUNDSCAPE, ScriptedSoundscape } from '@sense/hearing';
+import type { MenuItemInput, MenuSource } from '@sense/taste';
+import type { MenuAllergensPayload } from '@sense/protocol';
 import { parseBody, viaOf } from './routes-core';
 import type { SenseContext } from './context';
 
@@ -88,5 +90,66 @@ export function registerHearingRoutes(app: FastifyInstance, ctx: SenseContext): 
       for (const e of scape.due(1e9)) setTimeout(() => emit(e), e.at * 1000).unref();
     }
     return { events: DEMO_SOUNDSCAPE.length, simulated: true };
+  });
+}
+
+const TasteBody = z.strictObject({
+  fqdn: z.string().max(253).optional(),
+  itemId: z.string().max(64).optional(),
+  labelText: z.string().max(2000).optional(),
+  text: z.string().max(1000).optional(),
+  ...ImageFields,
+});
+
+/**
+ * TasteLens routes. The user's declared allergens are read locally from the profile; the only
+ * thing sent to a publisher is the standard, minimal menu-allergens query (no allergens, no profile).
+ */
+export function registerTasteRoutes(app: FastifyInstance, ctx: SenseContext): void {
+  app.get('/api/menu', async () => ({
+    menus: ctx.broker.latestFor('menu-allergens').map((d) => ({
+      fqdn: d.fqdn,
+      label: d.label,
+      tier: d.tier,
+      items: (d.payload as MenuAllergensPayload).items.map((i) => ({ id: i.id, name: i.name })),
+    })),
+  }));
+
+  app.post('/api/taste', async (req, reply) => {
+    const body = parseBody(TasteBody, req, reply);
+    if (!body) return;
+    ctx.record('taste', viaOf(req), body.itemId ?? body.fixture ?? 'label/photo');
+
+    let menu: { source: MenuSource; item: MenuItemInput } | undefined;
+    if (body.itemId) {
+      const fqdn = body.fqdn ?? 'bella-cucina.sim';
+      let rec = ctx.broker.latest(fqdn, 'menu-allergens');
+      if (!rec) {
+        await ctx.broker.connect(fqdn).catch(() => undefined);
+        rec = (await ctx.broker.query(fqdn, 'menu-allergens')) ?? undefined;
+      }
+      const item = (rec?.payload as MenuAllergensPayload | undefined)?.items.find((i) => i.id === body.itemId);
+      if (!rec || !item) return reply.code(404).send({ error: 'no such menu item from a usable source' });
+      menu = {
+        source: {
+          fqdn: rec.fqdn,
+          label: rec.label,
+          tier: rec.tier,
+          simulated: rec.simulated,
+          agentVersion: rec.source.agentVersion,
+          verifiedAt: rec.source.verifiedAt,
+          evidence: rec.source.evidence,
+        },
+        item,
+      };
+    }
+    const hasPhoto = body.fixture || body.imageBase64 || body.text;
+    const result = await ctx.taste.analyze({
+      ...(menu ? { menu } : {}),
+      ...(body.labelText ? { labelText: body.labelText } : {}),
+      ...(hasPhoto ? { photo: { ...frameOf(body), ...(body.text ? { text: body.text } : {}) } } : {}),
+    });
+    for (const p of result.percepts) ctx.broker.publishPercept(p);
+    return { percepts: result.percepts, degraded: result.degraded ?? null };
   });
 }

@@ -1,7 +1,7 @@
 import { render } from '@testing-library/react';
 import { ManualClock } from '@sense/protocol';
 import { HapticRenderer, Presenter, SpatialAudioRenderer, SpeechRenderer } from '@sense/render';
-import { SenseContext, buildServer, registerHearingRoutes, registerVisionRoutes } from '../../server/src';
+import { SenseContext, buildServer, registerHearingRoutes, registerTasteRoutes, registerVisionRoutes } from '../../server/src';
 import { App } from '../src/App';
 import { ApiError, type SenseApi } from '../src/api';
 import { createStore } from '../src/store';
@@ -12,7 +12,7 @@ import { createStore } from '../src/store';
  */
 export async function mountApp(opts: { vibrate?: boolean } = {}) {
   const ctx = await SenseContext.create({ env: {}, clock: new ManualClock(), online: false });
-  const server = await buildServer(ctx, { extra: [registerVisionRoutes, registerHearingRoutes] });
+  const server = await buildServer(ctx, { extra: [registerVisionRoutes, registerHearingRoutes, registerTasteRoutes] });
   const api: SenseApi = {
     getState: async () => (await server.inject({ method: 'GET', url: '/api/state' })).json(),
     get: async (path) => (await server.inject({ method: 'GET', url: path })).json(),

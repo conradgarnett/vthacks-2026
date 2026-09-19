@@ -1,7 +1,7 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { attachWebSocket, buildServer } from './app';
-import { registerHearingRoutes, registerVisionRoutes } from './routes-senses';
+import { registerHearingRoutes, registerTasteRoutes, registerVisionRoutes } from './routes-senses';
 import { SenseContext } from './context';
 import { checkOnline } from './online';
 
@@ -9,7 +9,10 @@ import { checkOnline } from './online';
 const here = dirname(fileURLToPath(import.meta.url));
 const online = await checkOnline();
 const ctx = await SenseContext.create({ keyDir: process.env.SENSE_KEY_DIR ?? '.sense/keys', online });
-const app = await buildServer(ctx, { webDist: join(here, '../../web/dist'), extra: [registerVisionRoutes, registerHearingRoutes] });
+const app = await buildServer(ctx, {
+  webDist: join(here, '../../web/dist'),
+  extra: [registerVisionRoutes, registerHearingRoutes, registerTasteRoutes],
+});
 const stopBackground = ctx.startBackground();
 
 const wanted = Number(process.env.SENSE_SERVER_PORT ?? 8787);

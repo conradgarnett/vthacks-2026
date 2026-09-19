@@ -54,7 +54,8 @@ describe('scene 1: arrive', () => {
     }
     expect(new Set(sessionByAgent.values()).size).toBe(sessionByAgent.size); // never shared across agents
     const serialized = h.sent.map((s) => JSON.stringify(s.msg)).join('\n');
-    expect(serialized).not.toMatch(/peanut|blind|persona|allergens"/i);
+    expect(serialized).not.toMatch(/peanut|blind/i);
+    expect(serialized).not.toMatch(/"(profile|persona|allergens?)"\s*:/i); // generic profile words as JSON keys (capability ids like menu-allergens are fine)
     // capability queries only ever request declared, minimum scopes
     for (const s of h.sent) if (s.msg.type === 'capability_query') expect(s.msg.scope).toEqual([`${s.msg.capability}:read`]);
   });
