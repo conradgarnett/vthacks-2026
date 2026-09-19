@@ -41,6 +41,12 @@ class VisionProvider(ABC):
     # Whether a "read" should escalate here when local OCR finds nothing.
     # The local scene provider cannot read at all, so it stays False there.
     reads_text: bool = False
+    # One line for the log and /health about whether the provider is usable.
+    note: str = ""
+
+    async def verify(self) -> None:
+        """Check credentials and reachability at startup; never raises."""
+        return None
 
     @abstractmethod
     def describe(
@@ -214,6 +220,24 @@ def build_provider(
 
         log.info("Vision provider: local scene model (no credentials required)")
         return LocalSceneProvider(scene_getter, detections_getter)
+
+    if settings.vision_provider == "nvidia":
+        from backend.ai.local_provider import LocalSceneProvider
+
+        local = LocalSceneProvider(scene_getter, detections_getter)
+        if not settings.nvidia_api_key:
+            log.warning(
+                "VISION_PROVIDER=nvidia but NVIDIA_API_KEY is not set; on-device "
+                "mode. Put the key in visionos/.env."
+            )
+            return local
+        from backend.ai.nvidia_provider import NvidiaVisionProvider
+
+        log.info(
+            "Vision provider: NVIDIA %s for questions; scans and reads on-device",
+            settings.nvidia_model,
+        )
+        return NvidiaVisionProvider(settings, local)
 
     if not credentials_available():
         from backend.ai.local_provider import LocalSceneProvider

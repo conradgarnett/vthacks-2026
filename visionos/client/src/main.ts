@@ -126,7 +126,12 @@ function show(text: string, kind: "speech" | "hazard" = "speech"): void {
 // What this backend can do, in one sentence, before the user commits to
 // starting. The same facts are spoken once connected; showing them here too
 // means a sighted helper can see at a glance whether a key is missing.
-type Health = { provider_active?: string; ocr?: string; lan_address?: string | null };
+type Health = {
+  provider_active?: string;
+  provider_note?: string;
+  ocr?: string;
+  lan_address?: string | null;
+};
 
 function describeMode(health: Health | null): string {
   if (!health) return "Backend not reachable yet. It will keep trying once you start.";
@@ -137,6 +142,8 @@ function describeMode(health: Health | null): string {
   switch (health.provider_active) {
     case "ClaudeVisionProvider":
       return `Full mode: Claude describes the scene and answers questions. ${ocr}`;
+    case "NvidiaVisionProvider":
+      return `Ask goes online: an NVIDIA vision model answers your questions; scans and reads stay on-device. ${ocr}${health.provider_note ? ` ${health.provider_note}` : ""}`;
     case "ReplayVisionProvider":
       return `Replay mode: scripted descriptions that ignore the camera. ${ocr}`;
     case "LocalSceneProvider":

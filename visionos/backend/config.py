@@ -35,9 +35,16 @@ class Settings(BaseSettings):
     #           confidently WRONG -- it will describe a living room while the
     #           camera points at a parking lot. Rehearsal and tests only.
     #
+    # "nvidia"  Ask is answered by a vision model hosted by NVIDIA
+    #           (build.nvidia.com) with NVIDIA_API_KEY; scans and reads stay
+    #           on-device. Degrades to "local" without a key.
+    #
     # "claude" degrades to "local", not "replay", when no credentials resolve:
     # a truthful partial answer beats a confident fabrication.
-    vision_provider: Literal["claude", "local", "replay"] = "claude"
+    vision_provider: Literal["claude", "nvidia", "local", "replay"] = "claude"
+    nvidia_api_key: str | None = None
+    nvidia_model: str = "meta/llama-3.2-11b-vision-instruct"
+    nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
     replay_fixture: str = "assets/replay/livingroom.json"
 
     # --- Text reading -----------------------------------------------------

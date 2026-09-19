@@ -313,6 +313,7 @@ async def lifespan(app: FastAPI):
         detections_getter=lambda: app.state.perception.last_detections,
     )
     app.state.effective_provider = type(app.state.provider).__name__
+    await app.state.provider.verify()
 
     app.state.ocr = build_reader(settings.ocr_engine)
     app.state.ocr.warmup()
@@ -344,6 +345,7 @@ async def health() -> JSONResponse:
             # What is actually serving, which differs when credentials are
             # missing and the configured provider fell back.
             "provider_active": app.state.effective_provider,
+            "provider_note": app.state.provider.note,
             "ocr": app.state.ocr.name,
             "device": app.state.perception.device,
             "lan_address": lan_address(),
