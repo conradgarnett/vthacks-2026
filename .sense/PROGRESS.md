@@ -29,3 +29,8 @@ Append one entry per milestone: date, what was done, verify result, tag.
 - Tests: units (39), broker integration (23: every 5.4 scenario), invariants suite (12, property-based), profile-io (4). Core coverage 92% stmts / 94% lines.
 - Bugs found by tests and fixed: disclosure gate matched "allergens" in capability id `menu-allergens`; conflict percept lacked source label; push handlers now fail loud into the security log instead of unhandled rejections; fitShort keeps sentence punctuation.
 - verify green (159 tests). Tag `m4-done`.
+
+## M5 — Profiles and rendering (done)
+- `packages/render`: `route(percept, profile) -> RenderPlan` (modality selection with per-sense overrides, safety redundancy >= 2 modalities at urgency >= 3, untranslated-sense quieting, caption for every audio output, ARIA politeness, interruption), speech text with spoken hedging of inferred/unverified content, earcon schedules per urgency, stereo pan + HRTF panner positions, haptic patterns with direction prefix + text equivalents, browser renderers (Web Speech, Web Audio, Vibration) behind injectable envs with honest fallbacks, `Presenter`.
+- Personas: Blind persona now translates vision only. Situational presets (hands-full, noisy-room) covered by routing tests.
+- 28 render tests including an all-combinations invariant sweep (5 personas x 5 senses x 5 urgencies x safety x spatial = 500 cases). verify green.

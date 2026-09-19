@@ -23,7 +23,7 @@ export const PERSONAS: Record<PersonaId, SensoryProfile> = {
     id: 'persona-blind',
     name: 'Blind / low vision',
     personaId: 'blind',
-    translate: translating('vision', 'hearing', 'smell', 'taste'),
+    translate: translating('vision'),
     output: byUrgency(
       ['speech'],
       ['speech'],
