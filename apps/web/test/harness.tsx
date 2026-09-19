@@ -1,8 +1,16 @@
 import { render } from '@testing-library/react';
 import { ManualClock } from '@sense/protocol';
 import { HapticRenderer, Presenter, SpatialAudioRenderer, SpeechRenderer } from '@sense/render';
-import { SenseContext, buildServer, registerHearingRoutes, registerTasteRoutes, registerVisionRoutes } from '../../server/src';
-import { App } from '../src/App';
+import {
+  SenseContext,
+  buildServer,
+  registerDeviceRoutes,
+  registerHearingRoutes,
+  registerTasteRoutes,
+  registerVisionRoutes,
+} from '../../server/src';
+import { App, type AppProps } from '../src/App';
+import type { Scheduler } from '@sense/touchless';
 import { ApiError, type SenseApi } from '../src/api';
 import { createStore } from '../src/store';
 
@@ -10,9 +18,11 @@ import { createStore } from '../src/store';
  * Runs the real SENSE server (broker + simulated world) in-process and connects the real React
  * app to it. No mocks between the UI and the broker: what the tests see is what the app does.
  */
-export async function mountApp(opts: { vibrate?: boolean } = {}) {
+export async function mountApp(opts: { vibrate?: boolean; scheduler?: Scheduler; touchless?: AppProps['touchless'] } = {}) {
   const ctx = await SenseContext.create({ env: {}, clock: new ManualClock(), online: false });
-  const server = await buildServer(ctx, { extra: [registerVisionRoutes, registerHearingRoutes, registerTasteRoutes] });
+  const server = await buildServer(ctx, {
+    extra: [registerVisionRoutes, registerHearingRoutes, registerTasteRoutes, registerDeviceRoutes],
+  });
   const api: SenseApi = {
     getState: async () => (await server.inject({ method: 'GET', url: '/api/state' })).json(),
     get: async (path) => (await server.inject({ method: 'GET', url: path })).json(),
@@ -42,7 +52,13 @@ export async function mountApp(opts: { vibrate?: boolean } = {}) {
     ),
   );
   const store = createStore(api, presenter);
-  const view = render(<App store={store} />);
+  const view = render(
+    <App
+      store={store}
+      {...(opts.scheduler ? { scheduler: opts.scheduler } : {})}
+      {...(opts.touchless ? { touchless: opts.touchless } : {})}
+    />,
+  );
   return { ctx, server, store, api, vibrations, ...view };
 }
 

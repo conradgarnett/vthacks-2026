@@ -34,6 +34,8 @@ export interface Store {
   refresh(): Promise<void>;
   post(path: string, body?: unknown, via?: string): Promise<unknown>;
   get(path: string): Promise<unknown>;
+  /** Run `fn` with every request it starts audited as `via` (used by InputDevice intents). */
+  runVia<T>(via: string, fn: () => T): T;
   select(fqdn: string | undefined): void;
   setMuted(muted: boolean): void;
   presenter: Presenter;
@@ -111,6 +113,8 @@ export function createStore(api: SenseApi, presenter: Presenter = new Presenter(
     }
   }
 
+  let viaOverride: string | undefined;
+
   const store: Store = {
     getState: () => state,
     subscribe(fn) {
@@ -130,7 +134,7 @@ export function createStore(api: SenseApi, presenter: Presenter = new Presenter(
     },
     async post(path, body, via) {
       try {
-        const res = await api.post(path, body, via);
+        const res = await api.post(path, body, via ?? viaOverride);
         set({ error: undefined });
         return res;
       } catch (err) {
@@ -139,6 +143,15 @@ export function createStore(api: SenseApi, presenter: Presenter = new Presenter(
       }
     },
     get: (path) => api.get(path),
+    runVia(via, fn) {
+      const prior = viaOverride;
+      viaOverride = via;
+      try {
+        return fn(); // handlers start their requests synchronously, so the override is read at call time
+      } finally {
+        viaOverride = prior;
+      }
+    },
     select: (selectedAgent) => set({ selectedAgent }),
     setMuted: (muted) => set({ muted }),
     presenter,

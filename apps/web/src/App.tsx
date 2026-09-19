@@ -11,6 +11,8 @@ import { VisionPanel } from './ui/VisionPanel';
 import { HearingPanel } from './ui/HearingPanel';
 import { ScentPanel } from './ui/ScentPanel';
 import { TastePanel } from './ui/TastePanel';
+import { TouchlessPanel, type TouchlessHandle } from './ui/TouchlessPanel';
+import { realScheduler, type Scheduler } from '@sense/touchless';
 
 /** Apply the profile's display preferences (contrast, text size, motion) to the page. */
 function useDisplayPrefs(profile: SensoryProfile | undefined): void {
@@ -35,7 +37,14 @@ const TEST_PERCEPT: Percept = {
   spatial: { bearingDeg: 90, distanceM: 2 },
 };
 
-export function App({ store }: { store: Store }) {
+export interface AppProps {
+  store: Store;
+  /** Time source for touchless devices (manual in tests and the headless demo). */
+  scheduler?: Scheduler;
+  touchless?: { initialDevice?: 'off' | 'switch-scan' | 'dwell' | 'keyboard'; onReady?: (h: TouchlessHandle) => void };
+}
+
+export function App({ store, scheduler = realScheduler, touchless }: AppProps) {
   const ui = useStore(store);
   const snap = ui.snapshot;
   useDisplayPrefs(snap?.profile);
@@ -114,6 +123,12 @@ export function App({ store }: { store: Store }) {
                 declared={snap.profile.allergens}
               />
               <ScentPanel status={snap.scent} />
+              <TouchlessPanel
+                store={store}
+                scheduler={scheduler}
+                {...(touchless?.initialDevice ? { initialDevice: touchless.initialDevice } : {})}
+                {...(touchless?.onReady ? { onReady: touchless.onReady } : {})}
+              />
               <HearingPanel post={post} />
               <TrustInspector verifications={snap.verifications} selected={ui.selectedAgent} onSelect={store.select} />
             </div>

@@ -80,7 +80,7 @@ export function VisionPanel({ post, aiLabel }: { post: PostFn; aiLabel: string }
         <label htmlFor="question">Your question</label>
         <div className="toolbar">
           <input id="question" type="text" value={question} onChange={(e) => setQuestion(e.target.value)} size={44} />
-          <button type="submit" className="primary">
+          <button type="submit" className="primary" data-touchless="Ask the question">
             Ask
           </button>
         </div>

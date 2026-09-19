@@ -116,6 +116,8 @@ export function PerceptCard({
                 key={a.id}
                 type="button"
                 className={isAck && !acked ? 'primary' : ''}
+                data-touchless={isAck ? `Acknowledge: ${p.short}` : `${a.label}: ${p.short}`}
+                data-touchless-kind={isAck ? 'acknowledge' : 'action'}
                 disabled={isAck && acked}
                 onClick={() => onAction(p, a.id)}
               >

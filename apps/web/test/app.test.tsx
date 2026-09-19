@@ -227,6 +227,112 @@ describe('scene 3: eat (Impaired-taste persona, peanut allergy)', () => {
   });
 });
 
+describe('scene 6: touchless close-out (Motor-limited persona)', () => {
+  it('acknowledges the alert and switches persona using only one-switch scanning: no pointer events, every action audited as an intent', async () => {
+    const { ManualScheduler } = await import('@sense/touchless');
+    const sched = new ManualScheduler();
+    let handle: import('../src/ui/TouchlessPanel').TouchlessHandle | undefined;
+    const { ctx, store, container } = await mountApp({
+      scheduler: sched,
+      touchless: { initialDevice: 'switch-scan', onReady: (h) => (handle = h) },
+    });
+    await screen.findByText('Live percept feed');
+    expect(handle?.device).toBe('switch-scan');
+
+    // Setup (labelled "setup", not a user action): Motor-limited persona, arrive, real alarm.
+    await store.runVia('setup', () => store.post('/api/profile/persona', { personaId: 'motor' }));
+    await store.runVia('setup', () => store.post('/api/arrive', { area: 'riverside' }));
+    await screen.findAllByText('Riverside Hall: Verified, 7 of 7 checks.');
+    await ctx.world.trigger('fire-alarm');
+    await waitFor(() => expect(container.querySelector('#alert-region')?.textContent).toContain('Fire alarm, East stairwell'));
+
+    // From here on: no mouse, no pointer. Only the switch.
+    const pointerish: string[] = [];
+    for (const type of ['mousedown', 'mouseup', 'mousemove', 'pointerdown', 'pointerup', 'pointermove', 'touchstart']) {
+      document.addEventListener(type, () => pointerish.push(type), true);
+    }
+    const scanTo = (re: RegExp) => {
+      for (let i = 0; i < 60; i++) {
+        sched.advance(1500); // one scan step
+        if (re.test(handle?.controller.focused?.label ?? '')) return true;
+      }
+      return false;
+    };
+
+    expect(scanTo(/^Acknowledge: Fire alarm/)).toBe(true);
+    const ring = document.querySelector('[data-intent-focus="true"]') as HTMLElement;
+    expect(ring.textContent).toMatch(/Acknowledge/); // visible focus ring on the focused control
+    expect(await screen.findByText(/Focused: Acknowledge: Fire alarm/)).toBeTruthy();
+    sched.advance(300); // false-activation guard: the item must have been focused for a moment
+    handle?.press();
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /acknowledged/i }).length).toBeGreaterThan(0));
+
+    expect(scanTo(/^Persona: Deaf/)).toBe(true);
+    sched.advance(300);
+    handle?.press();
+    await waitFor(() => expect(store.getState().snapshot?.profile.personaId).toBe('deaf'));
+    expect((screen.getByLabelText(/Deaf \/ hard of hearing/) as HTMLInputElement).checked).toBe(true);
+
+    // Proof: every action after setup was completed by an InputDevice intent.
+    const scene = ctx.snapshot().actions.filter((a) => a.via !== 'setup');
+    expect(scene.filter((a) => a.kind === 'world-event')).toEqual([]);
+    const done = scene.filter((a) => a.kind === 'acknowledge' || a.kind === 'persona');
+    expect(done.map((a) => [a.kind, a.via])).toEqual([
+      ['acknowledge', 'intent:switch-scan'],
+      ['persona', 'intent:switch-scan'],
+    ]);
+    expect(scene.every((a) => a.via === 'intent:switch-scan')).toBe(true);
+    expect(handle?.controller.log.map((l) => [l.device, l.intent])).toEqual([
+      ['switch-scan', 'activate'],
+      ['switch-scan', 'activate'],
+    ]);
+    expect(pointerish).toEqual([]);
+
+    // Pause tracking is always available: while paused the switch does nothing.
+    handle?.controller.setPaused(true);
+    const before = ctx.snapshot().actions.length;
+    sched.advance(10_000);
+    handle?.press();
+    expect(ctx.snapshot().actions.length).toBe(before);
+    expect(handle?.controller.log).toHaveLength(2);
+  });
+
+  it('Escape pauses and resumes tracking, devices can be switched, and the webcam gap is stated honestly', async () => {
+    const user = userEvent.setup();
+    const { ManualScheduler } = await import('@sense/touchless');
+    const sched = new ManualScheduler();
+    const { container } = await mountApp({ scheduler: sched });
+    const panel = (await screen.findByRole('region', { name: /touchless: hands-free control/i })) as HTMLElement;
+    expect(panel.textContent).toMatch(/Webcam head, eye or hand tracking is not available in this build/);
+    expect(panel.textContent).toMatch(/MediaPipe Tasks model files are not vendored/);
+    expect((within(panel).getByRole('button', { name: /pause tracking/i }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(within(panel).getByLabelText(/One-switch scanning/));
+    const pause = within(panel).getByRole('button', { name: /pause tracking/i }) as HTMLButtonElement;
+    expect(pause.disabled).toBe(false);
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(within(panel).getByRole('button', { name: /resume tracking/i })).toBeTruthy());
+    expect(panel.textContent).toMatch(/Tracking is paused/);
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(within(panel).getByRole('button', { name: /pause tracking/i })).toBeTruthy());
+    // dwell mode exposes calibration; keyboard mode intercepts nothing when off
+    await user.click(within(panel).getByLabelText(/Dwell selection/));
+    await user.click(within(panel).getByText('Calibration'));
+    await user.click(within(panel).getByRole('button', { name: /calibrate with example tracker drift/i }));
+    expect(within(panel).getByText(/Calibrated from 5 points/)).toBeTruthy();
+    await user.click(within(panel).getByLabelText(/Off \(normal/));
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it('the lift can be called from the app through the verified channel', async () => {
+    const user = userEvent.setup();
+    const { container } = await mountApp();
+    await user.click(await screen.findByRole('button', { name: /call the lift to floor 1/i }));
+    const feed = await screen.findByRole('list', { name: /percepts, newest first/i });
+    await waitFor(() => expect(within(feed).getAllByText('Lift called to floor 1. Verified, Hall Lifts.').length).toBeGreaterThan(0));
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+});
+
 describe('profile controls', () => {
   it('switches all five personas, keeps allergens, and applies display preferences', async () => {
     const user = userEvent.setup();

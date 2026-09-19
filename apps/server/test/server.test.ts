@@ -5,7 +5,15 @@ import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { ManualClock, type ServerEvent, type StateSnapshot } from '@sense/protocol';
-import { SenseContext, attachWebSocket, buildServer, registerHearingRoutes, registerTasteRoutes, registerVisionRoutes } from '../src';
+import {
+  SenseContext,
+  attachWebSocket,
+  buildServer,
+  registerDeviceRoutes,
+  registerHearingRoutes,
+  registerTasteRoutes,
+  registerVisionRoutes,
+} from '../src';
 
 const cleanups: Array<() => Promise<void> | void> = [];
 afterEach(async () => {
@@ -15,7 +23,7 @@ afterEach(async () => {
 async function start(opts: { manual?: boolean; webDist?: string } = {}) {
   const ctx = await SenseContext.create({ env: {}, ...(opts.manual === false ? {} : { clock: new ManualClock() }), online: false });
   const app = await buildServer(ctx, {
-    extra: [registerVisionRoutes, registerHearingRoutes, registerTasteRoutes],
+    extra: [registerVisionRoutes, registerHearingRoutes, registerTasteRoutes, registerDeviceRoutes],
     ...(opts.webDist ? { webDist: opts.webDist } : {}),
   });
   cleanups.push(() => app.close());
@@ -367,6 +375,34 @@ describe('scene 3: TasteLens through the server (peanut allergy)', () => {
     expect(label.at(-1)?.kind).toBe('alert');
     expect(s.percepts.some((p) => p.short === 'Some label text was ignored.')).toBe(true);
     expect((await post('/api/taste', { labelText: 'x'.repeat(5000) })).statusCode).toBe(400);
+  });
+});
+
+describe('device control through the verified channel (lift)', () => {
+  it('calls the lift with the minimum scope, shows provenance, and refuses during an alarm', async () => {
+    const { ctx, post, state, settle } = await start();
+    const res = await post('/api/lift', { floor: 1 }, { 'x-sense-via': 'intent:switch-scan' }); // connects and verifies on demand
+    expect(res.statusCode).toBe(200);
+    expect(res.json().ok).toBe(true);
+    let s = await state();
+    const called = s.percepts.at(-1);
+    expect(called).toMatchObject({ short: 'Lift called to floor 1. Verified, Hall Lifts.', sense: 'touch', kind: 'action' });
+    expect(called?.provenance).toMatchObject({ tier: 'VERIFIED', source: 'hall-lifts.sim' });
+    expect(s.actions.at(-1)).toMatchObject({ kind: 'lift', via: 'intent:switch-scan' });
+    const q = ctx.broker.disclosure.entries().filter((d) => d.capability === 'device-control');
+    expect(q.at(-1)?.scope).toEqual(['lift:call']);
+
+    await post('/api/arrive', { area: 'riverside' });
+    await settle();
+    await post('/api/world/event', { name: 'fire-alarm' });
+    await settle();
+    const refused = await post('/api/lift', { floor: 2 });
+    expect(refused.json().ok).toBe(false);
+    s = await state();
+    const p = s.percepts.at(-1);
+    expect(p?.short).toBe('Lift refused the call. Verified, Hall Lifts.');
+    expect(p?.long).toMatch(/out of service during an alarm/);
+    expect((await post('/api/lift', { floor: 9 })).statusCode).toBe(400);
   });
 });
 

@@ -29,6 +29,8 @@ export function PersonaSwitcher({ profile, post }: { profile: SensoryProfile; po
                 type="radio"
                 name="persona"
                 id={`persona-${id}`}
+                data-touchless={`Persona: ${PERSONAS[id].name}`}
+                data-touchless-kind="persona"
                 value={id}
                 checked={profile.personaId === id}
                 onChange={() => void post('/api/profile/persona', { personaId: id })}
@@ -192,6 +194,7 @@ export function SceneControls({ post }: { post: PostFn }) {
           <button
             key={b.label}
             type="button"
+            data-touchless={b.label}
             onClick={() => {
               if (b.arrive) void post('/api/arrive', { area: b.arrive });
               else if (b.script) void post('/api/world/play', { script: b.script });

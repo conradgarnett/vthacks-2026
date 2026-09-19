@@ -476,3 +476,51 @@ footer {
   color: var(--muted);
   font-style: italic;
 }
+
+/* Focus ring for InputDevice navigation (switch scanning, dwell, keyboard intents): unmistakable and not colour-only. */
+[data-intent-focus='true'] {
+  outline: 5px solid var(--focus) !important;
+  outline-offset: 4px;
+  box-shadow: 0 0 0 9px var(--surface);
+  position: relative;
+  z-index: 1;
+}
+[data-intent-focus='true']::after {
+  content: '\25B6 focus';
+  position: absolute;
+  left: 0;
+  top: -1.6rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  background: var(--accent);
+  color: var(--on-accent);
+  padding: 0 0.4rem;
+  border-radius: 0.25rem;
+  white-space: nowrap;
+}
+.dwell-ring {
+  height: 0.6rem;
+  background: var(--hairline);
+  border-radius: 0.3rem;
+  overflow: hidden;
+}
+.dwell-ring > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.calibration-pad {
+  position: relative;
+  height: 12rem;
+  border: 2px dashed var(--border);
+  border-radius: 0.5rem;
+}
+.cal-dot {
+  position: absolute;
+  min-width: 2rem;
+  text-align: center;
+  border: 2px solid var(--accent);
+  border-radius: 999px;
+  background: var(--surface);
+  font-weight: 700;
+}

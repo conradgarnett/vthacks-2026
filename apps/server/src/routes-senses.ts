@@ -153,3 +153,52 @@ export function registerTasteRoutes(app: FastifyInstance, ctx: SenseContext): vo
     return { percepts: result.percepts, degraded: result.degraded ?? null };
   });
 }
+
+const LiftBody = z.strictObject({ floor: z.number().int().min(0).max(2) });
+
+/**
+ * Device control through the SAME verified channel as everything else: the lift agent is verified
+ * first, the request carries only the minimum scope, and the answer is shown with its provenance.
+ */
+export function registerDeviceRoutes(app: FastifyInstance, ctx: SenseContext): void {
+  app.post('/api/lift', async (req, reply) => {
+    const body = parseBody(LiftBody, req, reply);
+    if (!body) return;
+    const via = viaOf(req);
+    ctx.record('lift', via, `call to floor ${body.floor}`);
+    const fqdn = 'hall-lifts.sim';
+    if (!ctx.broker.verifications().some((v) => v.fqdn === fqdn && v.result.outcome !== 'REJECTED'))
+      await ctx.broker.connect(fqdn).catch(() => undefined);
+    const rec = await ctx.broker.query(fqdn, 'device-control', { action: 'call', device: 'lift-1', floor: body.floor });
+    const result = (rec?.payload as { result?: { ok: boolean; message: string } } | undefined)?.result;
+    const source = rec?.source;
+    const tierWord = rec ? rec.tier.charAt(0) + rec.tier.slice(1).toLowerCase() : 'Unverified';
+    const label = rec?.label ?? 'Hall Lifts';
+    const ok = result?.ok === true;
+    const percept = ctx.broker.publishPercept({
+      id: ctx.broker.nextPerceptId(),
+      timestamp: new Date(ctx.clock.now()).toISOString(),
+      sense: 'touch',
+      kind: 'action',
+      urgency: ok ? 1 : 2,
+      short: !rec
+        ? `Lift not reachable. Unverified, ${label}.`
+        : ok
+          ? `Lift called to floor ${body.floor}. ${tierWord}, ${label}.`
+          : `Lift refused the call. ${tierWord}, ${label}.`,
+      long: !rec
+        ? 'The lift agent could not be reached or verified, so nothing was sent.'
+        : `${label} (${rec.tier}) answered: ${result?.message ?? 'no result'}`,
+      provenance: {
+        tier: rec?.tier ?? 'UNVERIFIED',
+        source: fqdn,
+        sourceLabel: label,
+        ...(source
+          ? { agentVersion: source.agentVersion, verifiedAt: source.verifiedAt, evidence: source.evidence }
+          : { evidence: ['lift agent not reachable'] }),
+      },
+      ...(rec?.simulated ? { simulated: true } : {}),
+    });
+    return { ok, percept };
+  });
+}
