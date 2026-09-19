@@ -33,6 +33,7 @@ import logging
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 
+from backend.ai.lexicon import correct_text
 from backend.ai.text_quality import assess, clean_for_speech, normalize
 
 log = logging.getLogger(__name__)
@@ -923,7 +924,11 @@ def format_for_speech(lines: list[TextLine]) -> str:
     """
     parts: list[str] = []
     for row in reading_rows(_drop_overlapping_fragments(_drop_fragments(lines))):
-        text = " ".join(clean_for_speech(line.text) for line in row)
+        # Near-miss correction last, on text that has already survived every
+        # filter. Cursive drops the lead-in capital, leaving a word one edit
+        # from correct; the lexicon restores only that, and only for wording
+        # it already knows.
+        text = " ".join(correct_text(clean_for_speech(line.text)) for line in row)
         text = " ".join(text.split())
         if text:
             parts.append(text)

@@ -24,13 +24,23 @@ from backend.ai.ocr import build_reader, format_for_speech
 
 
 def main() -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Score the reader by typeface.")
+    parser.add_argument(
+        "--system", action="store_true",
+        help="this machine's system faces (macOS lists) instead of the bundled "
+             "families, which exist everywhere and compare across machines",
+    )
+    args = parser.parse_args()
+
     ocr = build_reader()
     if not ocr.available:
         print("No OCR engine available.")
         return 1
     ocr.warmup()
 
-    samples = build_font_corpus()
+    samples = build_font_corpus(bundled=not args.system)
     if not samples:
         print("No fonts from the benchmark exist on this machine.")
         return 1
@@ -38,11 +48,13 @@ def main() -> int:
     by_family: dict[str, list[tuple[str, str, float]]] = defaultdict(list)
     for sample in samples:
         spoken = normalize_output(format_for_speech(ocr.read_consensus_sync(sample["frames"])))
-        by_family[sample["family"]].append((sample["font"], sample["truth"], cer(spoken, sample["truth"])))
+        font = Path(sample["font"]).stem
+        by_family[sample["family"]].append((font, sample["truth"], cer(spoken, sample["truth"])))
         if spoken.lower().strip() != sample["truth"].lower().strip():
-            print(f"   {sample['family']:<18} {sample['font'][:22]:<22} want={sample['truth']!r:<12} got={spoken[:36]!r}")
+            print(f"   {sample['family']:<18} {font[:22]:<22} want={sample['truth']!r:<12} got={spoken[:36]!r}")
 
-    print(f"\n{'=' * 72}\nFONT EVAL  (engine={ocr.name}, {platform.system()}, n={len(samples)})\n{'=' * 72}")
+    which = "system" if args.system else "bundled"
+    print(f"\n{'=' * 72}\nFONT EVAL  (engine={ocr.name}, {platform.system()}, {which} fonts, n={len(samples)})\n{'=' * 72}")
     print(f"  {'family':<18} {'n':>3}  {'exact':>6}  {'CER':>6}")
     for family, rows in by_family.items():
         exact = sum(1 for _, _, error in rows if error == 0.0)

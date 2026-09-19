@@ -14,13 +14,11 @@ reader trained on clean signage falls over.
 from __future__ import annotations
 
 import io
-import os
 import random
+from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
-
-from typefaces import FONT_DIR
 
 W, H = 1400, 500
 
@@ -72,32 +70,57 @@ FONT_FAMILIES: dict[str, list[str]] = {
     ],
 }
 
-# The display faces committed under eval/fonts/ exist on every machine, so
-# these rows compare across a Mac and a Windows laptop. The macOS families
-# above stay as they are and are skipped where their files do not exist.
-_BUNDLED = {
-    "bundled_script": [
-        "Pacifico-Regular.ttf", "KaushanScript-Regular.ttf", "Satisfy-Regular.ttf",
-        "RockSalt-Regular.ttf", "PermanentMarker-Regular.ttf", "Lobster-Regular.ttf",
-    ],
-    "bundled_decorative": [
-        "Creepster-Regular.ttf", "Monoton-Regular.ttf", "CinzelDecorative-Regular.ttf",
-        "BlackOpsOne-Regular.ttf", "SpecialElite-Regular.ttf",
-    ],
-    "bundled_display": [
-        "Bangers-Regular.ttf", "Righteous-Regular.ttf", "AmaticSC-Regular.ttf",
-        "BebasNeue-Regular.ttf",
-    ],
-}
-for _family, _names in _BUNDLED.items():
-    FONT_FAMILIES[_family] = [str(FONT_DIR / name) for name in _names]
-FONT_FAMILIES = {
-    family: [path for path in paths if os.path.exists(path)]
-    for family, paths in FONT_FAMILIES.items()
-}
-FONT_FAMILIES = {family: paths for family, paths in FONT_FAMILIES.items() if paths}
-
 PHRASES = ["Diet Cola", "Fire Exit", "Room 204B", "Ginger Ale", "Reception"]
+
+_BUNDLED_DIR = Path(__file__).resolve().parent / "fonts"
+
+# Open-licensed faces committed under eval/fonts/, chosen for what a person
+# actually meets: shopfronts, menus, packaging, cafe boards. They render
+# identically on every machine, so scores compare across a Mac and a Windows
+# laptop in a way the per-platform system fonts cannot.
+#
+# Cursive is over-represented on purpose. It is both the commonest hard case
+# in daily life -- drinks, cosmetics, bakeries, greeting cards -- and the one
+# an OCR engine fails worst on.
+BUNDLED_FAMILIES: dict[str, list[str]] = {
+    "everyday_sans": [
+        "Montserrat-Variable.ttf", "OpenSans-Variable.ttf", "Lato-Regular.ttf",
+        "Poppins-Regular.ttf", "Oswald-Variable.ttf", "Raleway-Variable.ttf",
+        "Anton-Regular.ttf", "BebasNeue-Regular.ttf", "Righteous-Regular.ttf",
+    ],
+    "everyday_serif": [
+        "PlayfairDisplay-Variable.ttf", "Lora-Variable.ttf",
+        "PT_Serif-Web-Regular.ttf", "CinzelDecorative-Regular.ttf",
+    ],
+    "cursive_script": [
+        "DancingScript-Variable.ttf", "GreatVibes-Regular.ttf",
+        "Sacramento-Regular.ttf", "Courgette-Regular.ttf",
+        "Parisienne-Regular.ttf", "Allura-Regular.ttf", "Cookie-Regular.ttf",
+        "AlexBrush-Regular.ttf", "Tangerine-Regular.ttf",
+        "MarckScript-Regular.ttf", "KaushanScript-Regular.ttf",
+        "Pacifico-Regular.ttf", "Satisfy-Regular.ttf", "Lobster-Regular.ttf",
+    ],
+    "handwriting": [
+        "Caveat-Variable.ttf", "IndieFlower-Regular.ttf",
+        "PatrickHand-Regular.ttf", "RockSalt-Regular.ttf",
+        "PermanentMarker-Regular.ttf", "AmaticSC-Regular.ttf",
+    ],
+    "novelty_display": [
+        "Bangers-Regular.ttf", "BlackOpsOne-Regular.ttf",
+        "Creepster-Regular.ttf", "Monoton-Regular.ttf",
+        "SpecialElite-Regular.ttf",
+    ],
+}
+
+
+def bundled_families() -> dict[str, list[str]]:
+    """Family -> absolute paths, skipping any face not present on disk."""
+    out: dict[str, list[str]] = {}
+    for family, names in BUNDLED_FAMILIES.items():
+        paths = [str(_BUNDLED_DIR / n) for n in names if (_BUNDLED_DIR / n).exists()]
+        if paths:
+            out[family] = paths
+    return out
 
 
 def _font(path: str, px: int):
@@ -139,28 +162,33 @@ def capture(img: Image.Image, rng: random.Random, severity: float = 0.6) -> byte
     return buf.getvalue()
 
 
-def build_font_corpus(seed: int = 41, frames: int = 3, phrases_per_font: int = 2):
-    """One sample per (font, phrase). Conditions held constant throughout."""
+def build_font_corpus(seed: int = 41, frames: int = 3, phrases_per_font: int = 2,
+                      bundled: bool = False):
+    """One sample per (font, phrase). Conditions held constant throughout.
+
+    bundled=True uses the open-licensed faces committed under eval/fonts/,
+    which render identically everywhere and so compare across machines.
+    """
     rng = random.Random(seed)
     np.random.seed(seed)
 
+    families = bundled_families() if bundled else FONT_FAMILIES
     samples = []
-    position = 0
-    for family, paths in FONT_FAMILIES.items():
-        for path in paths:
-            position += 1
+    for family, paths in families.items():
+        for index, path in enumerate(paths):
             for i in range(phrases_per_font):
-                # By position, not hash(path): str hashes are salted per
-                # process, so the phrase for a font changed between runs and
-                # the numbers did not reproduce.
-                text = PHRASES[(position + i) % len(PHRASES)]
+                # Positional, not hash-based: Python randomises string
+                # hashing per process, so hash(path) silently changed
+                # which phrases each font was tested on between runs and
+                # made before/after comparisons meaningless.
+                text = PHRASES[(index + i) % len(PHRASES)]
                 base = render_phrase(text, path)
                 if base is None:
                     continue
                 samples.append({
                     "frames": [capture(base, rng) for _ in range(frames)],
                     "truth": text,
-                    "font": os.path.basename(path).rsplit(".", 1)[0],
+                    "font": path.rsplit("/", 1)[-1].rsplit(".", 1)[0],
                     "family": family,
                 })
     return samples
