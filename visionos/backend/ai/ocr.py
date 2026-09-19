@@ -49,10 +49,24 @@ _MIN_CONFIDENCE = 0.3
 # sign reads left-to-right instead of zig-zagging down the page.
 _SAME_LINE_TOLERANCE = 0.04
 
-# Below this, upscaling gives Vision more pixels per stroke and measurably
+# Target longest edge after upscaling. More pixels per stroke measurably
 # improves recall on distant text.
-_UPSCALE_BELOW_PX = 1100
-_MAX_UPSCALE = 2.0
+_UPSCALE_BELOW_PX = 1600
+_MAX_UPSCALE = 3.0
+
+# 2x2 tiles quarter the frame, so text at 1.2% of it becomes ~5% of a tile --
+# from invisible to comfortably readable. Overlap keeps text that straddles a
+# boundary whole in at least one tile.
+# Tried in order, stopping as soon as a reading appears. 4x4 is the practical
+# floor: finer tiles cut words into fragments faster than they reveal them.
+_TILE_GRIDS = (2, 4)
+_TILE_OVERLAP = 0.12
+# Frames to tile when escalating. Tiling is the expensive path, so this is
+# the accuracy/latency dial: 1 frame forfeits consensus, 3 blew the budget.
+_TILE_FRAMES = 1
+# Total characters below which a full-frame reading is treated as a scrap
+# worth escalating on. Most real signage clears this easily.
+_THIN_RESULT_CHARS = 6
 
 
 @dataclass(slots=True)
@@ -99,42 +113,156 @@ class AppleVisionOCR:
     # -- single frame ------------------------------------------------------
 
     def read_sync(self, frame_jpeg: bytes) -> list[TextLine]:
-        """Read one frame, retrying once for smaller text."""
+        """Read one frame, escalating to tiles for small text.
+
+        Vision's minimum text height is a *fraction of the frame*, so a sign
+        across a room is invisible to it no matter how many pixels the sensor
+        captured -- measured CER was 1.00 below 2% of frame height, total
+        failure. Lowering the threshold instead makes it read texture as text.
+
+        Tiling fixes the ratio rather than the threshold: text occupying 1.2%
+        of the full frame occupies ~5% of a quarter tile, which is comfortably
+        within range. The full-frame pass runs first because it is cheap and
+        handles ordinary signage.
+        """
         if not self._available:
             return []
 
         prepared = _prepare(frame_jpeg)
+        lines = self._read_full(prepared)
+        if _needs_tiles(lines):
+            lines = self._escalate_tiles(prepared, lines)
+        return lines
+
+    def _read_full(self, prepared: bytes) -> list[TextLine]:
+        """Whole-frame pass. Cheap, and enough for ordinary signage."""
         lines = self._recognize(prepared, _MIN_TEXT_HEIGHT)
         if not lines:
             lines = self._recognize(prepared, _MIN_TEXT_HEIGHT_RETRY)
         return lines
 
-    async def read(self, frame_jpeg: bytes) -> list[TextLine]:
-        from backend.perception.runtime import run_inference
+    def _escalate_tiles(self, prepared: bytes, lines: list[TextLine]) -> list[TextLine]:
+        """Walk finer grids until something readable appears.
 
-        return await run_inference(self.read_sync, frame_jpeg)
+        Tiles rescue small text but damage large text: a crop cuts words at
+        its boundary and re-reads what the full frame already got right, so a
+        good reading acquires a garbled twin ("Departures" became
+        "DLpartiirL Departures"). Measured, unconditional tiling made 3.5%-14%
+        text worse while helping only below 2% -- hence the escalation gate.
+        """
+        for grid in _TILE_GRIDS:
+            lines = _dedupe(lines + self._read_tiles(prepared, grid))
+            if not _needs_tiles(lines):
+                break
+        return lines
+
+    def _read_tiles(self, frame_jpeg: bytes, grid: int = 2) -> list[TextLine]:
+        """OCR overlapping crops, mapping results back to frame coordinates.
+
+        Tiles overlap so text straddling a boundary is whole in at least one
+        of them; without the overlap a centred sign is reliably cut in half.
+        """
+        try:
+            from PIL import Image
+
+            image = Image.open(io.BytesIO(frame_jpeg))
+            image.load()
+        except Exception:
+            return []
+
+        width, height = image.size
+        found: list[TextLine] = []
+        step = 1.0 / grid
+
+        for row in range(grid):
+            for col in range(grid):
+                left = max(0.0, col * step - _TILE_OVERLAP)
+                top = max(0.0, row * step - _TILE_OVERLAP)
+                right = min(1.0, (col + 1) * step + _TILE_OVERLAP)
+                bottom = min(1.0, (row + 1) * step + _TILE_OVERLAP)
+
+                box = (
+                    int(left * width), int(top * height),
+                    int(right * width), int(bottom * height),
+                )
+                tile = image.crop(box)
+                if min(tile.size) < 40:
+                    continue
+
+                # Upscale so the crop carries enough pixels per stroke.
+                factor = min(_MAX_UPSCALE, _UPSCALE_BELOW_PX / max(tile.size))
+                if factor > 1.05:
+                    tile = tile.resize(
+                        (int(tile.width * factor), int(tile.height * factor)),
+                        Image.LANCZOS,
+                    )
+
+                buffer = io.BytesIO()
+                tile.save(buffer, "JPEG", quality=94)
+                for line in self._recognize(buffer.getvalue(), _MIN_TEXT_HEIGHT):
+                    # Tile-relative coordinates back to frame-relative.
+                    found.append(
+                        TextLine(
+                            text=line.text,
+                            confidence=line.confidence,
+                            top=top + line.top * (bottom - top),
+                            left=left + line.left * (right - left),
+                        )
+                    )
+
+        return found
+
+    async def read(self, frame_jpeg: bytes) -> list[TextLine]:
+        from backend.perception.runtime import run_ocr
+
+        return await run_ocr(self.read_sync, frame_jpeg)
 
     # -- multi frame -------------------------------------------------------
 
     def read_consensus_sync(self, frames: list[bytes]) -> list[TextLine]:
-        """Read several frames and keep only what they agree on.
+        """Read several frames and reconcile them.
 
         OCR noise is inconsistent between frames while real text is stable, so
         agreement is a far better signal than any single frame's confidence.
+
+        Tiling is deliberately not done per frame. It is the expensive path --
+        up to 21 recognitions per frame -- and tiling all three blew the
+        latency budget (p50 1.1 s, tail 3.7 s against 2.5 s). Since tiles only
+        matter for text too small to survive blur anyway, they run once, on
+        the sharpest frame.
         """
         usable = [f for f in frames if f]
         if not usable:
             return []
-        if len(usable) == 1:
-            return [line for line in self.read_sync(usable[0]) if _keep(line)]
 
-        readings = [self.read_sync(frame) for frame in usable]
-        return _merge(readings)
+        prepared = [_prepare(frame) for frame in usable]
+        readings = [self._read_full(frame) for frame in prepared]
+        merged = _merge(readings) if len(readings) > 1 else [
+            line for line in readings[0] if _keep(line)
+        ]
+
+        if _needs_tiles(merged):
+            # Two frames, not one: tiling a single frame cost accuracy on the
+            # smallest text (CER 0.70 -> 0.85) because it forfeited consensus
+            # exactly where readings are least reliable. Two keeps the vote
+            # and still lands well inside the latency budget.
+            sharpest = sorted(prepared, key=_sharpness, reverse=True)[:_TILE_FRAMES]
+            tiled: list[TextLine] = []
+            for frame in sharpest:
+                tiled.extend(self._escalate_tiles(frame, []))
+
+            # Union of the best variants, not a consensus vote. Text this
+            # small garbles differently in every frame, so demanding agreement
+            # rejects the only readings available and the user hears nothing.
+            # This is already the last resort; plausibility is the gate here.
+            merged = _dedupe(merged + tiled)
+
+        return merged
 
     async def read_consensus(self, frames: list[bytes]) -> list[TextLine]:
-        from backend.perception.runtime import run_inference
+        from backend.perception.runtime import run_ocr
 
-        return await run_inference(self.read_consensus_sync, frames)
+        return await run_ocr(self.read_consensus_sync, frames)
 
     # -- internals ---------------------------------------------------------
 
@@ -231,10 +359,97 @@ def _keep(line: TextLine) -> bool:
     return assess(line.text, line.confidence).keep
 
 
+def _sharpness(frame_jpeg: bytes) -> float:
+    """Focus estimate: variance of a Laplacian, higher is sharper.
+
+    Small text is the only case that reaches tiling, and it does not survive
+    motion blur, so spending the expensive pass on the sharpest frame of the
+    burst rather than an arbitrary one is close to free accuracy.
+    """
+    try:
+        import numpy as np
+        from PIL import Image
+
+        image = Image.open(io.BytesIO(frame_jpeg)).convert("L")
+        # Downscale first: sharpness ranking is unaffected and this keeps the
+        # metric far cheaper than the recognition it is choosing between.
+        image.thumbnail((480, 480))
+        pixels = np.asarray(image, dtype=np.float32)
+
+        laplacian = (
+            -4 * pixels[1:-1, 1:-1]
+            + pixels[:-2, 1:-1] + pixels[2:, 1:-1]
+            + pixels[1:-1, :-2] + pixels[1:-1, 2:]
+        )
+        return float(laplacian.var())
+    except Exception:
+        return 0.0
+
+
+def _needs_tiles(lines: list[TextLine]) -> bool:
+    """Was the full-frame pass good enough to skip the tile escalation?
+
+    Nothing found, or only a scrap, means the text was probably too small for
+    Vision's frame-relative minimum height. A solid reading means tiling can
+    only add garbled duplicates.
+    """
+    if not lines:
+        return True
+    return sum(len(line.text.strip()) for line in lines) < _THIN_RESULT_CHARS
+
+
+def _plausibility(line: TextLine) -> float:
+    return assess(line.text, line.confidence).score
+
+
+def _dedupe(lines: list[TextLine]) -> list[TextLine]:
+    """Keep one reading per physical piece of text, the most plausible one.
+
+    Position is the primary key, not text similarity. Two bad readings of one
+    word garble differently -- "DLpartiirL" and "Departures" score only ~0.6
+    similar -- so text matching emitted both and the user heard the correct
+    reading with a nonsense twin attached. The same text cannot be in two
+    places at once, so overlapping boxes are the same text by definition.
+
+    Ordering by plausibility rather than Vision's confidence matters: Vision
+    reports ~0.5 for nearly everything, which makes confidence close to a
+    coin flip for choosing between variants.
+    """
+    kept: list[TextLine] = []
+    for line in sorted(lines, key=lambda l: (-_plausibility(l), -len(l.text))):
+        key = normalize(line.text)
+        if not key:
+            continue
+
+        duplicate = False
+        for other in kept:
+            same_place = (
+                abs(line.top - other.top) < _SAME_POSITION_TOP
+                and abs(line.left - other.left) < _SAME_POSITION_LEFT
+            )
+            similar_text = (
+                SequenceMatcher(None, key, normalize(other.text)).ratio()
+                >= _SAME_LINE_SIMILARITY
+            )
+            if same_place or similar_text:
+                duplicate = True
+                break
+
+        if not duplicate:
+            kept.append(line)
+    return kept
+
+
 # Two readings this similar are the same line read imperfectly twice. Exact
 # matching fails here: degraded frames disagree on characters ("204B" vs
 # "2048") while clearly referring to the same text.
 _SAME_LINE_SIMILARITY = 0.72
+
+# Two readings this close together are the same physical text, however
+# differently they were garbled. Tolerances are generous vertically because
+# tile and full-frame boxes disagree slightly on where a line starts.
+_SAME_POSITION_TOP = 0.05
+_SAME_POSITION_LEFT = 0.20
 
 
 def _group_similar(readings: list[list[TextLine]]) -> list[list[TextLine]]:
@@ -277,10 +492,10 @@ def _merge(readings: list[list[TextLine]]) -> list[TextLine]:
         agreement = len(group)
         # The most confident variant, tie-broken by plausibility, so "204B"
         # wins over "2048" when both were seen.
-        best = max(
-            group,
-            key=lambda line: (line.confidence, assess(line.text, line.confidence).score),
-        )
+        # Plausibility first: Vision reports ~0.5 confidence for nearly
+        # everything, so confidence alone barely discriminates between
+        # "Departures" and "DLpartiirL".
+        best = max(group, key=lambda line: (_plausibility(line), len(line.text)))
 
         if agreement < 2:
             verdict = assess(best.text, best.confidence)
@@ -302,7 +517,9 @@ def _merge(readings: list[list[TextLine]]) -> list[TextLine]:
             )
         )
 
-    return merged
+    # Frames can garble the same word differently enough to land in separate
+    # groups; position catches what text similarity missed.
+    return _dedupe(merged)
 
 
 def sort_reading_order(lines: list[TextLine]) -> list[TextLine]:

@@ -28,13 +28,29 @@ T = TypeVar("T")
 # One worker, deliberately. Raising this reintroduces the crash.
 _INFERENCE_POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="inference")
 
+# Apple Vision gets its own thread. The crash above is specific to PyTorch's
+# MPS backend; Vision is a separate framework that never touches Metal through
+# torch, so it is safe to run alongside.
+#
+# Sharing the one thread was measured at 19.9 s for a single read, because the
+# read queued behind YOLO and depth passes for every frame of its own burst.
+# Isolated, the same read takes under 300 ms.
+_OCR_POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ocr")
+
 atexit.register(lambda: _INFERENCE_POOL.shutdown(wait=False))
+atexit.register(lambda: _OCR_POOL.shutdown(wait=False))
 
 
 async def run_inference(fn: Callable[..., T], *args: Any) -> T:
-    """Run a model call on the one inference thread."""
+    """Run a torch/MPS model call on the one inference thread."""
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(_INFERENCE_POOL, fn, *args)
+
+
+async def run_ocr(fn: Callable[..., T], *args: Any) -> T:
+    """Run an Apple Vision call, off the torch inference thread."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_OCR_POOL, fn, *args)
 
 
 def inference_pool() -> ThreadPoolExecutor:

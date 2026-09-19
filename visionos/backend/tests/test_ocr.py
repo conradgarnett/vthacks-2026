@@ -169,6 +169,26 @@ class TestAppleVision:
         assert "204" not in format_for_speech(untuned), "default unexpectedly read it"
         assert "204" in format_for_speech(tuned)
 
+    def test_tiling_rescues_text_the_full_frame_pass_cannot_see(self, ocr):
+        """Vision's minimum text height is a fraction of the frame, so a sign
+        across a room is invisible no matter how many pixels the sensor got.
+        Measured CER was 1.00 below 2% of frame height before tiling."""
+        jpeg = self.distant_sign_jpeg(14)  # ~1.2% of a 1200px frame
+
+        full_only = ocr._read_full(jpeg)
+        with_tiles = ocr.read_sync(jpeg)
+
+        assert len(with_tiles) > len(full_only) or not full_only, (
+            "tiling added nothing on text the full frame pass missed"
+        )
+
+    def test_reading_a_clean_sign_does_not_pay_for_tiling(self, ocr):
+        """Large text must not trigger the expensive path: tiles re-read what
+        the full frame already got right and attach garbled twins."""
+        from backend.ai.ocr import _needs_tiles
+
+        assert not _needs_tiles(ocr._read_full(self.sign_jpeg("EXIT", "Room 204B")))
+
     def test_blank_image_yields_no_text_rather_than_noise(self, ocr):
         import io
 
