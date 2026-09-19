@@ -1,0 +1,11 @@
+{
+  "name": "VisionOS — Digital Sense of Sight",
+  "short_name": "VisionOS",
+  "description": "Spatial audio description of your surroundings for blind and low-vision users.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "categories": ["accessibility", "utilities"]
+}

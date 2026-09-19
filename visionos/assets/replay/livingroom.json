@@ -1,0 +1,11 @@
+{
+  "default": "A couch is about three meters ahead at your twelve o'clock, with a low coffee table about one and a half meters in front of it. A doorway is about four meters away at your two o'clock.",
+  "scan": "You're facing into a living room. A coffee table is about one and a half meters ahead at your twelve o'clock, so step around it. A couch runs along the wall about three meters ahead, and there's a doorway about four meters away at your two o'clock.",
+  "door": "The doorway is at your two o'clock, about four meters away. The path to it looks clear.",
+  "path": "There's a coffee table about one and a half meters directly ahead. I'd move slightly left to get around it.",
+  "table": "On the coffee table I can see a mug and what looks like a remote control, about one and a half meters ahead at your twelve o'clock.",
+  "read": "The sign reads: Exit. Keep door closed.",
+  "chair": "I think there's an armchair about two and a half meters away at your ten o'clock.",
+  "person": "A person is standing about three meters ahead at your one o'clock, facing away from you.",
+  "changed": "A person just entered on your right, about three meters away."
+}

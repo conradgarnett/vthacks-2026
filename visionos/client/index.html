@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#000000" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <title>VisionOS</title>
+    <style>
+      /* High contrast and very large targets: the primary user has little or
+         no usable vision, and the secondary user is a judge across a room. */
+      :root {
+        --bg: #000;
+        --fg: #fff;
+        --accent: #ffd400;
+        --danger: #ff4b3e;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font: 500 18px/1.45 system-ui, -apple-system, sans-serif;
+        min-height: 100dvh;
+        display: flex;
+        flex-direction: column;
+      }
+      video {
+        width: 100%;
+        max-height: 34dvh;
+        object-fit: cover;
+        background: #111;
+      }
+      main { flex: 1; display: flex; flex-direction: column; padding: 12px; gap: 12px; }
+      button {
+        font: 700 26px/1 system-ui, sans-serif;
+        min-height: 88px; /* far above the 44px minimum -- found by touch */
+        width: 100%;
+        border: 3px solid var(--fg);
+        border-radius: 14px;
+        background: #111;
+        color: var(--fg);
+        cursor: pointer;
+      }
+      button:active { background: var(--accent); color: #000; }
+      button:focus-visible { outline: 4px solid var(--accent); outline-offset: 3px; }
+      #start { min-height: 160px; background: var(--accent); color: #000; border-color: var(--accent); }
+      #stop { border-color: var(--danger); color: var(--danger); }
+      #controls { display: flex; flex-direction: column; gap: 12px; }
+      #status { margin: 0; font-size: 17px; color: var(--accent); min-height: 1.5em; }
+      #transcript { font-size: 16px; color: #ccc; overflow-y: auto; max-height: 26dvh; }
+      #transcript p { margin: 0 0 8px; }
+      .sr-only {
+        position: absolute; width: 1px; height: 1px;
+        padding: 0; margin: -1px; overflow: hidden;
+        clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <h1 class="sr-only">VisionOS — your digital sense of sight</h1>
+
+    <video id="camera" playsinline muted aria-hidden="true"></video>
+
+    <main>
+      <button id="start" aria-describedby="start-help">
+        Start VisionOS
+      </button>
+      <p id="start-help" class="sr-only">
+        Starts the camera and speaks a description of your surroundings.
+        VisionOS is an assistive tool and not a replacement for a cane or guide dog.
+      </p>
+
+      <div id="controls" hidden>
+        <button id="scan" aria-label="Scan the room and describe it">Scan Room</button>
+        <button id="read" aria-label="Read any text or sign in view">Read Text</button>
+        <button id="stop" aria-label="Stop speaking">Stop Speaking</button>
+      </div>
+
+      <!-- role=status announces changes without stealing focus -->
+      <p id="status" role="status" aria-live="polite"></p>
+      <div id="transcript" role="log" aria-live="polite" aria-label="Spoken history"></div>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
