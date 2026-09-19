@@ -284,7 +284,9 @@ async function begin(): Promise<void> {
     spatial.init();
 
     try {
-      await camera.start();
+      // ?camera=<part of its name> pins a camera, for a webcam worn on
+      // glasses beside a laptop's own.
+      await camera.start(new URLSearchParams(location.search).get("camera"));
     } catch (err) {
       reportFailure((err as Error).message);
       return;
@@ -296,6 +298,12 @@ async function begin(): Promise<void> {
     controls.hidden = false;
     setStatus("Connecting…");
     tts.say(DISCLAIMER, SpeechPriority.Answer);
+    if (camera.count > 1) {
+      // Which camera is in use is a state the user cannot see: a webcam
+      // on a pair of glasses and the one above the laptop screen are
+      // indistinguishable from the inside.
+      tts.say(`Using ${camera.label}.`, SpeechPriority.Answer);
+    }
     connection.connect();
 
     let lastFrameAt = 0;
