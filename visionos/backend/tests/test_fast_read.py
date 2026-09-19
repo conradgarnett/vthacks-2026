@@ -27,8 +27,8 @@ from backend.tests.test_peek import FakePerception, FakeProvider, FakeSocket, fr
 from backend.main import Session
 
 
-def line(text: str, confidence: float = 0.95) -> TextLine:
-    return TextLine(text=text, confidence=confidence, top=0.3, left=0.1, height=0.05)
+def line(text: str, confidence: float = 0.95, top: float = 0.3) -> TextLine:
+    return TextLine(text=text, confidence=confidence, top=top, left=0.1, height=0.05)
 
 
 class Engine(TextReader):
@@ -108,6 +108,26 @@ class TestTieredReader:
     def test_a_scrap_escalates_even_when_confident(self):
         fast, slow = Engine([line("il", 0.99)], "fast"), Engine([line("EXIT")], "slow")
         assert [l.text for l in TieredReader(fast, slow).read_sync(b"f")] == ["EXIT"]
+
+    def test_the_mesh_keeps_sure_words_and_fills_in_the_rest(self):
+        """The fast engine reads the words it can check and skips the rest;
+        the thorough engine supplies the rest, and where both read the same
+        place the more plausible reading wins."""
+        fast = Engine([line("FIRE EXIT", 0.95, top=0.2), line("Ilcccpcion", 0.4, top=0.5)], "fast")
+        slow = Engine([line("Reception", 0.9, top=0.5)], "slow")
+        texts = sorted(l.text for l in TieredReader(fast, slow).read_consensus_sync([b"f"]))
+        assert texts == ["FIRE EXIT", "Reception"]
+
+    def test_one_unsure_word_is_enough_to_look_harder(self):
+        fast = Engine([line("FIRE EXIT", 0.95, top=0.2), line("Ilcccpcion", 0.4, top=0.5)], "fast")
+        slow = Engine([line("Reception", 0.9, top=0.5)], "slow")
+        TieredReader(fast, slow).read_sync(b"f")
+        assert slow.calls == 1
+
+    def test_an_unsure_fast_word_the_thorough_engine_also_read_is_replaced(self):
+        fast = Engine([line("F1RE EX1T", 0.6, top=0.2)], "fast")
+        slow = Engine([line("FIRE EXIT", 0.9, top=0.2)], "slow")
+        assert [l.text for l in TieredReader(fast, slow).read_sync(b"f")] == ["FIRE EXIT"]
 
     def test_the_thorough_reader_finding_nothing_keeps_the_fast_reading(self):
         fast, slow = Engine([line("F1RE", 0.5)], "fast"), Engine([], "slow")

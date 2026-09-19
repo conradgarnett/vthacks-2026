@@ -737,6 +737,20 @@ def reading_confidence(reader: TextReader, lines: list[TextLine]) -> float:
     return _known_word_share(lines)
 
 
+def line_confidence(reader: TextReader, line: TextLine) -> float:
+    """How sure the reader is of one line, on the same scale."""
+    return line.confidence if reader.confidence_informative else _known_word_share([line])
+
+
+def all_lines_sure(reader: TextReader, lines: list[TextLine]) -> bool:
+    """Every line clears the bar. One unsure word is enough to look harder:
+    the fast engine reads the words it can check and skips the rest, and
+    the rest is what the thorough engine is for."""
+    return bool(lines) and all(
+        line_confidence(reader, line) >= FAST_READ_CONFIDENCE for line in lines
+    )
+
+
 def _known_word_share(lines: list[TextLine]) -> float:
     """Fraction of the alphabetic words the lexicon knows, corrections included."""
     from backend.ai.lexicon import LEXICON
@@ -755,13 +769,16 @@ def _known_word_share(lines: list[TextLine]) -> float:
 
 
 class TieredReader(TextReader):
-    """A fast engine first; the thorough one when the fast one is not sure.
+    """A fast engine first; the thorough one fills in what it could not check.
 
-    Apple Vision reads a frame in 15 ms and is right on ordinary signage;
-    RapidOCR takes most of a second per frame on a CPU and reads cursive,
-    handwriting and dense labels that Vision cannot. Starting fast and
-    escalating below the confidence bar gives the speed of one and the
-    reach of the other, and the bar is the same 80% every guess here must
+    Apple Vision reads a frame in 15 ms and is right on ordinary signage,
+    but it reads the words it can check and skips the rest; RapidOCR takes
+    most of a second per frame on a CPU and reads cursive, handwriting and
+    dense labels that Vision cannot. When every fast line clears the bar
+    the fast reading stands. Otherwise the thorough engine reads too, and
+    the result is a mesh: the fast engine's sure lines, plus everything the
+    thorough one read, with the more plausible reading winning where both
+    read the same place. The bar is the same 80% every guess here must
     clear.
     """
 
@@ -782,18 +799,30 @@ class TieredReader(TextReader):
         self.thorough.warmup()
 
     def _settled(self, lines: list[TextLine]) -> bool:
-        return (
-            bool(lines)
-            and not _needs_tiles(lines)
-            and reading_confidence(self.fast, lines) >= FAST_READ_CONFIDENCE
-        )
+        return not _needs_tiles(lines) and all_lines_sure(self.fast, lines)
+
+    def _mesh(self, fast: list[TextLine], thorough: list[TextLine]) -> list[TextLine]:
+        """The fast engine's sure lines plus the thorough engine's reading.
+
+        Where both read the same place, position dedupe keeps the more
+        plausible one, and the thorough engine's real score beats a flat
+        one. A fast line that was not sure is dropped unless the thorough
+        engine found nothing at all, in which case the fast reading stands.
+        """
+        if not thorough:
+            return fast
+        sure = [
+            line for line in fast
+            if line_confidence(self.fast, line) >= FAST_READ_CONFIDENCE
+        ]
+        return _dedupe(sure + thorough)
 
     def read_sync(self, frame_jpeg: bytes) -> list[TextLine]:
         lines = self.fast.read_sync(frame_jpeg)
         if self._settled(lines) or not self.thorough.available:
             return lines
-        log.debug("read: %s unsure, escalating to %s", self.fast.name, self.thorough.name)
-        return self.thorough.read_sync(frame_jpeg) or lines
+        log.debug("read: %s unsure, meshing with %s", self.fast.name, self.thorough.name)
+        return self._mesh(lines, self.thorough.read_sync(frame_jpeg))
 
     def read_quick_sync(self, frame_jpeg: bytes) -> list[TextLine]:
         return self.fast.read_quick_sync(frame_jpeg)
@@ -802,8 +831,8 @@ class TieredReader(TextReader):
         lines = self.fast.read_consensus_sync(frames)
         if self._settled(lines) or not self.thorough.available:
             return lines
-        log.debug("read: %s unsure, escalating to %s", self.fast.name, self.thorough.name)
-        return self.thorough.read_consensus_sync(frames) or lines
+        log.debug("read: %s unsure, meshing with %s", self.fast.name, self.thorough.name)
+        return self._mesh(lines, self.thorough.read_consensus_sync(frames))
 
     def combine_readings(self, readings: list[list[TextLine]]) -> list[TextLine]:
         return self.fast.combine_readings(readings)

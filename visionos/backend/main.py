@@ -34,13 +34,12 @@ from fastapi.responses import JSONResponse
 
 from backend.ai.medication import UNREADABLE_DOSE
 from backend.ai.ocr import (
-    FAST_READ_CONFIDENCE,
     NO_TEXT_FOUND,
     TextReader,
     _sharpness,
+    all_lines_sure,
     build_reader,
     format_for_speech,
-    reading_confidence,
 )
 from backend.ai.prompts import PROMPT_VERSION, READ_PROMPT, SCAN_PROMPT, scene_context
 from backend.ai.vision import VisionProvider, build_provider
@@ -351,17 +350,16 @@ class Session:
         trace = LatencyTrace(label="read")
         # Fast tier first: one quick pass over the sharpest frame, joined
         # with any fresh peeks. Spoken as it stands when the reader is at
-        # least 80% sure of it and it is not a scrap; the thorough burst is
-        # the fallback, not the default. A medical label whose dose the
-        # guard would withhold always gets the burst, since only agreement
-        # across frames can release a dose.
+        # least 80% sure of every line and it is not a scrap; the thorough
+        # burst is the fallback, not the default. A medical label whose dose
+        # the guard would withhold always gets the burst, since only
+        # agreement across frames can release a dose.
         with trace.stage("quick"):
             first = await self.ocr.read_quick(max(frames, key=_sharpness))
         lines = self.ocr.combine_readings([*self.fresh_peek_readings(), first])
         settled = (
-            bool(lines)
+            all_lines_sure(self.ocr, lines)
             and not read_is_weak(lines)
-            and reading_confidence(self.ocr, lines) >= FAST_READ_CONFIDENCE
             and UNREADABLE_DOSE not in format_for_speech(lines)
         )
         if not settled:
