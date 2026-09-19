@@ -9,7 +9,8 @@ This module reads the same evidence the way a person would:
 
   what the confirmed objects imply together   a fridge, a sink and a counter
                                               are a kitchen
-  what was glimpsed but not yet confirmed     spoken as a guess, never a fact
+  what was glimpsed but not yet confirmed     spoken as a guess, never a fact,
+                                              and only when the detector is sure
   what left the frame a moment ago            still there, now behind you
 
 Every inference is hedged in its wording, and nothing here feeds the hazard
@@ -45,17 +46,21 @@ ROOMS: list[tuple[str, dict[str, float]]] = [
     ("street", {"bus": 2.0, "car": 1.5, "truck": 1.5, "motorcycle": 1.0, "bicycle": 0.7,
                 "pole": 0.7}),
 ]
-# Evidence needed before a room is named at all, and before it is named
-# with any confidence. Two matching objects of middling weight reach the
-# first; a fridge plus a sink or a bed alone reach the second.
-_ROOM_MIN_SCORE = 2.0
-_ROOM_SURE_SCORE = 3.0
+# Evidence needed before a room is named. A fridge plus a sink, a bed
+# alone or a toilet alone reach it; a door plus a handrail do not. There
+# used to be a lower tier spoken as "this may be", but in live use the
+# user heard guesses that were plainly wrong, and a wrong guess is not
+# made harmless by hedging it. Below this score the room is not named.
+_ROOM_MIN_SCORE = 3.0
 # A second copy of an object adds evidence; a fifth chair does not.
 _MAX_COUNT_PER_LABEL = 2
 
-# A glimpsed object worth mentioning must have been seen at least this
-# confidently. Below it the guess would be noise dressed as a hint.
-_TENTATIVE_MIN_CONFIDENCE = 0.25
+# A glimpsed object is only mentioned when the detector was at least this
+# sure of it. This was 0.25, and in live use the hints were hallucinations:
+# an open-vocabulary detector at a quarter confidence sees doors in
+# shadows. The user asked for predictions only above 80%, and a hint the
+# user cannot check has to clear that bar or stay unspoken.
+_TENTATIVE_MIN_CONFIDENCE = 0.8
 # A landmark that left the frame is worth a reminder for this long.
 _REMINDER_MAX_UNSEEN_S = 15.0
 _REMINDER_MIN_UNSEEN_S = 1.0
@@ -90,14 +95,13 @@ def room_guess(labels: Iterable[str]) -> tuple[str, float] | None:
 
 
 def room_sentence(labels: Iterable[str]) -> str | None:
+    """Named only on decisive evidence, and then plainly; there is no
+    hedged tier, because the evidence is either enough or it is not."""
     guess = room_guess(labels)
     if guess is None:
         return None
-    room, score = guess
-    article = with_article(room)
-    if score >= _ROOM_SURE_SCORE:
-        return f"This looks like {article}."
-    return f"This may be {article}."
+    room, _score = guess
+    return f"This looks like {with_article(room)}."
 
 
 def tentative_objects(detections, scene: SceneModel, limit: int = 2) -> list[Tentative]:
@@ -181,11 +185,10 @@ def describe_scene(scene: SceneModel, detections=()) -> str:
     tentative = tentative_objects(detections, scene)
 
     sentences: list[str] = []
-    room = room_sentence(visible_labels) or (
-        # With nothing confirmed, the glimpses alone may still name the space,
-        # but only ever as "may be".
-        _soft(room_sentence([t.label for t in tentative])) if not visible_labels else None
-    )
+    # The room comes from confirmed objects only. Naming it from glimpses
+    # stacked a guess on a guess, and that is where the wrong rooms came
+    # from.
+    room = room_sentence(visible_labels)
     if room:
         sentences.append(room)
 
@@ -204,10 +207,6 @@ def describe_scene(scene: SceneModel, detections=()) -> str:
         sentences.append(reminder)
 
     return " ".join(sentences)
-
-
-def _soft(sentence: str | None) -> str | None:
-    return sentence.replace("This looks like", "This may be") if sentence else None
 
 
 def snapshot_extras(scene: SceneModel, detections=()) -> dict:

@@ -1,8 +1,10 @@
 """Predictions from incomplete evidence.
 
-The property under test is honesty of wording: a guess is always spoken as a
-guess. A room named from two objects says "may be"; a glimpsed object says
-"I think"; a landmark that left the frame is in the past tense.
+The property under test is honesty of wording and of silence: a guess is
+always spoken as a guess, and a weak guess is not spoken at all. A room is
+named only on decisive evidence; a glimpsed object says "I think" and only
+when the detector was sure of it; a landmark that left the frame is in the
+past tense.
 """
 
 from __future__ import annotations
@@ -42,9 +44,12 @@ class TestRoomGuess:
     def test_a_fifth_chair_adds_no_evidence(self):
         assert room_guess(["chair"] * 5) is None
 
-    def test_strong_evidence_says_looks_like_weak_says_may_be(self):
+    def test_strong_evidence_names_the_room_weak_evidence_stays_silent(self):
+        """In live use the hedged tier produced wrong rooms; hedging does
+        not make a wrong guess harmless, so there is no hedged tier."""
         assert room_sentence(["refrigerator", "sink"]) == "This looks like a kitchen."
-        assert room_sentence(["door", "handrail"]) == "This may be a corridor."
+        assert room_sentence(["door", "handrail"]) is None
+        assert room_guess(["door", "handrail"]) is None
 
     def test_article_is_right_for_an_office(self):
         assert room_sentence(["desk", "laptop"]) == "This looks like an office."
@@ -55,7 +60,7 @@ class TestTentative:
         scene = build_scene([make_detection(label="chair", azimuth=0.0, distance=2.0)])
         latest = [
             make_detection(label="chair", azimuth=0.0, distance=2.0),
-            make_detection(label="door", x=500, azimuth=40.0, distance=3.0, confidence=0.4),
+            make_detection(label="door", x=500, azimuth=40.0, distance=3.0, confidence=0.9),
         ]
         assert [t.label for t in tentative_objects(latest, scene)] == ["door"]
 
@@ -63,13 +68,20 @@ class TestTentative:
         scene = SceneModel()
         latest = [
             make_detection(label="cup", x=100, azimuth=-10.0, distance=1.0, confidence=0.9),
-            make_detection(label="door", x=500, azimuth=40.0, distance=3.0, confidence=0.4),
+            make_detection(label="door", x=500, azimuth=40.0, distance=3.0, confidence=0.9),
         ]
         assert [t.label for t in tentative_objects(latest, scene)][0] == "door"
 
-    def test_noise_below_the_floor_is_not_offered(self):
-        latest = [make_detection(label="door", azimuth=0.0, distance=3.0, confidence=0.1)]
+    @pytest.mark.parametrize("confidence", [0.1, 0.4, 0.6, 0.79])
+    def test_a_glimpse_the_detector_is_not_sure_of_is_not_offered(self, confidence):
+        """The floor was 0.25 and the hints were hallucinations in live use.
+        A guess the user cannot check has to clear 80% or stay unspoken."""
+        latest = [make_detection(label="door", azimuth=0.0, distance=3.0, confidence=confidence)]
         assert tentative_objects(latest, SceneModel()) == []
+
+    def test_a_glimpse_at_the_floor_is_offered(self):
+        latest = [make_detection(label="door", azimuth=0.0, distance=3.0, confidence=0.8)]
+        assert [t.label for t in tentative_objects(latest, SceneModel())] == ["door"]
 
     def test_limit_is_respected(self):
         latest = [
@@ -87,22 +99,43 @@ class TestDescribeScene:
                 make_detection(label="sink", x=400, azimuth=10.0, distance=2.0),
             ]
         )
-        latest = [make_detection(label="door", x=600, azimuth=45.0, distance=3.0, confidence=0.4)]
+        latest = [make_detection(label="door", x=600, azimuth=45.0, distance=3.0, confidence=0.9)]
         spoken = describe_scene(scene, latest)
         assert spoken.startswith("This looks like a kitchen.")
         assert "refrigerator" in spoken and "sink" in spoken
         assert "I think there may also be a door at your" in spoken
 
     def test_nothing_confirmed_is_still_hedged_not_silent(self):
-        latest = [make_detection(label="door", azimuth=30.0, distance=3.0, confidence=0.4)]
+        latest = [make_detection(label="door", azimuth=30.0, distance=3.0, confidence=0.9)]
         spoken = describe_scene(SceneModel(), latest)
         assert spoken.startswith("I can't confirm anything yet, but I think there may be a door")
 
     def test_nothing_at_all_says_so(self):
         assert "can't" in describe_scene(SceneModel(), [])
 
+    def test_unsure_glimpses_alone_name_no_room_and_no_object(self):
+        """A room guessed from unconfirmed glimpses was a guess stacked on a
+        guess. Now only confirmed objects can name the room, and glimpses
+        below the floor are not mentioned at all."""
+        latest = [
+            make_detection(label="refrigerator", x=100, azimuth=-20.0, distance=2.5, confidence=0.6),
+            make_detection(label="sink", x=400, azimuth=10.0, distance=2.0, confidence=0.6),
+        ]
+        spoken = describe_scene(SceneModel(), latest)
+        assert "kitchen" not in spoken
+        assert "refrigerator" not in spoken and "sink" not in spoken
+
+    def test_sure_glimpses_alone_still_do_not_name_a_room(self):
+        latest = [
+            make_detection(label="refrigerator", x=100, azimuth=-20.0, distance=2.5, confidence=0.95),
+            make_detection(label="sink", x=400, azimuth=10.0, distance=2.0, confidence=0.95),
+        ]
+        spoken = describe_scene(SceneModel(), latest)
+        assert "kitchen" not in spoken
+        assert spoken.startswith("I can't confirm anything yet, but I think there may be")
+
     def test_a_guess_never_reads_as_a_fact(self):
-        latest = [make_detection(label="stairs", azimuth=0.0, distance=None, confidence=0.5)]
+        latest = [make_detection(label="stairs", azimuth=0.0, distance=None, confidence=0.9)]
         spoken = describe_scene(SceneModel(), latest)
         assert "I think" in spoken
         assert "There are stairs" not in spoken and "There's stairs" not in spoken
@@ -142,7 +175,7 @@ class TestReminder:
 class TestSnapshotExtras:
     def test_room_and_tentative_travel_with_the_snapshot(self):
         scene = build_scene([make_detection(label="bed", distance=2.0)])
-        latest = [make_detection(label="door", x=500, azimuth=40.0, distance=3.0, confidence=0.4)]
+        latest = [make_detection(label="door", x=500, azimuth=40.0, distance=3.0, confidence=0.9)]
         extras = snapshot_extras(scene, latest)
         assert extras["room"] == "bedroom"
         assert extras["tentative"][0]["label"] == "door"
@@ -162,7 +195,7 @@ async def test_scan_reasons_past_the_confirmed_list():
             make_detection(label="sink", x=400, azimuth=10.0, distance=2.0),
         ]
     )
-    latest = [make_detection(label="door", x=600, azimuth=45.0, distance=3.0, confidence=0.4)]
+    latest = [make_detection(label="door", x=600, azimuth=45.0, distance=3.0, confidence=0.9)]
     spoken = await answer(scene, "scan", latest, intent="scan")
     assert spoken.startswith("This looks like a kitchen.")
     assert "I think there may also be a door" in spoken
