@@ -1,6 +1,7 @@
 """Score the OCR pipeline. Run this before and after any change to it.
 
-    cd visionos && PYTHONPATH=..:. .venv/bin/python eval/run_ocr_eval.py 60
+    cd visionos && PYTHONPATH=. .venv/bin/python eval/run_ocr_eval.py 60
+    cd visionos && PYTHONPATH=. .venv/bin/python eval/run_ocr_eval.py 60 --fonts bundled
 
 Reports character error rate by apparent text size, plus how often the reader
 invents text on surfaces that contain none. Both numbers matter: a reader that
@@ -25,7 +26,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from corpus import FONTS, build_corpus, build_textureless_corpus, cer, normalize_output
+from corpus import build_corpus, build_textureless_corpus, cer, normalize_output
+from fonts import font_set
 
 from backend.ai.ocr import TextReader, build_reader, format_for_speech
 
@@ -75,7 +77,18 @@ def evaluate_hallucination(ocr: TextReader, count: int = 8):
 
 
 def main() -> int:
-    count = int(sys.argv[1]) if len(sys.argv) > 1 else 60
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Score the OCR pipeline on signage.")
+    parser.add_argument("count", nargs="?", type=int, default=60)
+    parser.add_argument(
+        "--fonts", choices=("platform", "bundled", "all"), default="platform",
+        help="platform: this machine's system fonts (default); bundled: the "
+             "display faces committed under eval/fonts/, identical everywhere",
+    )
+    args = parser.parse_args()
+    count = args.count
+    fonts = font_set(args.fonts)
 
     ocr = build_reader()
     if not ocr.available:
@@ -87,8 +100,11 @@ def main() -> int:
     import time
 
     started = time.perf_counter()
-    label = f"OCR EVAL  (n={count}, engine={ocr.name}, {platform.system()}, {len(FONTS)} fonts)"
-    rows, mean_cer = evaluate(ocr, build_corpus(count), label)
+    label = (
+        f"OCR EVAL  (n={count}, engine={ocr.name}, {platform.system()}, "
+        f"{args.fonts} fonts: {len(fonts)})"
+    )
+    rows, mean_cer = evaluate(ocr, build_corpus(count, fonts=fonts), label)
     elapsed = time.perf_counter() - started
     print(f"  read time     {elapsed / count * 1000:.0f} ms mean per sample (3-frame burst)")
 

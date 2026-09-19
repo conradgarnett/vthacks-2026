@@ -19,10 +19,13 @@ from __future__ import annotations
 
 import io
 import math
+import os
 import random
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
+
+from fonts import bundled_fonts
 
 W, H = 1600, 1200
 
@@ -61,12 +64,19 @@ PRODUCT_TEXT = [
 
 BRAND_MARKS = ["®", "™", "©"]
 
+# Off macOS none of the faces above exist; the committed display faces in
+# eval/fonts/ stand in, so the corpus renders everywhere. On a Mac the list
+# is unchanged, so its history stays comparable.
+DISPLAY_FONTS = [f for f in DISPLAY_FONTS if os.path.exists(f)] or bundled_fonts()
+
 
 def _font(path: str, px: int):
-    try:
-        return ImageFont.truetype(path, px)
-    except OSError:
-        return ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", px)
+    for candidate in (path, *bundled_fonts()):
+        try:
+            return ImageFont.truetype(candidate, px)
+        except OSError:
+            continue
+    return ImageFont.load_default(size=px)
 
 
 def _curve(img: Image.Image, strength: float) -> Image.Image:
@@ -222,7 +232,7 @@ def build_packaging_corpus(n: int = 24, seed: int = 31, frames: int = 3):
         samples.append({
             "frames": [capture_package(base, rng, curved) for _ in range(frames)],
             "truth": lines[0],
-            "font": font.rsplit("/", 1)[-1],
+            "font": os.path.basename(font),
             "curved": curved,
             "scale": scale,
         })

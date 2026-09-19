@@ -13,67 +13,18 @@ import io
 import math
 import os
 import random
-import sys
 from dataclasses import dataclass
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-# Real system fonts, per platform, so the corpus renders on whichever machine
-# runs it. Numbers are comparable only across runs on the same font set and
-# engine; the report names both.
-_MAC_FONTS = [
-    "/System/Library/Fonts/Helvetica.ttc",
-    "/System/Library/Fonts/Supplemental/Arial.ttf",
-    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
-    "/System/Library/Fonts/Avenir.ttc",
-    "/System/Library/Fonts/Supplemental/Futura.ttc",
-    "/System/Library/Fonts/Supplemental/Gill Sans.ttc",
-    "/System/Library/Fonts/Supplemental/Optima.ttc",
-    "/System/Library/Fonts/Supplemental/Georgia.ttf",
-    "/System/Library/Fonts/Supplemental/Times New Roman.ttf",
-    "/System/Library/Fonts/Supplemental/Verdana.ttf",
-    "/System/Library/Fonts/Supplemental/Tahoma.ttf",
-    "/System/Library/Fonts/Supplemental/Trebuchet MS.ttf",
-    "/System/Library/Fonts/Supplemental/Courier New.ttf",
-    "/System/Library/Fonts/Supplemental/American Typewriter.ttc",
-    "/System/Library/Fonts/Supplemental/Palatino.ttc",
-    "/System/Library/Fonts/Supplemental/Rockwell.ttc",
-]
-_WINDOWS_FONTS = [
-    "C:/Windows/Fonts/arial.ttf",
-    "C:/Windows/Fonts/arialbd.ttf",
-    "C:/Windows/Fonts/calibri.ttf",
-    "C:/Windows/Fonts/segoeui.ttf",
-    "C:/Windows/Fonts/verdana.ttf",
-    "C:/Windows/Fonts/tahoma.ttf",
-    "C:/Windows/Fonts/trebuc.ttf",
-    "C:/Windows/Fonts/georgia.ttf",
-    "C:/Windows/Fonts/times.ttf",
-    "C:/Windows/Fonts/cour.ttf",
-    "C:/Windows/Fonts/consola.ttf",
-    "C:/Windows/Fonts/impact.ttf",
-    "C:/Windows/Fonts/bahnschrift.ttf",
-    "C:/Windows/Fonts/candara.ttf",
-    "C:/Windows/Fonts/constan.ttf",
-    "C:/Windows/Fonts/pala.ttf",
-]
-_LINUX_FONTS = [
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-    "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf",
-    "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
-]
-_PLATFORM_FONTS = (
-    _MAC_FONTS if sys.platform == "darwin"
-    else _WINDOWS_FONTS if sys.platform == "win32"
-    else _LINUX_FONTS
-)
-FONTS = [f for f in _PLATFORM_FONTS if os.path.exists(f)] or _PLATFORM_FONTS[:1]
+from fonts import platform_fonts
+
+# Real system fonts on this machine by default. `--fonts bundled` on the
+# runner renders with the display faces committed under eval/fonts/ instead,
+# which are identical on every machine, so those numbers compare across
+# platforms. Platform numbers only compare within one platform.
+FONTS = platform_fonts()
 
 # What signage actually says.
 PHRASES = [
@@ -188,13 +139,16 @@ def capture(img: Image.Image, rng: random.Random, severity: float) -> bytes:
     return buf.getvalue()
 
 
-def build_corpus(n: int = 60, seed: int = 11, frames: int = 3) -> list[Sample]:
+def build_corpus(
+    n: int = 60, seed: int = 11, frames: int = 3, fonts: list[str] | None = None
+) -> list[Sample]:
     rng = random.Random(seed)
     np.random.seed(seed)
+    pool = fonts or FONTS
     samples = []
     for _ in range(n):
         text = rng.choice(PHRASES)
-        font = rng.choice(FONTS)
+        font = rng.choice(pool)
         # 1.2%-14% of frame height: across a room to arm's length.
         height_pct = rng.choice([0.012, 0.018, 0.025, 0.035, 0.05, 0.075, 0.11, 0.14])
         severity = rng.uniform(0.5, 1.25)
@@ -202,7 +156,7 @@ def build_corpus(n: int = 60, seed: int = 11, frames: int = 3) -> list[Sample]:
         samples.append(Sample(
             frames=[capture(base, rng, severity) for _ in range(frames)],
             truth=text,
-            font=font.rsplit("/", 1)[-1],
+            font=os.path.basename(font),
             height_pct=height_pct,
         ))
     return samples
