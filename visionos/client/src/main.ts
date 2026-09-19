@@ -25,8 +25,12 @@ const FRAME_INTERVAL_MS = 700;
 // a scan or a read that arrives finds the detector free. Measured here,
 // detection takes about 270 ms a frame, so this lands at three or four
 // frames a second on its own; sending every 150 ms just had every second
-// frame dropped and the detector always busy.
-const FRAME_INTERVAL_CPU_MS = 150;
+// frame dropped and the detector always busy. The floor is 300 ms rather
+// than the detector's own 180 ms because each detection takes every core:
+// back to back, the live loop alone used 80% of this laptop and a scan or
+// a read had to fight it. At 300 ms it uses about 60%, boxes update three
+// times a second, and the rest is there for what the user asked for.
+const FRAME_INTERVAL_CPU_MS = 300;
 // A frame that never gets an answer (dropped behind a scan, say) stops
 // blocking the loop after this long.
 const FRAME_IN_FLIGHT_MAX_MS = 1200;
