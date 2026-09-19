@@ -28,6 +28,7 @@ import logging
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 
+from backend.ai.lexicon import correct_text
 from backend.ai.text_quality import assess, clean_for_speech, normalize
 
 log = logging.getLogger(__name__)
@@ -663,8 +664,12 @@ def format_for_speech(lines: list[TextLine]) -> str:
 
     # Stray marks are voiced literally by a speech engine -- "EXIT comma
     # comma" -- so they are stripped rather than passed through.
+    # Near-miss correction last, on text that has already survived every
+    # filter. Cursive drops the lead-in capital, leaving a word one edit
+    # from correct; the lexicon restores only that, and only for wording
+    # it already knows.
     parts = [
-        clean_for_speech(line.text)
+        correct_text(clean_for_speech(line.text))
         for line in sort_reading_order(
             _drop_overlapping_fragments(_drop_fragments(lines))
         )
