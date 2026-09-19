@@ -149,6 +149,9 @@
       <button id="stop" aria-label="Stop speaking">
         <span class="glyph" aria-hidden="true">&#9632;</span>Stop
       </button>
+      <button id="watch" hidden aria-label="Connect the watch over its USB cable">
+        <span class="glyph" aria-hidden="true">&#9673;</span>Watch
+      </button>
     </div>
 
     <button id="start" aria-describedby="start-help">
@@ -159,7 +162,8 @@
     <p id="start-help" class="sr-only">
       Starts the camera and speaks a description of your surroundings.
       Once running, tap anywhere on the screen to scan the room, or tap Ask
-      to speak a question.
+      to speak a question. On a keyboard or the watch: 1 scans, 2 reads,
+      3 asks, 4 changes the voice, 0 stops speaking.
     </p>
 
     <script type="module" src="/src/main.ts"></script>

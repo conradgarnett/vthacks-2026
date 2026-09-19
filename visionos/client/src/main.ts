@@ -406,39 +406,113 @@ function cycleVoice(): void {
 onVoicesReady(applyBestVoice);
 void showMode();
 
+// One action per control, so a tap on the screen, a key press and a watch
+// button wired through an Arduino all do exactly the same thing.
+const actions = {
+  scan: () => connection.sendIntent("scan"),
+  read: () => void readText(),
+  // Tap to toggle, not push-to-talk. A held button fails on phones: the
+  // browser cancels the press the moment it takes it for a scroll or a
+  // long-press, so recognition stopped before the user had said a word.
+  // Recognition ends itself after one utterance; a second tap ends it early.
+  ask: () => (voice.isListening ? voice.stop() : voice.start()),
+  voice: () => cycleVoice(),
+  stop: () => {
+    tts.stopAll();
+    spatial.stopBeacon();
+    connection.sendIntent("stop_beacon");
+  },
+};
+type Action = keyof typeof actions;
+
 startButton.addEventListener("click", begin);
-tapLayer.addEventListener("click", () => connection.sendIntent("scan"));
-el("scan").addEventListener("click", (e) => {
-  e.stopPropagation();
-  connection.sendIntent("scan");
-});
-el("read").addEventListener("click", (e) => {
-  e.stopPropagation();
-  void readText();
-});
-el("voice").addEventListener("click", (e) => {
-  e.stopPropagation();
-  cycleVoice();
-});
-el("stop").addEventListener("click", (e) => {
-  e.stopPropagation();
-  tts.stopAll();
-  spatial.stopBeacon();
-  connection.sendIntent("stop_beacon");
+tapLayer.addEventListener("click", actions.scan);
+for (const name of Object.keys(actions) as Action[]) {
+  el(name).addEventListener("click", (e) => {
+    e.stopPropagation();
+    actions[name]();
+  });
+}
+
+// Keys drive the same actions, so a watch whose Arduino presents itself as
+// a USB keyboard runs the app with nothing in between. Digits suit a
+// keypad; the letters suit a person at a keyboard. Before the app has
+// started, any mapped key starts it: a key press is the gesture the
+// browser needs before it will speak.
+const KEYS: Record<string, Action> = {
+  "1": "scan", s: "scan", " ": "scan",
+  "2": "read", r: "read",
+  "3": "ask", a: "ask",
+  "4": "voice", v: "voice",
+  "0": "stop", x: "stop", Escape: "stop",
+};
+window.addEventListener("keydown", (event) => {
+  if (event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
+  const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+  if (!started) {
+    if (key in KEYS || key === "Enter") {
+      event.preventDefault();
+      void begin();
+    }
+    return;
+  }
+  const action = KEYS[key];
+  if (!action) return;
+  event.preventDefault();
+  actions[action]();
 });
 
-// Tap to toggle, not push-to-talk. A held button fails on phones: the
-// browser cancels the press the moment it takes it for a scroll or a
-// long-press, so recognition stopped before the user had said a word.
-// Recognition ends itself after one utterance; a second tap ends it early.
-askButton.addEventListener("click", (e) => {
-  e.stopPropagation();
-  if (voice.isListening) {
-    voice.stop();
-  } else {
-    voice.start();
+// The watch's Arduino can instead talk over its USB serial port, one command
+// per line: SCAN, READ, ASK, VOICE or STOP. That needs no keyboard emulation,
+// so any board will do, but the browser only opens a port a person has
+// picked, hence the Watch button. Shown only where Web Serial exists.
+type SerialPortLike = {
+  open(options: { baudRate: number }): Promise<void>;
+  readable: ReadableStream<BufferSource> | null;
+};
+const serial = (navigator as unknown as { serial?: { requestPort(): Promise<SerialPortLike> } })
+  .serial;
+const watchButton = document.getElementById("watch") as HTMLButtonElement | null;
+if (watchButton && serial) {
+  watchButton.hidden = false;
+  watchButton.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    try {
+      const port = await serial.requestPort();
+      await port.open({ baudRate: 9600 });
+      setStatus("Watch connected");
+      tts.say("Watch connected.", SpeechPriority.Answer);
+      void listenToWatch(port);
+    } catch (err) {
+      reportFailure(`Couldn't connect the watch: ${(err as Error).message}`);
+    }
+  });
+}
+
+async function listenToWatch(port: SerialPortLike): Promise<void> {
+  if (!port.readable) return;
+  const reader = port.readable.pipeThrough(new TextDecoderStream()).getReader();
+  let buffered = "";
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffered += value;
+      let newline = buffered.indexOf("\n");
+      while (newline >= 0) {
+        const line = buffered.slice(0, newline).trim().toLowerCase();
+        buffered = buffered.slice(newline + 1);
+        if (line in actions) {
+          if (started) actions[line as Action]();
+          else void begin();
+        }
+        newline = buffered.indexOf("\n");
+      }
+    }
+  } catch {
+    reportFailure("Lost the connection to the watch.");
   }
-});
+}
 
 if (!tts.isSupported) {
   setStatus("This browser has no speech synthesis. Try Safari or Chrome.");
