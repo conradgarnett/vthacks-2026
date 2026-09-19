@@ -51,7 +51,10 @@ const EXPOSURE_SETTLE_MS = 300;
 // or so, dark enough to keep the whites and not so dark that shadows go.
 const READ_EXPOSURE_DROP = 0.25;
 const READ_BRIGHTNESS_DROP = 0.2;
-const READ_CONTRAST_RAISE = 0.15;
+// Contrast barely moves: a real raise made the picture look like a different
+// camera. Sharpness goes up for the strokes.
+const READ_CONTRAST_RAISE = 0.03;
+const READ_SHARPNESS_RAISE = 0.25;
 
 // Cameras that live in the machine rather than on the user.
 const BUILT_IN = /integrated|built-?in|facetime|internal|easycamera|true ?vision|wide ?vision|user.facing|front/i;
@@ -66,12 +69,18 @@ const REMEMBERED = "visionos.camera";
 type FocusCapabilities = { focusMode?: string[] };
 type FocusConstraint = { focusMode: string };
 type Range = { min: number; max: number; step?: number };
-type ImageCapabilities = { exposureCompensation?: Range; brightness?: Range; contrast?: Range };
+type ImageCapabilities = {
+  exposureCompensation?: Range;
+  brightness?: Range;
+  contrast?: Range;
+  sharpness?: Range;
+};
 type ImageSettings = Record<string, number | string | undefined>;
 const EXPOSURE_CONTROLS: Array<[keyof ImageCapabilities, number]> = [
   ["exposureCompensation", -READ_EXPOSURE_DROP],
   ["brightness", -READ_BRIGHTNESS_DROP],
   ["contrast", READ_CONTRAST_RAISE],
+  ["sharpness", READ_SHARPNESS_RAISE],
 ];
 
 export class Camera {
@@ -155,8 +164,8 @@ export class Camera {
   /**
    * Turn the picture down for a read. A webcam's automatic exposure blows
    * a glossy label out to white, and the ink is what the reader needs.
-   * Uses whichever of exposure compensation, brightness and contrast the
-   * camera offers; does nothing on one that offers none. Put back with
+   * Uses whichever of exposure compensation, brightness, contrast and
+   * sharpness the camera offers; does nothing on one that offers none. Put back with
    * `restoreExposure`, so the preview and the scan frames are untouched.
    */
   async dimForRead(): Promise<void> {
