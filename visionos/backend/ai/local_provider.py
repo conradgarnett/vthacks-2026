@@ -17,6 +17,7 @@ from typing import AsyncIterator, Callable
 from backend.ai.vision import VisionProvider
 from backend.perception.detector import CLASS_HEIGHTS_M
 from backend.perception.geometry import steps_away
+from backend.speech.phrasing import with_article
 from backend.scene.model import SceneModel
 from backend.scene.queries import (
     _ALIASES,
@@ -101,19 +102,23 @@ class LocalSceneProvider(VisionProvider):
 
         nearest = result["blockers"][0]
         return (
-            f"There's a {nearest['label']} about {nearest['distance_m']:.1f} meters "
-            f"ahead, roughly {nearest['steps']} steps, at your {nearest['clock']}."
+            f"There's {with_article(nearest['label'])} about "
+            f"{nearest['distance_m']:.1f} meters ahead, roughly "
+            f"{nearest['steps']} steps, at your {nearest['clock']}."
         )
 
     @staticmethod
     def _describe_object(scene: SceneModel, label: str) -> str:
         matches = find_object(scene, label)
         if not matches:
-            return f"I can't see a {label} right now."
+            return f"I can't see {with_article(label)} right now."
 
         obj = matches[0]
         if obj.distance_m is None:
-            return f"I can see a {obj.label} at your {obj.clock}, but I can't judge the distance."
+            return (
+                f"I can see {with_article(obj.label)} at your {obj.clock}, "
+                "but I can't judge the distance."
+            )
 
         seen = "" if obj.visible else ", though I can't see it now"
         return (
@@ -127,4 +132,7 @@ class LocalSceneProvider(VisionProvider):
         if not changes:
             return "Nothing has changed that I noticed."
         first = changes[0]
-        return f"A {first['label']} appeared at your {first['clock']}."
+        return (
+            f"{with_article(first['label']).capitalize()} appeared at your "
+            f"{first['clock']}."
+        )

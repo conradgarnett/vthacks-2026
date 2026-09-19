@@ -1,21 +1,20 @@
-"""YOLO object detection with size-based metric distance.
+"""Object detection with size-based metric distance.
 
-Why distance comes from object size, not the depth network: monocular depth
-models output *relative* inverse depth with no metric scale. Calibrating that
-to meters needs a reference, and guessing the reference is how you end up
-confidently telling someone a wall is two meters away when it's five.
+Two modes. "open" runs YOLO-World against the curated vocabulary in
+vocabulary.py, which is what makes doors, stairs and handrails detectable at
+all -- COCO has none of them. "coco" runs a standard YOLO checkpoint, kept as
+a fallback for when open-vocabulary output is too noisy for a given room.
 
-Apparent size gives real metric distance directly via the pinhole model:
+Measured on this machine: YOLO-World 25 ms, yolo11n 13 ms, yolo11m 43 ms. Open
+vocabulary is both broader and cheaper than the medium closed-set model, so it
+is the default.
+
+Why distance comes from object size, not the depth network: monocular depth is
+*relative* and unscaled. Calibrating it to meters needs a reference, and a
+wrong reference means confidently telling someone a wall is two meters away
+when it is five. Apparent size gives metric distance directly:
 
     distance = (real_height_m * focal_px) / pixel_height
-
-It only works for classes whose real height we know, which is exactly the set
-of common obstacles that matter for safety. The depth network (depth.py) then
-supplies relative ordering and covers everything the detector has no prior for.
-
-COCO has no "door" class. That gap is deliberate architecture, not an
-oversight: the local detector owns the fast safety-critical path, and Claude
-handles open-vocabulary queries ("where's the door", "read that sign").
 """
 
 from __future__ import annotations
@@ -34,57 +33,25 @@ from backend.perception.geometry import (
     pixel_to_elevation,
     vertical_fov_deg,
 )
+from backend.perception.vocabulary import (
+    CLASS_HEIGHTS_M,
+    CLASS_NAMES,
+    LANDMARK_CLASSES,
+    OBSTACLE_CLASSES,
+    confidence_floor,
+    height_for,
+    is_obstacle,
+)
 
 log = logging.getLogger(__name__)
 
-# Typical real-world heights in meters. Deliberately conservative: a distance
-# that reads slightly too close is a safe error, too far is not.
-CLASS_HEIGHTS_M: dict[str, float] = {
-    "person": 1.70,
-    "chair": 0.90,
-    "couch": 0.80,
-    "bed": 0.60,
-    "dining table": 0.75,
-    "tv": 0.60,
-    "laptop": 0.25,
-    "backpack": 0.45,
-    "handbag": 0.30,
-    "suitcase": 0.65,
-    "bottle": 0.25,
-    "cup": 0.12,
-    "bowl": 0.08,
-    "potted plant": 0.50,
-    "refrigerator": 1.70,
-    "oven": 0.85,
-    "microwave": 0.30,
-    "sink": 0.25,
-    "toilet": 0.75,
-    "book": 0.24,
-    "clock": 0.30,
-    "vase": 0.30,
-    "bicycle": 1.05,
-    "motorcycle": 1.10,
-    "car": 1.50,
-    "bus": 3.00,
-    "truck": 3.20,
-    "traffic light": 0.90,
-    "stop sign": 0.75,
-    "bench": 0.85,
-    "dog": 0.55,
-    "cat": 0.30,
-    "tv monitor": 0.55,
-    "keyboard": 0.03,
-    "cell phone": 0.15,
-}
-
-# Objects a user can walk into. Drives hazard filtering.
-OBSTACLE_CLASSES = frozenset(
-    {
-        "person", "chair", "couch", "bed", "dining table", "bicycle",
-        "motorcycle", "car", "bus", "truck", "bench", "potted plant",
-        "refrigerator", "oven", "toilet", "sink", "suitcase", "dog",
-    }
-)
+__all__ = [
+    "CLASS_HEIGHTS_M",
+    "OBSTACLE_CLASSES",
+    "Detection",
+    "Detector",
+    "distance_from_height",
+]
 
 _MIN_DISTANCE_M = 0.3
 _MAX_DISTANCE_M = 30.0
@@ -106,14 +73,18 @@ class Detection:
 
     @property
     def is_obstacle(self) -> bool:
-        return self.label in OBSTACLE_CLASSES
+        return is_obstacle(self.label)
+
+    @property
+    def is_landmark(self) -> bool:
+        return self.label in LANDMARK_CLASSES
 
 
 def distance_from_height(
     label: str, pixel_height: float, frame_height: int, vfov_deg: float
 ) -> float | None:
     """Metric distance from apparent size. None when we have no prior."""
-    real_height = CLASS_HEIGHTS_M.get(label)
+    real_height = height_for(label)
     if real_height is None or pixel_height <= 1 or frame_height <= 0:
         return None
 
@@ -123,12 +94,13 @@ def distance_from_height(
 
 
 class Detector:
-    """Thread-pooled YOLO. Never call the model on the event loop."""
+    """Thread-pooled detector. Never call the model on the event loop."""
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._model = None
         self._device = self._resolve_device(settings.perception_device)
+        self._open_vocab = settings.detector_mode == "open"
 
     @staticmethod
     def _resolve_device(preference: str) -> str:
@@ -149,12 +121,27 @@ class Detector:
         """Blocking. Call once at startup, never mid-demo."""
         if self._model is not None:
             return
-        from ultralytics import YOLO
 
-        self._model = YOLO(self._settings.detector_weights)
-        log.info(
-            "Detector loaded: %s on %s", self._settings.detector_weights, self._device
-        )
+        if self._open_vocab:
+            from ultralytics import YOLOWorld
+
+            self._model = YOLOWorld(self._settings.open_vocab_weights)
+            # Embedding the class list is the expensive part of open-vocabulary
+            # detection, so it happens once here rather than per frame.
+            self._model.set_classes(CLASS_NAMES)
+            log.info(
+                "Detector: %s on %s, %d open-vocabulary classes",
+                self._settings.open_vocab_weights,
+                self._device,
+                len(CLASS_NAMES),
+            )
+        else:
+            from ultralytics import YOLO
+
+            self._model = YOLO(self._settings.detector_weights)
+            log.info(
+                "Detector: %s on %s (COCO)", self._settings.detector_weights, self._device
+            )
 
     def detect_sync(self, frame_bgr) -> list[Detection]:
         if self._model is None:
@@ -162,10 +149,11 @@ class Detector:
 
         height, width = frame_bgr.shape[:2]
         vfov = vertical_fov_deg(self._settings.camera_hfov_deg, width, height)
+        base_confidence = self._settings.detector_confidence
 
         results = self._model.predict(
             frame_bgr,
-            conf=self._settings.detector_confidence,
+            conf=base_confidence,
             device=self._device,
             verbose=False,
         )
@@ -174,16 +162,23 @@ class Detector:
         for result in results:
             names = result.names
             for raw in result.boxes:
+                label = names[int(raw.cls[0])]
+                confidence = float(raw.conf[0])
+
+                # A phantom staircase stops someone dead; a phantom door sends
+                # them into a wall. Those classes clear a higher bar.
+                if confidence < confidence_floor(label, base_confidence):
+                    continue
+
                 x1, y1, x2, y2 = (float(v) for v in raw.xyxy[0].tolist())
                 box = BoundingBox(x1, y1, x2, y2)
-                label = names[int(raw.cls[0])]
                 center_x, center_y = box.center
                 distance = distance_from_height(label, box.height, height, vfov)
 
                 detections.append(
                     Detection(
                         label=label,
-                        confidence=float(raw.conf[0]),
+                        confidence=confidence,
                         box=box,
                         azimuth_deg=pixel_to_azimuth(
                             center_x, width, self._settings.camera_hfov_deg

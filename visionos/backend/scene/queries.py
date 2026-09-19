@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from backend.perception.geometry import in_forward_cone, lateral_offset_m, steps_away
+from backend.speech.phrasing import join_spoken, pluralize, with_article
 from backend.scene.model import SceneModel, SceneObject
 
 # Some spoken labels don't match COCO's class names.
@@ -120,18 +121,34 @@ def what_changed(scene: SceneModel, seconds: float = 10.0) -> list[dict[str, Any
 
 
 def summarize(scene: SceneModel, limit: int = 5) -> str:
-    """One spoken sentence covering the nearest objects."""
-    objects = nearest_objects(scene, limit)
+    """One spoken sentence covering the nearest objects.
+
+    Duplicates are collapsed: "three people" is easier to act on than three
+    separate clauses each naming a person at a slightly different angle.
+    """
+    objects = [o for o in nearest_objects(scene, limit * 2) if o.distance_m is not None]
     if not objects:
         return "I can't make out anything specific right now."
 
-    parts = [
-        f"{o.label} at your {o.clock}, about {o.distance_m:.1f} meters"
-        for o in objects
-        if o.distance_m is not None
-    ]
-    if not parts:
-        return "I can't make out anything specific right now."
-    if len(parts) == 1:
-        return f"There's a {parts[0]}."
-    return "There's a " + ", a ".join(parts[:-1]) + f", and a {parts[-1]}."
+    grouped: dict[str, list] = {}
+    for obj in objects:
+        grouped.setdefault(obj.label, []).append(obj)
+
+    parts: list[str] = []
+    for label, items in list(grouped.items())[:limit]:
+        nearest = min(items, key=lambda o: o.distance_m or 0.0)
+        if len(items) > 1:
+            parts.append(
+                f"{pluralize(len(items), label)}, nearest at your "
+                f"{nearest.clock} about {nearest.distance_m:.1f} meters"
+            )
+        else:
+            parts.append(
+                f"{with_article(label)} at your {nearest.clock}, "
+                f"about {nearest.distance_m:.1f} meters"
+            )
+
+    # Verb agrees with the first item: "There's a chair", "There are 5 people".
+    leading_count = parts[0].split(" ", 1)[0]
+    verb = "There are" if leading_count.isdigit() and leading_count != "1" else "There's"
+    return f"{verb} {join_spoken(parts)}."

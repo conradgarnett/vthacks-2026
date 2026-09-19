@@ -20,7 +20,9 @@ from backend.ai.ocr import AppleVisionOCR, format_for_speech
 from backend.ai.prompts import PROMPT_VERSION, READ_PROMPT, SCAN_PROMPT, scene_context
 from backend.ai.vision import VisionProvider, build_provider
 from backend.config import get_settings
+from backend.hazards.engine import HazardEngine
 from backend.perception.pipeline import PerceptionPipeline
+from backend.scene.queries import find_object
 from backend.speech.chunker import SentenceChunker
 from backend.telemetry import LatencyTrace, metrics_snapshot
 
@@ -113,9 +115,46 @@ class Session:
         self.ocr = ocr
         self.latest_frame: bytes | None = None
 
+        settings = get_settings()
+        self.hazards = HazardEngine(
+            distance_m=settings.hazard_distance_m,
+            cone_deg=settings.hazard_cone_deg,
+            cooldown_s=settings.hazard_cooldown_s,
+        )
+        self.beacon_label: str | None = None
+
     async def handle_frame(self, frame: bytes) -> None:
         self.latest_frame = frame
         await self.perception.process(frame)
+
+        # Deterministic, microseconds, and ahead of everything else. Nothing
+        # on this path can be delayed by an API call.
+        for alert in self.hazards.evaluate(
+            self.perception.scene, self.perception.dropoffs
+        ):
+            await self.socket.send_json(alert.to_dict())
+
+        await self._update_beacon()
+
+    async def _update_beacon(self) -> None:
+        """Keep the audio beacon pointed at its target as the user turns."""
+        if self.beacon_label is None:
+            return
+
+        matches = find_object(self.perception.scene, self.beacon_label)
+        if not matches:
+            return
+
+        target = matches[0]
+        await self.socket.send_json(
+            {
+                "type": "beacon",
+                "label": target.label,
+                "azimuth_deg": round(target.azimuth_deg, 1),
+                "distance_m": target.distance_m or 2.0,
+                "visible": target.visible,
+            }
+        )
 
     async def _read_locally(self) -> bool:
         """Read text with on-device OCR. False means nothing found, escalate.
@@ -137,6 +176,40 @@ class Session:
         await self.socket.send_json({"type": "trace", **trace.to_dict()})
         log.info("read: %d line(s) in %.0f ms", len(lines), trace.total_ms)
         return True
+
+    async def handle_locate(self, label: str | None) -> None:
+        """Start an audio beacon toward a named object."""
+        if not label:
+            return
+
+        matches = find_object(self.perception.scene, label)
+        if not matches:
+            self.beacon_label = None
+            await self.socket.send_json(
+                {"type": "speech", "text": f"I can't see a {label} to guide you to."}
+            )
+            return
+
+        target = matches[0]
+        self.beacon_label = target.label
+        distance = target.distance_m
+        where = (
+            f"about {distance:.1f} meters away"
+            if distance is not None
+            else "somewhere ahead"
+        )
+        await self.socket.send_json(
+            {
+                "type": "speech",
+                "text": f"Guiding you to the {target.label}, at your "
+                f"{target.clock}, {where}. Turn until the sound is centered.",
+            }
+        )
+        await self._update_beacon()
+
+    async def stop_beacon(self) -> None:
+        self.beacon_label = None
+        await self.socket.send_json({"type": "beacon_stop"})
 
     async def handle_intent(self, kind: str, text: str | None) -> None:
         if self.latest_frame is None:
@@ -213,8 +286,13 @@ async def websocket_endpoint(socket: WebSocket) -> None:
 
             event = json.loads(payload)
             kind = event.get("type")
+
             if kind in {"scan", "read", "ask"}:
                 await session.handle_intent(kind, event.get("text"))
+            elif kind == "locate":
+                await session.handle_locate(event.get("text"))
+            elif kind == "stop_beacon":
+                await session.stop_beacon()
 
     except WebSocketDisconnect:
         log.info("client disconnected")

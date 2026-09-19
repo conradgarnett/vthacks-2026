@@ -43,8 +43,16 @@ class Settings(BaseSettings):
     replay_fixture: str = "assets/replay/livingroom.json"
 
     # --- Local perception -------------------------------------------------
-    detector_weights: str = "yolo11n.pt"
-    detector_confidence: float = 0.35
+    # "open" detects the curated vocabulary in vocabulary.py, including doors,
+    # stairs and handrails that COCO lacks entirely. Measured cheaper than the
+    # medium closed-set model (25 ms vs 43 ms), so it is the default.
+    # "coco" falls back to a fixed checkpoint if open vocabulary proves noisy.
+    detector_mode: Literal["open", "coco"] = "open"
+    open_vocab_weights: str = "yolov8s-world.pt"
+    detector_weights: str = "yolo11m.pt"
+    # Open-vocabulary scores run lower than closed-set ones; dangerous classes
+    # get a stricter floor of their own in vocabulary.py.
+    detector_confidence: float = 0.12
     depth_model: str = "depth-anything/Depth-Anything-V2-Small-hf"
     # Horizontal FOV of a typical phone rear camera. Drives pixel->azimuth.
     camera_hfov_deg: float = 66.0

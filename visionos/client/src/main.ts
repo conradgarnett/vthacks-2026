@@ -1,70 +1,76 @@
 /**
- * Walking skeleton wiring: camera -> socket -> speech.
- *
- * Voice input and spatial audio arrive in later phases; this file proves the
- * end-to-end path a blind user actually depends on.
+ * Client wiring: camera, voice, spatial audio, speech, haptics.
  */
 
 import { Camera } from "./camera";
+import { SpatialAudio } from "./audio/spatial";
 import { SpeechPriority, TtsPlayer } from "./audio/tts-player";
+import { Voice } from "./voice";
 import { Connection, type ServerEvent } from "./ws";
 
 const DISCLAIMER =
-  "VisionOS is starting. This is an assistive tool, not a replacement for " +
-  "your cane or guide dog. Distances are estimates.";
+  "VisionOS ready. Tap anywhere to scan. This is an assistive tool, not a " +
+  "replacement for your cane or guide dog. Distances are estimates.";
 
-// One frame per second is enough while the backend only keeps the latest.
-// Phase 2 raises this once perception actually consumes the stream.
-const FRAME_INTERVAL_MS = 1000;
+const FRAME_INTERVAL_MS = 700;
+
+// "take me to the door" should start a beacon, not narrate. Checked before
+// the question is sent, because guidance is a different mode from an answer.
+const BEACON_PHRASES = [
+  /^(?:take|guide|lead|walk) me to (?:the |a |an )?(.+)$/i,
+  /^(?:navigate|go) to (?:the |a |an )?(.+)$/i,
+  /^(?:find|locate) (?:the |a |an )?(.+?)(?: for me)?$/i,
+];
+const STOP_PHRASES = /^(?:stop|cancel|quiet|never mind|nevermind)\b/i;
 
 const el = <T extends HTMLElement>(id: string): T =>
   document.getElementById(id) as T;
 
 const video = el<HTMLVideoElement>("camera");
 const startButton = el<HTMLButtonElement>("start");
+const tapLayer = el<HTMLButtonElement>("tap-layer");
 const controls = el<HTMLDivElement>("controls");
+const askButton = el<HTMLButtonElement>("ask");
 const status = el<HTMLParagraphElement>("status");
 const transcript = el<HTMLDivElement>("transcript");
 
 const tts = new TtsPlayer();
+const spatial = new SpatialAudio();
 const camera = new Camera(video);
 
-const backendUrl = (): string => {
-  const override = new URLSearchParams(location.search).get("backend");
-  if (override) return override;
-  // Same origin: Vite proxies /ws to the backend. Connecting straight to
-  // :8000 would need a second accepted certificate, which Safari will not
-  // prompt for on a WebSocket -- it just reconnects forever.
-  const scheme = location.protocol === "https:" ? "wss" : "ws";
-  return `${scheme}://${location.host}/ws`;
+const setStatus = (text: string): void => {
+  status.textContent = text;
 };
 
-/** Sets the visible status and announces it to screen readers. */
-function setStatus(text: string): void {
-  status.textContent = text;
-}
-
-function show(text: string): void {
+function show(text: string, kind: "speech" | "hazard" = "speech"): void {
   const line = document.createElement("p");
   line.textContent = text;
+  if (kind === "hazard") line.className = "hazard";
   transcript.prepend(line);
-  while (transcript.childElementCount > 12) transcript.lastElementChild?.remove();
+  while (transcript.childElementCount > 8) transcript.lastElementChild?.remove();
 }
+
+const socketUrl = (): string => {
+  const override = new URLSearchParams(location.search).get("backend");
+  if (override) return override;
+  // Same origin: Vite proxies /ws. Connecting to :8000 directly would need a
+  // second accepted certificate, which Safari never prompts for on a socket.
+  return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
+};
 
 function onServerEvent(event: ServerEvent): void {
   switch (event.type) {
     case "ready": {
-      // Replay is the one mode that can be confidently wrong, so it says so
-      // out loud. A user who cannot see the status line would otherwise have
-      // no way to know the description is unrelated to the camera.
       const modes: Record<string, { label: string; spoken?: string }> = {
         ReplayVisionProvider: {
-          label: "Connected — REPLAY (scripted, ignores camera)",
+          label: "REPLAY — scripted, ignores camera",
           spoken: "Replay mode. Descriptions are scripted and do not match your camera.",
         },
         LocalSceneProvider: {
-          label: "Connected — on-device only",
-          spoken: "Running on device. I can describe objects I recognize and read text, but I can't answer open questions.",
+          label: "On-device",
+          spoken:
+            "Running on device. I can describe what I recognize and read text, " +
+            "but I can't answer open questions.",
         },
       };
       const mode = modes[event.provider_active];
@@ -72,15 +78,34 @@ function onServerEvent(event: ServerEvent): void {
       if (mode?.spoken) tts.say(mode.spoken, SpeechPriority.Answer);
       break;
     }
+
     case "speech":
       tts.say(event.text, SpeechPriority.Answer);
       show(event.text);
       break;
-    case "hazard":
+
+    case "hazard": {
+      // Earcon first: it lands in ~20 ms and arrives from the right
+      // direction, while the sentence takes about a second to say.
+      spatial.play("hazard", event.azimuth_deg, event.distance_m || 1);
+      navigator.vibrate?.(event.severity >= 2 ? [120, 50, 120] : [80]);
       tts.say(event.text, SpeechPriority.Hazard);
-      navigator.vibrate?.([80, 40, 80]);
-      show(`[hazard] ${event.text}`);
+      show(event.text, "hazard");
       break;
+    }
+
+    case "beacon":
+      if (spatial.beaconActive) {
+        spatial.updateBeacon(event.azimuth_deg, event.distance_m);
+      } else {
+        spatial.startBeacon(event.azimuth_deg, event.distance_m);
+      }
+      break;
+
+    case "beacon_stop":
+      spatial.stopBeacon();
+      break;
+
     case "trace":
       console.info(
         `[latency] ${event.label} first_word=${event.stages.first_sentence ?? "-"}ms total=${event.total_ms}ms`
@@ -89,20 +114,66 @@ function onServerEvent(event: ServerEvent): void {
   }
 }
 
-const connection = new Connection(backendUrl(), {
+const connection = new Connection(socketUrl(), {
   onEvent: onServerEvent,
   onConnectionChange: (connected) => {
-    if (connected) return;
-    setStatus("Reconnecting...");
-    // Spoken, because the user cannot see the status line.
+    if (connected) {
+      setStatus("Connected");
+      return;
+    }
+    setStatus("Reconnecting…");
     tts.say("I lost connection. Reconnecting.", SpeechPriority.Answer);
   },
 });
 
+const voice = new Voice({
+  onTranscript: (text) => {
+    show(`“${text}”`);
+    routeSpokenCommand(text);
+  },
+  onStateChange: (listening) => {
+    askButton.dataset.listening = String(listening);
+    if (listening) {
+      // Stop talking before listening, or the mic hears the assistant.
+      tts.stopAll();
+      spatial.play("info", 0, 1);
+      setStatus("Listening…");
+    } else {
+      setStatus("Connected");
+    }
+  },
+  onError: (message) => {
+    setStatus(message);
+    tts.say(message, SpeechPriority.Answer);
+  },
+});
+
+function routeSpokenCommand(text: string): void {
+  const trimmed = text.trim();
+
+  if (STOP_PHRASES.test(trimmed)) {
+    tts.stopAll();
+    spatial.stopBeacon();
+    connection.sendIntent("stop_beacon");
+    return;
+  }
+
+  for (const pattern of BEACON_PHRASES) {
+    const match = trimmed.match(pattern);
+    if (match?.[1]) {
+      connection.sendIntent("locate", match[1].replace(/[?.!]$/, ""));
+      return;
+    }
+  }
+
+  connection.sendIntent("ask", trimmed);
+}
+
 async function begin(): Promise<void> {
-  // Must happen inside the tap handler or iOS stays silent all session.
+  // Both must happen inside the tap handler: iOS starts audio suspended and
+  // refuses speech synthesis until a gesture has occurred.
   tts.prime();
-  tts.say(DISCLAIMER, SpeechPriority.Answer);
+  spatial.init();
 
   try {
     await camera.start();
@@ -114,8 +185,10 @@ async function begin(): Promise<void> {
   }
 
   startButton.hidden = true;
+  tapLayer.hidden = false;
   controls.hidden = false;
-  setStatus("Connecting...");
+  setStatus("Connecting…");
+  tts.say(DISCLAIMER, SpeechPriority.Answer);
   connection.connect();
 
   setInterval(async () => {
@@ -126,17 +199,44 @@ async function begin(): Promise<void> {
 }
 
 async function sendDetailedThen(intent: string): Promise<void> {
-  // OCR needs detail the fast path throws away, so push a hi-res frame first.
+  // OCR needs detail the 640px fast path throws away.
   const frame = await camera.captureDetailed();
   if (frame) connection.sendFrame(frame);
   connection.sendIntent(intent);
 }
 
 startButton.addEventListener("click", begin);
-el("scan").addEventListener("click", () => connection.sendIntent("scan"));
-el("read").addEventListener("click", () => void sendDetailedThen("read"));
-el("stop").addEventListener("click", () => tts.stopAll());
+tapLayer.addEventListener("click", () => connection.sendIntent("scan"));
+el("scan").addEventListener("click", (e) => {
+  e.stopPropagation();
+  connection.sendIntent("scan");
+});
+el("read").addEventListener("click", (e) => {
+  e.stopPropagation();
+  void sendDetailedThen("read");
+});
+el("stop").addEventListener("click", (e) => {
+  e.stopPropagation();
+  tts.stopAll();
+  spatial.stopBeacon();
+  connection.sendIntent("stop_beacon");
+});
+
+// Push to talk. Pointer events cover touch and mouse; releasing anywhere ends
+// the capture so a drag off the button cannot leave the mic open.
+askButton.addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  voice.start();
+});
+const endCapture = () => voice.isListening && voice.stop();
+askButton.addEventListener("pointerup", endCapture);
+askButton.addEventListener("pointercancel", endCapture);
+window.addEventListener("pointerup", endCapture);
 
 if (!tts.isSupported) {
   setStatus("This browser has no speech synthesis. Try Safari or Chrome.");
+}
+if (!voice.isSupported) {
+  askButton.hidden = true;
 }

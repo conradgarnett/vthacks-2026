@@ -2,54 +2,111 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
     <meta name="theme-color" content="#000000" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <title>VisionOS</title>
     <style>
-      /* High contrast and very large targets: the primary user has little or
-         no usable vision, and the secondary user is a judge across a room. */
       :root {
-        --bg: #000;
-        --fg: #fff;
         --accent: #ffd400;
         --danger: #ff4b3e;
+        --fg: #fff;
+        --scrim: rgba(0, 0, 0, 0.62);
       }
-      * { box-sizing: border-box; }
-      body {
-        margin: 0;
-        background: var(--bg);
-        color: var(--fg);
-        font: 500 18px/1.45 system-ui, -apple-system, sans-serif;
-        min-height: 100dvh;
-        display: flex;
-        flex-direction: column;
+      * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+      html, body {
+        margin: 0; height: 100%; overflow: hidden;
+        background: #000; color: var(--fg);
+        font: 500 16px/1.4 system-ui, -apple-system, sans-serif;
+        overscroll-behavior: none;
       }
-      video {
-        width: 100%;
-        max-height: 34dvh;
+
+      /* Camera is the whole screen; everything else floats over it. */
+      #camera {
+        position: fixed; inset: 0;
+        width: 100%; height: 100%;
         object-fit: cover;
-        background: #111;
+        background: #000;
       }
-      main { flex: 1; display: flex; flex-direction: column; padding: 12px; gap: 12px; }
-      button {
-        font: 700 26px/1 system-ui, sans-serif;
-        min-height: 88px; /* far above the 44px minimum -- found by touch */
-        width: 100%;
-        border: 3px solid var(--fg);
-        border-radius: 14px;
-        background: #111;
+
+      /* The primary action for a user who cannot see the buttons: tap
+         anywhere. Corner targets are hard to find by touch. */
+      #tap-layer {
+        position: fixed; inset: 0;
+        border: 0; padding: 0; background: transparent;
+        color: transparent; font-size: 0;
+      }
+      #tap-layer:active { background: rgba(255, 212, 0, 0.16); }
+
+      #start {
+        position: fixed; inset: 0;
+        width: 100%; height: 100%;
+        border: 0; background: rgba(0, 0, 0, 0.88);
+        color: var(--accent);
+        font: 700 30px/1.3 system-ui, sans-serif;
+        display: flex; align-items: center; justify-content: center;
+        flex-direction: column; gap: 14px;
+        z-index: 40;
+      }
+      #start small { font-size: 16px; font-weight: 500; color: #aaa; max-width: 20rem; }
+
+      /* Compact controls, thumb-reachable in the bottom corner. */
+      #controls {
+        position: fixed;
+        right: max(12px, env(safe-area-inset-right));
+        bottom: max(14px, env(safe-area-inset-bottom));
+        display: flex; flex-direction: column; gap: 9px;
+        z-index: 30;
+      }
+      #controls button {
+        width: 62px; height: 62px;
+        border-radius: 50%;
+        border: 2px solid rgba(255, 255, 255, 0.55);
+        background: var(--scrim);
         color: var(--fg);
+        backdrop-filter: blur(8px);
+        font: 600 10px/1.15 system-ui, sans-serif;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 2px;
         cursor: pointer;
       }
-      button:active { background: var(--accent); color: #000; }
-      button:focus-visible { outline: 4px solid var(--accent); outline-offset: 3px; }
-      #start { min-height: 160px; background: var(--accent); color: #000; border-color: var(--accent); }
-      #stop { border-color: var(--danger); color: var(--danger); }
-      #controls { display: flex; flex-direction: column; gap: 12px; }
-      #status { margin: 0; font-size: 17px; color: var(--accent); min-height: 1.5em; }
-      #transcript { font-size: 16px; color: #ccc; overflow-y: auto; max-height: 26dvh; }
-      #transcript p { margin: 0 0 8px; }
+      #controls button .glyph { font-size: 21px; line-height: 1; }
+      #controls button:active { background: var(--accent); color: #000; border-color: var(--accent); }
+      #controls button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+      #ask[data-listening="true"] { background: var(--danger); border-color: var(--danger); }
+      #stop { border-color: rgba(255, 75, 62, 0.75); }
+
+      #status {
+        position: fixed;
+        top: max(10px, env(safe-area-inset-top));
+        left: max(10px, env(safe-area-inset-left));
+        margin: 0; padding: 6px 11px;
+        background: var(--scrim); backdrop-filter: blur(8px);
+        border-radius: 999px;
+        font-size: 12.5px; color: var(--accent);
+        max-width: 68vw;
+        z-index: 30;
+      }
+
+      #transcript {
+        position: fixed;
+        left: max(10px, env(safe-area-inset-left));
+        bottom: max(14px, env(safe-area-inset-bottom));
+        width: min(60vw, 30rem);
+        max-height: 34vh; overflow-y: auto;
+        padding: 10px 12px;
+        background: var(--scrim); backdrop-filter: blur(8px);
+        border-radius: 12px;
+        font-size: 14px; line-height: 1.4;
+        z-index: 20;
+      }
+      #transcript:empty { display: none; }
+      #transcript p { margin: 0 0 7px; }
+      #transcript p:last-child { margin-bottom: 0; }
+      #transcript p.hazard { color: var(--danger); font-weight: 700; }
+
       .sr-only {
         position: absolute; width: 1px; height: 1px;
         padding: 0; margin: -1px; overflow: hidden;
@@ -62,25 +119,37 @@
 
     <video id="camera" playsinline muted aria-hidden="true"></video>
 
-    <main>
-      <button id="start" aria-describedby="start-help">
-        Start VisionOS
+    <!-- Full-screen tap target, so the primary action needs no aiming. -->
+    <button id="tap-layer" hidden aria-label="Scan the room and describe it">
+      Scan the room
+    </button>
+
+    <p id="status" role="status" aria-live="polite"></p>
+    <div id="transcript" role="log" aria-live="polite" aria-label="Spoken history"></div>
+
+    <div id="controls" hidden>
+      <button id="ask" aria-label="Hold to ask a question about your surroundings">
+        <span class="glyph" aria-hidden="true">&#127908;</span>Ask
       </button>
-      <p id="start-help" class="sr-only">
-        Starts the camera and speaks a description of your surroundings.
-        VisionOS is an assistive tool and not a replacement for a cane or guide dog.
-      </p>
+      <button id="read" aria-label="Read any text or sign in view">
+        <span class="glyph" aria-hidden="true">&#128196;</span>Read
+      </button>
+      <button id="scan" aria-label="Scan the room and describe it">
+        <span class="glyph" aria-hidden="true">&#128301;</span>Scan
+      </button>
+      <button id="stop" aria-label="Stop speaking">
+        <span class="glyph" aria-hidden="true">&#9632;</span>Stop
+      </button>
+    </div>
 
-      <div id="controls" hidden>
-        <button id="scan" aria-label="Scan the room and describe it">Scan Room</button>
-        <button id="read" aria-label="Read any text or sign in view">Read Text</button>
-        <button id="stop" aria-label="Stop speaking">Stop Speaking</button>
-      </div>
-
-      <!-- role=status announces changes without stealing focus -->
-      <p id="status" role="status" aria-live="polite"></p>
-      <div id="transcript" role="log" aria-live="polite" aria-label="Spoken history"></div>
-    </main>
+    <button id="start" aria-describedby="start-help">
+      Start VisionOS
+      <small>Tap anywhere to scan. An assistive tool, not a replacement for a cane or guide dog.</small>
+    </button>
+    <p id="start-help" class="sr-only">
+      Starts the camera and speaks a description of your surroundings.
+      Once running, tap anywhere on the screen to scan the room.
+    </p>
 
     <script type="module" src="/src/main.ts"></script>
   </body>
