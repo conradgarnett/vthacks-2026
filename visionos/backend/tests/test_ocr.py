@@ -201,3 +201,43 @@ class TestAppleVision:
     def test_malformed_input_does_not_raise(self, ocr):
         """This sits in the user's speech path; it must degrade, not crash."""
         assert ocr.read_sync(b"not a jpeg") == []
+
+
+class TestDedupeRegressions:
+    """Bugs found by the visionOS-2 collaborator in review.
+
+    Neither shows up in eval/, because every corpus phrase is a single line
+    in one place. A reviewer reading the logic caught what the benchmark
+    structurally could not.
+    """
+
+    @staticmethod
+    def line(text: str, top: float, left: float):
+        from backend.ai.ocr import TextLine
+
+        return TextLine(text=text, confidence=0.5, top=top, left=left)
+
+    def test_two_words_on_one_row_both_survive(self):
+        """An engine that boxes "Room" and "204B" separately must keep both.
+        A 0.20 horizontal tolerance treated them as one place and dropped one."""
+        from backend.ai.ocr import _dedupe
+
+        kept = _dedupe([self.line("Room", 0.50, 0.30), self.line("204B", 0.50, 0.46)])
+        assert {l.text for l in kept} == {"Room", "204B"}
+
+    def test_same_word_in_two_places_both_survive(self):
+        """"PUSH" on two different doors is two signs, not one read twice."""
+        from backend.ai.ocr import _dedupe
+
+        kept = _dedupe([self.line("PUSH", 0.30, 0.12), self.line("PUSH", 0.72, 0.80)])
+        assert len(kept) == 2, "repeated signage collapsed into one"
+
+    def test_garbled_twin_in_the_same_place_is_still_collapsed(self):
+        """The behaviour the position rule exists for must not regress."""
+        from backend.ai.ocr import _dedupe
+
+        kept = _dedupe(
+            [self.line("Departures", 0.40, 0.20), self.line("DLpartiirL", 0.41, 0.21)]
+        )
+        assert len(kept) == 1
+        assert kept[0].text == "Departures", "kept the less plausible variant"

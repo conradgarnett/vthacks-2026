@@ -68,6 +68,16 @@ _TILE_FRAMES = 1
 # worth escalating on. Most real signage clears this easily.
 _THIN_RESULT_CHARS = 6
 
+# A line this long counts as a real reading, which licenses discarding
+# scraps next to it. Below it, short lines are all we have. Set to 4 so
+# that "EXIT" -- the single most important word on any sign -- counts,
+# and the stray "il" beside it gets dropped.
+_SUBSTANTIAL_LINE_CHARS = 4
+# Lines shorter than this are scraps unless strongly plausible -- a room
+# number like "B12" must survive beside a longer line.
+_FRAGMENT_CHARS = 4
+_FRAGMENT_RESCUE_SCORE = 0.45
+
 
 @dataclass(slots=True)
 class TextLine:
@@ -295,6 +305,17 @@ class AppleVisionOCR:
 
         lines: list[TextLine] = []
         for observation in request.results() or []:
+            # Top candidate only. Two variants of using Vision's alternatives
+            # were measured and both were worse than ignoring them:
+            #   score all, take most plausible -> CER 0.199 (from 0.182). The
+            #     linguistic scorer promotes plausible-but-wrong readings over
+            #     Vision's correct first guess.
+            #   use alternatives only to rescue a rejected top candidate ->
+            #     also 0.199, because it revives lines that were rightly
+            #     dropped, adding garbage at large text sizes.
+            # Vision's own ranking beats the heuristic at choosing among its
+            # candidates; the heuristic is only better at deciding whether to
+            # speak at all. Don't re-litigate this without running eval/.
             candidates = observation.topCandidates_(1)
             if not candidates:
                 continue
@@ -423,15 +444,15 @@ def _dedupe(lines: list[TextLine]) -> list[TextLine]:
 
         duplicate = False
         for other in kept:
-            same_place = (
+            # Position alone decides. Text similarity used to force a dedupe
+            # on its own, which collapsed genuinely repeated signage -- "PUSH"
+            # on two different doors became one "PUSH". Two readings are the
+            # same physical text only if they are in the same physical place;
+            # identical words elsewhere in the frame are different words.
+            if (
                 abs(line.top - other.top) < _SAME_POSITION_TOP
                 and abs(line.left - other.left) < _SAME_POSITION_LEFT
-            )
-            similar_text = (
-                SequenceMatcher(None, key, normalize(other.text)).ratio()
-                >= _SAME_LINE_SIMILARITY
-            )
-            if same_place or similar_text:
+            ):
                 duplicate = True
                 break
 
@@ -446,10 +467,15 @@ def _dedupe(lines: list[TextLine]) -> list[TextLine]:
 _SAME_LINE_SIMILARITY = 0.72
 
 # Two readings this close together are the same physical text, however
-# differently they were garbled. Tolerances are generous vertically because
-# tile and full-frame boxes disagree slightly on where a line starts.
+# differently they were garbled.
+#
+# The horizontal tolerance is tight on purpose. It was 0.20, which treated two
+# words on the same row as one place: an engine that boxes "Room" and "204B"
+# separately had one of them silently dropped. Words sit closer together
+# vertically than horizontally, so the top tolerance can stay loose enough to
+# absorb tile-versus-full-frame disagreement about where a line begins.
 _SAME_POSITION_TOP = 0.05
-_SAME_POSITION_LEFT = 0.20
+_SAME_POSITION_LEFT = 0.06
 
 
 def _group_similar(readings: list[list[TextLine]]) -> list[list[TextLine]]:
@@ -522,6 +548,33 @@ def _merge(readings: list[list[TextLine]]) -> list[TextLine]:
     return _dedupe(merged)
 
 
+def _drop_fragments(lines: list[TextLine]) -> list[TextLine]:
+    """Discard scraps sitting beside a substantial reading.
+
+    A sign's border, a reflection or a background edge routinely yields a
+    two-or-three character fragment alongside the real text -- observed output
+    included "J 44 Elevator" and "3Ji 11 li4 1 Rectrplion rr g". The fragment
+    is spoken with the same confidence as the word, and the listener has no
+    way to tell which part was real.
+
+    Only applied when something substantial was found: if every line is short,
+    the short lines are all we have and a room number is worth speaking.
+    """
+    if len(lines) < 2:
+        return lines
+
+    longest = max(len(line.text.strip()) for line in lines)
+    if longest < _SUBSTANTIAL_LINE_CHARS:
+        return lines
+
+    return [
+        line
+        for line in lines
+        if len(line.text.strip()) >= _FRAGMENT_CHARS
+        or _plausibility(line) >= _FRAGMENT_RESCUE_SCORE
+    ]
+
+
 def sort_reading_order(lines: list[TextLine]) -> list[TextLine]:
     """Top to bottom, then left to right within a row.
 
@@ -554,7 +607,10 @@ def format_for_speech(lines: list[TextLine]) -> str:
 
     # Stray marks are voiced literally by a speech engine -- "EXIT comma
     # comma" -- so they are stripped rather than passed through.
-    parts = [clean_for_speech(line.text) for line in sort_reading_order(lines)]
+    parts = [
+        clean_for_speech(line.text)
+        for line in sort_reading_order(_drop_fragments(lines))
+    ]
     body = ". ".join(part for part in parts if part)
     if not body:
         return NO_TEXT_FOUND
