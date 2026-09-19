@@ -14,12 +14,19 @@
  * whenever there is one, `next()` cycles through the rest, and the last
  * choice is remembered. The caller speaks every choice: a wrong camera is
  * invisible to someone who cannot see the preview.
+ *
+ * Focus is the other thing a webcam gets wrong. A lens that can focus is put
+ * in continuous autofocus and asked to settle again right before a read; a
+ * lens that cannot is reported as such, so the user can be told to hold a
+ * label a hand's length away instead of against the glasses.
  */
 
 const FAST_WIDTH = 640;
 const FAST_QUALITY = 0.6;
 const HIRES_WIDTH = 1920;
 const HIRES_QUALITY = 0.85;
+// Time for a single-shot autofocus to settle before the burst is captured.
+const REFOCUS_MS = 600;
 
 // Cameras that live in the machine rather than on the user.
 const BUILT_IN = /integrated|built-?in|facetime|internal|easycamera|true ?vision|wide ?vision|user.facing|front/i;
@@ -29,11 +36,18 @@ const EXTERNAL = /usb|logitech|brio|uvc|razer|elgato|obsbot|insta360|external|ki
 const VENDOR_ID = /\s*\([0-9a-f]{4}:[0-9a-f]{4}\)/i;
 const REMEMBERED = "visionos.camera";
 
+// Focus control is not in the TypeScript DOM typings yet; browsers expose it
+// on cameras whose driver offers it.
+type FocusCapabilities = { focusMode?: string[] };
+type FocusConstraint = { focusMode: string };
+
 export class Camera {
   private video: HTMLVideoElement;
   private canvas = document.createElement("canvas");
   private stream: MediaStream | null = null;
   private cameras: MediaDeviceInfo[] = [];
+  /** "autofocus" or "no focus control", once started; spoken with the name. */
+  focus = "";
 
   constructor(video: HTMLVideoElement) {
     this.video = video;
@@ -81,8 +95,55 @@ export class Camera {
 
   /** The camera in use, named for speech; empty before start. */
   get label(): string {
-    const raw = this.stream?.getVideoTracks()[0]?.label ?? "";
+    const raw = this.track()?.label ?? "";
     return raw.replace(VENDOR_ID, "").trim() || "camera";
+  }
+
+  /**
+   * Ask an autofocus lens to settle on whatever is in front of it now.
+   * Continuous autofocus hunts, and a burst captured mid-hunt is three
+   * soft frames. Does nothing on a lens without focus control.
+   */
+  async refocus(): Promise<void> {
+    const track = this.track();
+    const modes = this.focusModes(track);
+    if (!track || !modes.includes("single-shot")) return;
+    try {
+      await this.setFocus(track, "single-shot");
+      await new Promise((resolve) => setTimeout(resolve, REFOCUS_MS));
+      if (modes.includes("continuous")) await this.setFocus(track, "continuous");
+    } catch {
+      // Focus is best effort; the read goes ahead with what the lens gives.
+    }
+  }
+
+  private track(): MediaStreamTrack | undefined {
+    return this.stream?.getVideoTracks()[0];
+  }
+
+  private focusModes(track: MediaStreamTrack | undefined): string[] {
+    const capabilities = (track?.getCapabilities?.() ?? {}) as FocusCapabilities;
+    return capabilities.focusMode ?? [];
+  }
+
+  private setFocus(track: MediaStreamTrack, mode: string): Promise<void> {
+    const constraint = { focusMode: mode } as FocusConstraint as unknown as MediaTrackConstraintSet;
+    return track.applyConstraints({ advanced: [constraint] });
+  }
+
+  private async applyFocus(): Promise<void> {
+    const track = this.track();
+    const modes = this.focusModes(track);
+    if (track && modes.includes("continuous")) {
+      this.focus = "autofocus";
+      try {
+        await this.setFocus(track, "continuous");
+      } catch {
+        // The lens keeps whatever mode it had.
+      }
+    } else {
+      this.focus = modes.length ? "manual focus" : "no focus control";
+    }
   }
 
   private async open(video: MediaTrackConstraints): Promise<MediaStream> {
@@ -115,6 +176,7 @@ export class Camera {
   }
 
   private async show(): Promise<void> {
+    await this.applyFocus();
     this.video.srcObject = this.stream;
     this.video.setAttribute("playsinline", "true");
     this.video.muted = true;
@@ -131,7 +193,7 @@ export class Camera {
   }
 
   private currentDeviceId(): string | undefined {
-    return this.stream?.getVideoTracks()[0]?.getSettings().deviceId;
+    return this.track()?.getSettings().deviceId;
   }
 
   /** The camera to switch to, or null to keep the browser's choice. */
@@ -157,7 +219,7 @@ export class Camera {
     // A phone's rear camera already faces the world; leave it alone. A
     // computer's own camera faces the user, or reports nothing, and either
     // way the one worn on the glasses is somewhere else in the list.
-    const facing = this.stream?.getVideoTracks()[0]?.getSettings().facingMode;
+    const facing = this.track()?.getSettings().facingMode;
     if (facing === "environment") return null;
 
     return (

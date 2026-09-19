@@ -28,7 +28,13 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.ai.ocr import NO_TEXT_FOUND, TextReader, build_reader, format_for_speech
+from backend.ai.ocr import (
+    NO_TEXT_FOUND,
+    TextReader,
+    _sharpness,
+    build_reader,
+    format_for_speech,
+)
 from backend.ai.prompts import PROMPT_VERSION, READ_PROMPT, SCAN_PROMPT, scene_context
 from backend.ai.vision import VisionProvider, build_provider
 from backend.config import get_settings
@@ -47,6 +53,19 @@ OCR_CONSENSUS_FRAMES = 3
 # Total characters below which a local read is treated as a failure worth
 # escalating to the vision model. Real signage and packaging clear this.
 WEAK_READ_CHARS = 5
+
+# A read that found nothing on a soft picture gets advice, not just the
+# verdict. A webcam on a pair of glasses cannot focus on a label held
+# against it, and the user cannot see that the picture is blurred. The
+# floor is the reader's own sharpness score: a rendered label reads at
+# 450 and up, fails from about 135 (2.5 px of blur) down, and a blank wall
+# scores 0, so the advice is worded for the case where something is
+# being held up and costs nothing when nothing is.
+BLURRY_SHARPNESS = 100.0
+BLURRY_HINT = (
+    "If you are holding something up to read, try it about a hand's length "
+    "from the camera and hold still."
+)
 NO_CAMERA = "I'm not receiving the camera yet."
 
 
@@ -76,6 +95,17 @@ def read_is_weak(lines) -> bool:
     if not lines:
         return True
     return sum(len(line.text.strip()) for line in lines) < WEAK_READ_CHARS
+
+
+def looks_blurry(frames: list[bytes]) -> bool:
+    """Was every frame of the burst too soft to carry text?"""
+    return bool(frames) and max(_sharpness(frame) for frame in frames) < BLURRY_SHARPNESS
+
+
+def no_text_response(frames: list[bytes]) -> str:
+    if looks_blurry(frames):
+        return f"{NO_TEXT_FOUND} {BLURRY_HINT}"
+    return NO_TEXT_FOUND
 
 
 def pack_read_frames(frames: list[bytes]) -> bytes:
@@ -243,7 +273,7 @@ class Session:
                 "read: %d line(s) via %s from %d frame(s)", len(lines), self.ocr.name, len(frames)
             )
         else:
-            await self._say(NO_TEXT_FOUND)
+            await self._say(no_text_response(frames))
         await self._finish(trace)
 
     # --- Questions and scans ----------------------------------------------

@@ -298,12 +298,11 @@ async function begin(): Promise<void> {
     controls.hidden = false;
     setStatus("Connecting…");
     tts.say(DISCLAIMER, SpeechPriority.Answer);
-    if (camera.count > 1) {
-      // Which camera is in use is a state the user cannot see: a webcam
-      // on a pair of glasses and the one above the laptop screen are
-      // indistinguishable from the inside.
-      tts.say(`Using ${camera.label}.`, SpeechPriority.Answer);
-    }
+    // Which camera is in use, and whether it can focus, are states the user
+    // cannot see: a webcam on a pair of glasses and the one above the laptop
+    // screen are indistinguishable from the inside, and a lens that cannot
+    // focus up close changes how a label has to be held.
+    tts.say(`Using ${camera.label}, ${camera.focus}.`, SpeechPriority.Answer);
     connection.connect();
 
     let lastFrameAt = 0;
@@ -329,8 +328,8 @@ async function switchCamera(): Promise<void> {
   if (!started) return;
   try {
     const label = await camera.next();
-    setStatus(`Camera: ${label}`);
-    tts.say(`Using ${label}.`, SpeechPriority.Answer);
+    setStatus(`Camera: ${label}, ${camera.focus}`);
+    tts.say(`Using ${label}, ${camera.focus}.`, SpeechPriority.Answer);
   } catch (err) {
     reportFailure((err as Error).message);
   }
@@ -351,6 +350,9 @@ async function readText(): Promise<void> {
     // A burst, not one frame. Hand-held capture blurs and glares differently
     // each time, and the server keeps only text that several frames agree on
     // -- which is what separates real text from OCR noise.
+    // Let an autofocus lens settle on the label first; a burst captured
+    // mid-hunt is three soft frames that agree on nothing.
+    await camera.refocus();
     const captured: Blob[] = [];
     for (let i = 0; i < READ_BURST_FRAMES; i++) {
       const frame = await camera.captureDetailed();
