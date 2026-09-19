@@ -21,7 +21,7 @@ fact is not.
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Iterable
 
 from backend.perception.geometry import clock_position, describe_direction
@@ -406,6 +406,84 @@ def describe_scan(scene: SceneModel, seen: list[Seen], glimpsed: Iterable[Seen] 
     if reminder:
         sentences.append(reminder)
     return " ".join(sentences)
+
+
+# What a scan can read off an object beats what its outline suggests. A
+# recycling bin and a small refrigerator are the same tall box to the
+# detector; the symbol on the front, or the word printed on it, is not.
+_BIN_LIKE = {"trash can", "recycling bin", "refrigerator", "cabinet", "box", "dumpster"}
+_TEXT_CUES = (
+    ("recycl", "recycling bin"),
+    ("compost", "compost bin"),
+    ("landfill", "trash can"),
+    ("trash", "trash can"),
+    ("garbage", "trash can"),
+    ("rubbish", "trash can"),
+    ("waste", "trash can"),
+)
+# A refrigerator with none of these around it, below the confidence bar,
+# is more likely a bin or a cabinet than a fridge in a hallway.
+_KITCHEN_COMPANY = {"sink", "microwave", "counter", "dining table", "bowl", "cup", "bottle"}
+UNSURE_TALL_BOX = "large cabinet or bin"
+
+
+def _point_inside(x: float, y: float, box: tuple[float, float, float, float]) -> bool:
+    return box[0] <= x <= box[2] and box[1] <= y <= box[3]
+
+
+def _cue_on(item: Seen, symbols: list[Seen], text_lines) -> str | None:
+    """A label the cues on this object's face justify, or None."""
+    if item.box is None:
+        return None
+    for symbol in symbols:
+        if symbol.box is None:
+            continue
+        cx = (symbol.box[0] + symbol.box[2]) / 2
+        cy = (symbol.box[1] + symbol.box[3]) / 2
+        if _point_inside(cx, cy, item.box):
+            return "recycling bin"
+    for line in text_lines:
+        if not _point_inside(line.left, line.top + line.height / 2, item.box):
+            continue
+        lowered = line.text.lower()
+        for cue, label in _TEXT_CUES:
+            if cue in lowered:
+                return label
+    return None
+
+
+def refine_labels(seen: list[Seen], text_lines=()) -> list[Seen]:
+    """Relabel bin-like objects from the symbol or words on them.
+
+    A recycling symbol on an object makes it a recycling bin whatever the
+    detector called it; RECYCLE, COMPOST, TRASH and the like printed on it
+    do the same. A lone symbol with no object under it still means a bin
+    is there, spoken by direction only. A refrigerator with no kitchen
+    around it, below the confidence bar, is spoken as a large cabinet or
+    bin rather than as a fridge, since that is what it usually is.
+    """
+    symbols = [s for s in seen if s.label == "recycling symbol"]
+    objects = [s for s in seen if s.label != "recycling symbol"]
+    kitchen = any(s.label in _KITCHEN_COMPANY for s in objects)
+    claimed: set[int] = set()
+    out: list[Seen] = []
+    for item in objects:
+        label = item.label
+        if label in _BIN_LIKE:
+            cue = _cue_on(item, symbols, text_lines)
+            if cue:
+                label = cue
+                claimed.update(
+                    id(s) for s in symbols
+                    if s.box and item.box and _point_inside((s.box[0] + s.box[2]) / 2, (s.box[1] + s.box[3]) / 2, item.box)
+                )
+            elif label == "refrigerator" and not kitchen and item.confidence < _TENTATIVE_MIN_CONFIDENCE:
+                label = UNSURE_TALL_BOX
+        out.append(replace(item, label=label))
+    for symbol in symbols:
+        if id(symbol) not in claimed:
+            out.append(replace(symbol, label="recycling bin", distance_m=None))
+    return out
 
 
 def inventory_sentence(seen: list[Seen], glimpsed: Iterable[Seen] = ()) -> str:

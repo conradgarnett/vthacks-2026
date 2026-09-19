@@ -57,6 +57,13 @@ VOCABULARY: dict[str, ClassSpec] = {
     "bed": ClassSpec(0.60, True),
     "bench": ClassSpec(0.85, True),
     "trash can": ClassSpec(0.70, True),
+    # A recycling bin and a small refrigerator are the same tall box to the
+    # detector; naming the bin, and the symbol on its front, lets the text
+    # prompt separate them. The symbol has no height prior: it is a cue for
+    # the object it sits on, never spoken on its own.
+    "recycling bin": ClassSpec(1.00, True),
+    "recycling symbol": ClassSpec(None, False),
+    "dumpster": ClassSpec(1.40, True),
     "box": ClassSpec(0.40, True),
     "backpack": ClassSpec(0.45, True),
     "suitcase": ClassSpec(0.65, True),

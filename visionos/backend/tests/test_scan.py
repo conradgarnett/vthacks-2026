@@ -12,7 +12,16 @@ import pytest
 from backend.main import Session, add_tracked, match_scan_frames
 from backend.perception.detector import Detection
 from backend.perception.geometry import BoundingBox
-from backend.scene.inference import Seen, describe_group, describe_scan, group_seen, inventory_sentence
+from backend.ai.ocr import TextLine
+from backend.scene.inference import (
+    UNSURE_TALL_BOX,
+    Seen,
+    describe_group,
+    describe_scan,
+    group_seen,
+    inventory_sentence,
+    refine_labels,
+)
 from backend.scene.model import SceneModel
 from backend.tests.test_peek import FakeProvider, FakeSocket, frame
 
@@ -65,6 +74,50 @@ class TestPicture:
     def test_the_inventory_lists_everything_with_confidence(self):
         text = inventory_sentence([seen("person", 0, 6.0, 0.91)], [seen("bottle", 5, 1.0, 0.35, 1)])
         assert text == "Seen in both frames: person 91% about 6 meters. Seen once: bottle 35% about 1 meters."
+
+
+def text(line, left, top, height=0.03):
+    return TextLine(text=line, confidence=0.9, top=top, left=left, height=height)
+
+
+class TestCues:
+    """What is read off an object beats what its outline suggests."""
+
+    def test_a_recycling_symbol_on_a_fridge_makes_it_a_recycling_bin(self):
+        fridge = seen("refrigerator", 0, 3.0, 0.9, box=(0.4, 0.3, 0.6, 0.9))
+        symbol = seen("recycling symbol", 0, None, 0.6, box=(0.47, 0.5, 0.53, 0.58))
+        out = refine_labels([fridge, symbol])
+        assert [s.label for s in out] == ["recycling bin"]
+
+    def test_the_word_on_the_bin_relabels_it(self):
+        can = seen("trash can", 0, 2.0, 0.7, box=(0.4, 0.3, 0.6, 0.9))
+        assert refine_labels([can], [text("RECYCLE", 0.45, 0.5)])[0].label == "recycling bin"
+        assert refine_labels([can], [text("COMPOST ONLY", 0.45, 0.5)])[0].label == "compost bin"
+        fridge = seen("refrigerator", 0, 2.0, 0.9, box=(0.4, 0.3, 0.6, 0.9))
+        assert refine_labels([fridge], [text("LANDFILL", 0.45, 0.5)])[0].label == "trash can"
+
+    def test_words_elsewhere_in_the_frame_do_not_relabel(self):
+        can = seen("trash can", 0, 2.0, 0.7, box=(0.4, 0.3, 0.6, 0.9))
+        assert refine_labels([can], [text("RECYCLE", 0.9, 0.1)])[0].label == "trash can"
+
+    def test_an_unsure_fridge_with_no_kitchen_around_it_is_hedged(self):
+        fridge = seen("refrigerator", 0, 3.0, 0.55, box=(0.4, 0.3, 0.6, 0.9))
+        assert refine_labels([fridge])[0].label == UNSURE_TALL_BOX
+        assert "a large cabinet or bin" in describe_scan(SceneModel(), refine_labels([fridge]))
+
+    def test_a_fridge_beside_a_sink_stays_a_fridge(self):
+        fridge = seen("refrigerator", 0, 3.0, 0.55, box=(0.4, 0.3, 0.6, 0.9))
+        assert refine_labels([fridge, seen("sink", 20, 3.0)])[0].label == "refrigerator"
+
+    def test_a_sure_fridge_stays_a_fridge(self):
+        fridge = seen("refrigerator", 0, 3.0, 0.9, box=(0.4, 0.3, 0.6, 0.9))
+        assert refine_labels([fridge])[0].label == "refrigerator"
+
+    def test_a_lone_symbol_means_a_bin_by_direction_only(self):
+        symbol = seen("recycling symbol", 30.0, None, 0.7, box=(0.7, 0.5, 0.74, 0.56))
+        out = refine_labels([symbol])
+        assert [s.label for s in out] == ["recycling bin"] and out[0].distance_m is None
+        assert "recycling symbol" not in describe_scan(SceneModel(), out)
 
 
 def detection(label, x1, y1, x2, y2, confidence=0.8, azimuth=0.0, distance=2.0):

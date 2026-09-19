@@ -44,7 +44,7 @@ from backend.ai.ocr import (
 )
 from backend.ai.prompts import PROMPT_VERSION, READ_PROMPT, SCAN_PROMPT, scene_context
 from backend.perception.pipeline import _decode_jpeg
-from backend.scene.inference import Seen, describe_scan, inventory_sentence
+from backend.scene.inference import Seen, describe_scan, inventory_sentence, refine_labels
 from backend.ai.vision import VisionProvider, build_provider
 from backend.config import get_settings
 from backend.hazards.engine import HazardEngine
@@ -487,6 +487,14 @@ class Session:
 
         seen, once = match_scan_frames(per_frame, size)
         seen = add_tracked(seen, self.perception.scene.all_objects())
+        # The words on things: one quick read of the first frame, so a bin
+        # marked RECYCLE is a recycling bin whatever its outline suggested.
+        cues = []
+        if self.ocr.available:
+            with trace.stage("cues"):
+                cues = await self.ocr.read_quick(frames[0])
+        seen = refine_labels(seen, cues)
+        once = refine_labels(once, cues)
         await self._say(describe_scan(self.perception.scene, seen, once))
         await self.socket.send_json({
             "type": "inventory",
