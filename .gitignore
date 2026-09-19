@@ -1,0 +1,18 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+node_modules/
+dist/
+*.local
+
+# Model weights -- pulled by `make precache`, never committed
+*.pt
+*.onnx
+.cache/
+
+.DS_Store
+*.log
