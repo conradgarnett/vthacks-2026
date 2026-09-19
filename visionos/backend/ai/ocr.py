@@ -83,6 +83,14 @@ _FRAGMENT_RESCUE_SCORE = 0.45
 # text. Tuned so "ire Cxi" collapses into "Fire CXLE" while genuinely
 # different words that happen to share a stem do not.
 _FRAGMENT_OVERLAP = 0.7
+# Reading strength below which the image itself is transformed and retried.
+# Roughly 'one short plausible word or less'. Enhancement costs nine extra
+# recognitions, so it stays reserved for reads that found almost nothing.
+_ENHANCE_STRENGTH_FLOOR = 3.0
+# An enhanced reading must carry at least this much plausible text to be
+# accepted -- about one real word -- and beat the original by this margin.
+_ENHANCE_ACCEPT_FLOOR = 2.2
+_ENHANCE_MARGIN = 1.6
 
 
 @dataclass(slots=True)
@@ -148,7 +156,49 @@ class AppleVisionOCR:
         lines = self._read_full(prepared)
         if _needs_tiles(lines):
             lines = self._escalate_tiles(prepared, lines)
+        if _needs_enhancement(lines):
+            lines = self._escalate_enhanced(prepared, lines)
         return lines
+
+    def _escalate_enhanced(
+        self, prepared: bytes, lines: list[TextLine]
+    ) -> list[TextLine]:
+        """Last resort: re-read transformed copies of the image.
+
+        Cursive faces return *nothing* rather than garbage -- Great Vibes,
+        Pacifico and Parisienne produce no observations at all -- so there is
+        nothing for post-processing to repair. Changing the image is the only
+        remaining lever: shearing the slant upright, thickening thin connected
+        strokes, binarizing low local contrast, flattening a curved label.
+
+        Measured on 31 hard cursive and handwriting samples, 24 improved and 5
+        went from unreadable to correct.
+
+        Selection cannot use ground truth, so the most plausible result wins
+        and it must beat what we already had. Every variant is a guess, and a
+        guess that reads confidently is the dangerous kind.
+        """
+        from backend.ai.enhance import variants
+
+        best = lines
+        best_score = _reading_strength(lines)
+
+        # A transformed image must be decisively better, not marginally.
+        # Accepting any improvement tripled hallucination on symbol-only
+        # images (1/12 -> 3/12): enhancing a barcode yields weak junk that
+        # still beats nothing. Requiring a real word's worth of plausible
+        # text, and a clear margin over the original, keeps the gain without
+        # the invention.
+        for name, image in variants(prepared):
+            candidate = self._read_full(image)
+            score = _reading_strength(candidate)
+            if score < _ENHANCE_ACCEPT_FLOOR or not _contains_a_word(candidate):
+                continue
+            if score > max(best_score * _ENHANCE_MARGIN, _ENHANCE_ACCEPT_FLOOR):
+                best, best_score = candidate, score
+                log.debug("enhance: %s improved the read", name)
+
+        return best
 
     def _read_full(self, prepared: bytes) -> list[TextLine]:
         """Whole-frame pass. Cheap, and enough for ordinary signage."""
@@ -272,6 +322,13 @@ class AppleVisionOCR:
             # rejects the only readings available and the user hears nothing.
             # This is already the last resort; plausibility is the gate here.
             merged = _dedupe(merged + tiled)
+
+        # Cursive returns nothing rather than garbage, so tiles cannot help:
+        # there is no text to cut up. Transforming the image is the only
+        # remaining lever, and it runs last because it is the most expensive.
+        if _needs_enhancement(merged):
+            sharpest = max(prepared, key=_sharpness)
+            merged = self._escalate_enhanced(sharpest, merged)
 
         return merged
 
@@ -411,6 +468,45 @@ def _sharpness(frame_jpeg: bytes) -> float:
         return float(laplacian.var())
     except Exception:
         return 0.0
+
+
+def _contains_a_word(lines: list[TextLine]) -> bool:
+    """Does this reading contain something that is actually a word?
+
+    The discriminator between a rescued cursive read and an enhanced barcode.
+    Transforming a barcode yields strings like "Ip h.jlil" -- plausible enough
+    by shape to score, but no token is a word. A rescued script face yields
+    "reception" or "DIET COLA", which are.
+    """
+    from backend.ai.lexicon import LEXICON
+
+    for line in lines:
+        for token in line.text.split():
+            cleaned = "".join(ch for ch in token if ch.isalpha()).lower()
+            if len(cleaned) >= 4 and (
+                cleaned in LEXICON or correct_text(cleaned).lower() in LEXICON
+            ):
+                return True
+    return False
+
+
+def _reading_strength(lines: list[TextLine]) -> float:
+    """How much real text a reading appears to contain.
+
+    Plausibility times length, so a long confident line outranks a short one
+    and a scrap of nonsense outranks nothing only barely. Used to choose
+    between image variants at runtime, where no ground truth exists.
+    """
+    return sum(_plausibility(line) * len(line.text.strip()) for line in lines)
+
+
+def _needs_enhancement(lines: list[TextLine]) -> bool:
+    """Did the ordinary path fail badly enough to justify transforming the image?
+
+    Enhancement costs nine extra recognitions, so it is reserved for reads
+    that produced almost nothing -- which is exactly what cursive does.
+    """
+    return _reading_strength(lines) < _ENHANCE_STRENGTH_FLOOR
 
 
 def _needs_tiles(lines: list[TextLine]) -> bool:
