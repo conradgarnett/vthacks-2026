@@ -146,6 +146,10 @@ class TextReader:
     # should stop as soon as two frames agree. Vision reads a frame in 15 ms
     # and always takes the full vote.
     costly_frames = False
+    # Whether the engine's confidence means anything. Vision reports ~0.5
+    # for nearly everything, garbage included, so plausibility stands in
+    # for it; RapidOCR scores real lines 0.85-0.99 and junk 0.3-0.6.
+    confidence_informative = False
 
     @property
     def available(self) -> bool:
@@ -565,6 +569,7 @@ class RapidOCR(TextReader):
 
     name = "rapidocr"
     costly_frames = True
+    confidence_informative = True
 
     def __init__(self) -> None:
         self._engine = None
@@ -710,12 +715,109 @@ _ENGINES: dict[str, type[TextReader]] = {
 }
 
 
+# A reading the reader is at least this sure of is spoken as it stands; below
+# it the thorough path runs. The user's rule for every guess in this app.
+FAST_READ_CONFIDENCE = 0.8
+
+
+def reading_confidence(reader: TextReader, lines: list[TextLine]) -> float:
+    """How sure the reader is of a reading, 0 to 1.
+
+    The engine's own score, weighted by length, where it means something.
+    Where it does not (Vision's flat 0.5), the share of words the lexicon
+    knows stands in: "FIRE EXIT" is 1.0, "DLpartiirL" is 0.0, and a drug
+    name the lexicon has never seen scores low, which is exactly when the
+    thorough engine should look.
+    """
+    if not lines:
+        return 0.0
+    if reader.confidence_informative:
+        weights = [max(1, len(line.text.strip())) for line in lines]
+        return sum(l.confidence * w for l, w in zip(lines, weights)) / sum(weights)
+    return _known_word_share(lines)
+
+
+def _known_word_share(lines: list[TextLine]) -> float:
+    """Fraction of the alphabetic words the lexicon knows, corrections included."""
+    from backend.ai.lexicon import LEXICON
+
+    words = [
+        "".join(ch for ch in token if ch.isalpha()).lower()
+        for line in lines
+        for token in line.text.split()
+        if any(ch.isalpha() for ch in token) and not any(ch.isdigit() for ch in token)
+    ]
+    words = [w for w in words if len(w) >= 3]
+    if not words:
+        return 0.0
+    known = sum(1 for w in words if w in LEXICON or correct_text(w).lower() in LEXICON)
+    return known / len(words)
+
+
+class TieredReader(TextReader):
+    """A fast engine first; the thorough one when the fast one is not sure.
+
+    Apple Vision reads a frame in 15 ms and is right on ordinary signage;
+    RapidOCR takes most of a second per frame on a CPU and reads cursive,
+    handwriting and dense labels that Vision cannot. Starting fast and
+    escalating below the confidence bar gives the speed of one and the
+    reach of the other, and the bar is the same 80% every guess here must
+    clear.
+    """
+
+    def __init__(self, fast: TextReader, thorough: TextReader) -> None:
+        self.fast = fast
+        self.thorough = thorough
+        self.name = f"{fast.name}+{thorough.name}"
+        self.confidence_informative = fast.confidence_informative
+        self.has_height_floor = fast.has_height_floor
+        self.costly_frames = fast.costly_frames
+
+    @property
+    def available(self) -> bool:
+        return self.fast.available or self.thorough.available
+
+    def warmup(self) -> None:
+        self.fast.warmup()
+        self.thorough.warmup()
+
+    def _settled(self, lines: list[TextLine]) -> bool:
+        return (
+            bool(lines)
+            and not _needs_tiles(lines)
+            and reading_confidence(self.fast, lines) >= FAST_READ_CONFIDENCE
+        )
+
+    def read_sync(self, frame_jpeg: bytes) -> list[TextLine]:
+        lines = self.fast.read_sync(frame_jpeg)
+        if self._settled(lines) or not self.thorough.available:
+            return lines
+        log.debug("read: %s unsure, escalating to %s", self.fast.name, self.thorough.name)
+        return self.thorough.read_sync(frame_jpeg) or lines
+
+    def read_quick_sync(self, frame_jpeg: bytes) -> list[TextLine]:
+        return self.fast.read_quick_sync(frame_jpeg)
+
+    def read_consensus_sync(self, frames: list[bytes]) -> list[TextLine]:
+        lines = self.fast.read_consensus_sync(frames)
+        if self._settled(lines) or not self.thorough.available:
+            return lines
+        log.debug("read: %s unsure, escalating to %s", self.fast.name, self.thorough.name)
+        return self.thorough.read_consensus_sync(frames) or lines
+
+    def combine_readings(self, readings: list[list[TextLine]]) -> list[TextLine]:
+        return self.fast.combine_readings(readings)
+
+
 def build_reader(preferred: str = "auto") -> TextReader:
-    """First engine that loads wins. `preferred` pins one; "none" disables OCR."""
+    """The engines that load, fastest first. `preferred` pins one; "none"
+    disables OCR. With two engines the reader starts on the fast one and
+    escalates to the thorough one below the confidence bar."""
     if preferred == "none":
         return TextReader()
 
     names = list(_ENGINES) if preferred == "auto" else [preferred]
+    loaded: list[TextReader] = []
     for name in names:
         engine_type = _ENGINES.get(name)
         if engine_type is None:
@@ -723,7 +825,12 @@ def build_reader(preferred: str = "auto") -> TextReader:
             continue
         reader = engine_type()
         if reader.available:
-            return reader
+            loaded.append(reader)
+
+    if len(loaded) >= 2:
+        return TieredReader(loaded[0], loaded[1])
+    if loaded:
+        return loaded[0]
 
     log.warning("No OCR engine loaded; text can only be read by the vision provider")
     return TextReader()

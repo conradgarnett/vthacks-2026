@@ -32,12 +32,15 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from backend.ai.medication import UNREADABLE_DOSE
 from backend.ai.ocr import (
+    FAST_READ_CONFIDENCE,
     NO_TEXT_FOUND,
     TextReader,
     _sharpness,
     build_reader,
     format_for_speech,
+    reading_confidence,
 )
 from backend.ai.prompts import PROMPT_VERSION, READ_PROMPT, SCAN_PROMPT, scene_context
 from backend.ai.vision import VisionProvider, build_provider
@@ -346,8 +349,24 @@ class Session:
             return
 
         trace = LatencyTrace(label="read")
-        with trace.stage("ocr"):
-            lines = await self.ocr.read_consensus(frames)
+        # Fast tier first: one quick pass over the sharpest frame, joined
+        # with any fresh peeks. Spoken as it stands when the reader is at
+        # least 80% sure of it and it is not a scrap; the thorough burst is
+        # the fallback, not the default. A medical label whose dose the
+        # guard would withhold always gets the burst, since only agreement
+        # across frames can release a dose.
+        with trace.stage("quick"):
+            first = await self.ocr.read_quick(max(frames, key=_sharpness))
+        lines = self.ocr.combine_readings([*self.fresh_peek_readings(), first])
+        settled = (
+            bool(lines)
+            and not read_is_weak(lines)
+            and reading_confidence(self.ocr, lines) >= FAST_READ_CONFIDENCE
+            and UNREADABLE_DOSE not in format_for_speech(lines)
+        )
+        if not settled:
+            with trace.stage("ocr"):
+                lines = await self.ocr.read_consensus(frames)
 
         # Escalate on a poor read, not only an empty one. Connected script and
         # decorative faces are where OCR fails hardest, and it fails in two
@@ -400,12 +419,14 @@ class Session:
         while self.peeks and now - self.peeks[0][0] > PEEK_KEEP_S:
             self.peeks.popleft()
 
-    def fresh_reading(self, now: float | None = None) -> list:
-        """What the last few seconds of peeks agree is in view; [] if nothing."""
+    def fresh_peek_readings(self, now: float | None = None) -> list[list]:
         now = time.monotonic() if now is None else now
         self.forget_stale_peeks(now)
-        readings = [lines for seen_at, lines in self.peeks if now - seen_at <= PEEK_FRESH_S]
-        return self.ocr.combine_readings(readings)
+        return [lines for seen_at, lines in self.peeks if now - seen_at <= PEEK_FRESH_S]
+
+    def fresh_reading(self, now: float | None = None) -> list:
+        """What the last few seconds of peeks agree is in view; [] if nothing."""
+        return self.ocr.combine_readings(self.fresh_peek_readings(now))
 
     # --- Questions and scans ----------------------------------------------
 

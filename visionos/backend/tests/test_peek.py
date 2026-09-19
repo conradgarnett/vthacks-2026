@@ -55,7 +55,11 @@ class FakeSocket:
 
 
 class FakeReader(TextReader):
+    """Its quick pass is deliberately unsure (0.5), so the fast tier never
+    settles here and these tests see the peek cache and the burst alone."""
+
     name = "fake"
+    confidence_informative = True
 
     def __init__(self, lines: list[TextLine]) -> None:
         self.lines = lines
@@ -68,7 +72,7 @@ class FakeReader(TextReader):
 
     async def read_quick(self, frame_jpeg: bytes) -> list[TextLine]:
         self.quick_calls += 1
-        return list(self.lines)
+        return [TextLine(l.text, 0.5, l.top, l.left, l.height) for l in self.lines]
 
     async def read_consensus(self, frames: list[bytes]) -> list[TextLine]:
         self.burst_calls += 1
