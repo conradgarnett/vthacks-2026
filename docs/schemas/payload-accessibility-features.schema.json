@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "features": {
+      "maxItems": 40,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "step-free-route",
+              "hearing-loop",
+              "tactile-paving",
+              "braille-signage",
+              "accessible-toilet",
+              "lift",
+              "quiet-room",
+              "visual-alarm"
+            ]
+          },
+          "location": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 300
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "features"
+  ],
+  "additionalProperties": false
+}

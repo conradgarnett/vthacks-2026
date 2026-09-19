@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "restaurant": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "items": {
+      "maxItems": 80,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "ingredients": {
+            "maxItems": 60,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 60
+            }
+          },
+          "allergens": {
+            "type": "object",
+            "properties": {
+              "contains": {
+                "maxItems": 20,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 40
+                }
+              },
+              "mayContain": {
+                "maxItems": 20,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 40
+                }
+              }
+            },
+            "required": [
+              "contains",
+              "mayContain"
+            ],
+            "additionalProperties": false
+          },
+          "preparation": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "spice": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5
+          },
+          "texture": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "temperature": {
+            "type": "string",
+            "enum": [
+              "cold",
+              "cool",
+              "warm",
+              "hot"
+            ]
+          },
+          "culture": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 300
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "ingredients",
+          "allergens",
+          "preparation",
+          "spice"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "restaurant",
+    "items"
+  ],
+  "additionalProperties": false
+}

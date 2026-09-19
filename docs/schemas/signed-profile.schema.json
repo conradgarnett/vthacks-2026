@@ -1,0 +1,245 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "format": {
+      "type": "string",
+      "const": "sense-profile/0.1"
+    },
+    "profile": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "personaId": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "translate": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "enum": [
+              "vision",
+              "hearing",
+              "touch",
+              "smell",
+              "taste"
+            ]
+          },
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "required": [
+            "vision",
+            "hearing",
+            "touch",
+            "smell",
+            "taste"
+          ]
+        },
+        "output": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "enum": [
+              "0",
+              "1",
+              "2",
+              "3",
+              "4"
+            ]
+          },
+          "additionalProperties": {
+            "maxItems": 4,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "speech",
+                "spatial-audio",
+                "visual",
+                "haptic"
+              ]
+            }
+          },
+          "required": [
+            "0",
+            "1",
+            "2",
+            "3",
+            "4"
+          ]
+        },
+        "senseOverrides": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "enum": [
+              "vision",
+              "hearing",
+              "touch",
+              "smell",
+              "taste"
+            ]
+          },
+          "additionalProperties": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string",
+              "enum": [
+                "0",
+                "1",
+                "2",
+                "3",
+                "4"
+              ]
+            },
+            "additionalProperties": {
+              "maxItems": 4,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "speech",
+                  "spatial-audio",
+                  "visual",
+                  "haptic"
+                ]
+              }
+            }
+          }
+        },
+        "verbosity": {
+          "type": "string",
+          "enum": [
+            "terse",
+            "normal",
+            "detailed"
+          ]
+        },
+        "speechRate": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 3
+        },
+        "interruptFromUrgency": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4
+        },
+        "language": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 35
+        },
+        "display": {
+          "type": "object",
+          "properties": {
+            "highContrast": {
+              "type": "boolean"
+            },
+            "textScale": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 2
+            },
+            "reducedMotion": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "highContrast",
+            "textScale",
+            "reducedMotion"
+          ],
+          "additionalProperties": false
+        },
+        "inputMethods": {
+          "minItems": 1,
+          "maxItems": 7,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "touch",
+              "keyboard",
+              "switch",
+              "gaze",
+              "head",
+              "hand",
+              "voice"
+            ]
+          }
+        },
+        "allergens": {
+          "maxItems": 32,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        },
+        "situational": {
+          "type": "object",
+          "properties": {
+            "preset": {
+              "type": "string",
+              "enum": [
+                "hands-full",
+                "noisy-room"
+              ]
+            },
+            "expiresAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+            }
+          },
+          "required": [
+            "preset"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "translate",
+        "output",
+        "verbosity",
+        "speechRate",
+        "interruptFromUrgency",
+        "language",
+        "display",
+        "inputMethods",
+        "allergens"
+      ],
+      "additionalProperties": false
+    },
+    "publicKey": {
+      "type": "string",
+      "maxLength": 400
+    },
+    "signature": {
+      "type": "string",
+      "maxLength": 400
+    }
+  },
+  "required": [
+    "format",
+    "profile",
+    "publicKey",
+    "signature"
+  ],
+  "additionalProperties": false
+}

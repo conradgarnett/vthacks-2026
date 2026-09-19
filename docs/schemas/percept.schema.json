@@ -1,0 +1,180 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+    },
+    "sense": {
+      "type": "string",
+      "enum": [
+        "vision",
+        "hearing",
+        "touch",
+        "smell",
+        "taste"
+      ]
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "alert",
+        "description",
+        "answer",
+        "status",
+        "action"
+      ]
+    },
+    "urgency": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4
+    },
+    "short": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "long": {
+      "type": "string",
+      "maxLength": 2000
+    },
+    "spatial": {
+      "type": "object",
+      "properties": {
+        "bearingDeg": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 360
+        },
+        "elevationDeg": {
+          "type": "number",
+          "minimum": -90,
+          "maximum": 90
+        },
+        "distanceM": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "clockPosition": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 12
+        }
+      },
+      "required": [
+        "bearingDeg"
+      ],
+      "additionalProperties": false
+    },
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "tier": {
+          "type": "string",
+          "enum": [
+            "VERIFIED",
+            "INFERRED",
+            "UNVERIFIED",
+            "REJECTED"
+          ]
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253
+        },
+        "sourceLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "agentVersion": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "verifiedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "evidence": {
+          "maxItems": 32,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 300
+          }
+        }
+      },
+      "required": [
+        "tier",
+        "source",
+        "evidence"
+      ],
+      "additionalProperties": false
+    },
+    "actions": {
+      "maxItems": 6,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "safety": {
+      "type": "boolean"
+    },
+    "simulated": {
+      "type": "boolean"
+    },
+    "groupId": {
+      "type": "string",
+      "maxLength": 64
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "id",
+    "timestamp",
+    "sense",
+    "kind",
+    "urgency",
+    "short",
+    "provenance"
+  ],
+  "additionalProperties": false
+}

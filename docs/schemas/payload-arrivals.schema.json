@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "stop": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "arrivals": {
+      "maxItems": 32,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "route": {
+            "type": "string",
+            "maxLength": 16
+          },
+          "destination": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "etaMinutes": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1440
+          },
+          "platform": {
+            "type": "string",
+            "maxLength": 8
+          },
+          "accessible": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "route",
+          "destination",
+          "etaMinutes",
+          "accessible"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "stop",
+    "arrivals"
+  ],
+  "additionalProperties": false
+}

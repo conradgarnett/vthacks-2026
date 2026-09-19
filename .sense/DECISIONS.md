@@ -10,3 +10,6 @@ Format: `D<n>` — decision — rationale. Newest at the bottom.
 - D6 — Zod 4 is used; its built-in `z.toJSONSchema` is used for JSON Schema export (no extra dependency).
 - D7 — Certificates via `@peculiar/x509` (WebCrypto, ECDSA P-256) rather than node-forge: maintained, TypeScript-native, runs on Node and browser.
 - D8 — Prettier ignores Markdown to avoid formatting churn in docs; ESLint ignores `docs/`.
+- D9 — `Percept.short` is capped at 10 words. Assumption (not measured): 2.8 words/s at speech rate 1.0 and alerts spoken at >= 1.8x, so 10 words ~ 2 s. Safety percepts must contain the tier word and source label inside `short` (enforced in the schema).
+- D10 — Agent payload schemas use `strictObject`: unknown keys make the payload REJECTED rather than being silently stripped, so smuggled fields like `systemPrompt` become visible security events.
+- D11 — Personas, situational presets and the profile builder live in `@sense/protocol` (pure data + validation) so core, render, server and web share one definition.
