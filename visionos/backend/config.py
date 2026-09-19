@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     perception_device: Literal["auto", "cpu", "mps", "cuda"] = "auto"
 
     # --- Hazards (safety-critical; no LLM in this path) -------------------
+    # Off by default while the open-vocabulary vocabulary is being tuned:
+    # false warnings interrupt everything else and make the rest of the system
+    # hard to evaluate. The engine is intact and tested -- flip this to re-arm.
+    hazards_enabled: bool = False
     hazard_distance_m: float = 1.5
     hazard_cone_deg: float = 30.0
     hazard_cooldown_s: float = 3.0

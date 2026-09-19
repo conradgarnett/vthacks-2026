@@ -116,6 +116,7 @@ class Session:
         self.latest_frame: bytes | None = None
 
         settings = get_settings()
+        self.hazards_enabled = settings.hazards_enabled
         self.hazards = HazardEngine(
             distance_m=settings.hazard_distance_m,
             cone_deg=settings.hazard_cone_deg,
@@ -131,10 +132,11 @@ class Session:
 
         # Deterministic, microseconds, and ahead of everything else. Nothing
         # on this path can be delayed by an API call.
-        for alert in self.hazards.evaluate(
-            self.perception.scene, self.perception.dropoffs
-        ):
-            await self.socket.send_json(alert.to_dict())
+        if self.hazards_enabled:
+            for alert in self.hazards.evaluate(
+                self.perception.scene, self.perception.dropoffs
+            ):
+                await self.socket.send_json(alert.to_dict())
 
         await self._update_beacon()
 
