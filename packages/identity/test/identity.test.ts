@@ -45,12 +45,8 @@ describe('happy path', () => {
     });
     const rec = await w.client.resolve('riverside-hall.sim');
     expect(rec.ansName).toBe('ans://v1.0.0.riverside-hall.sim');
-    expect(
-      (await w.client.search({ capability: 'air-quality', area: 'riverside' })).map((r) => r.fqdn),
-    ).toEqual(['city-air.sim']);
-    expect((await w.client.search({ capability: 'alarm-feed' })).map((r) => r.fqdn)).toEqual([
-      'riverside-hall.sim',
-    ]);
+    expect((await w.client.search({ capability: 'air-quality', area: 'riverside' })).map((r) => r.fqdn)).toEqual(['city-air.sim']);
+    expect((await w.client.search({ capability: 'alarm-feed' })).map((r) => r.fqdn)).toEqual(['riverside-hall.sim']);
     expect(await w.client.search({ capability: 'arrivals' })).toEqual([]);
     expect((await w.client.search({ text: 'CITY' })).map((r) => r.fqdn)).toEqual(['city-air.sim']);
     await expect(w.client.resolve('nope.sim')).rejects.toThrow(/does not resolve/);
@@ -264,12 +260,8 @@ describe('LiveAnsClient', () => {
     expect(live.mode).toBe('live');
     await expect(live.resolve('x.example')).rejects.toBeInstanceOf(NotConfiguredError);
     await expect(live.search({})).rejects.toThrow(/not configured/);
-    await expect(live.getInclusionProof({} as AgentRecord)).rejects.toBeInstanceOf(
-      NotConfiguredError,
-    );
-    await expect(live.verify({} as AgentRecord, {} as never)).rejects.toBeInstanceOf(
-      NotConfiguredError,
-    );
+    await expect(live.getInclusionProof({} as AgentRecord)).rejects.toBeInstanceOf(NotConfiguredError);
+    await expect(live.verify({} as AgentRecord, {} as never)).rejects.toBeInstanceOf(NotConfiguredError);
   });
 
   it('ANS_MODE selects the client', async () => {

@@ -1,15 +1,6 @@
 import type * as x509 from '@peculiar/x509';
 import { SignedSenseCardSchema, canonicalJson, helloChallengeBytes } from '@sense/protocol';
-import {
-  certChainsTo,
-  certDigest,
-  certDnsNames,
-  certPublicKey,
-  certUriNames,
-  fingerprint,
-  parseCertificate,
-  verifyBytes,
-} from './crypto';
+import { certChainsTo, certDigest, certDnsNames, certPublicKey, certUriNames, fingerprint, parseCertificate, verifyBytes } from './crypto';
 import { ansName, verifyCrl, type SignedCrl } from './ca';
 import { verifyInclusionProof, type InclusionProof, type SignedTreeHead } from './merkle';
 import {
@@ -58,20 +49,14 @@ export async function runVerification(ctx: VerifyContext): Promise<VerificationR
     // 1. Name resolves and record is well-formed
     async () => {
       const parsed = AgentRecordSchema.safeParse(record);
-      if (!parsed.success)
-        return fail(`record is malformed: ${parsed.error.issues[0]?.message ?? 'invalid'}`);
+      if (!parsed.success) return fail(`record is malformed: ${parsed.error.issues[0]?.message ?? 'invalid'}`);
       if (record.ansName !== ansName(record.fqdn, record.version)) {
-        return fail(
-          `record name ${record.ansName} does not match ${ansName(record.fqdn, record.version)}`,
-        );
+        return fail(`record name ${record.ansName} does not match ${ansName(record.fqdn, record.version)}`);
       }
       if (challenge.fqdn !== record.fqdn) {
         return fail(`responder claims ${challenge.fqdn}, but the record is for ${record.fqdn}`);
       }
-      return pass(
-        `${record.fqdn} resolved to ${record.ansName}`,
-        `endpoint ${record.endpoints[0]?.url ?? '?'}`,
-      );
+      return pass(`${record.fqdn} resolved to ${record.ansName}`, `endpoint ${record.endpoints[0]?.url ?? '?'}`);
     },
     // 2. Server certificate chains to a trusted root and matches the FQDN
     async () => {
@@ -81,22 +66,15 @@ export async function runVerification(ctx: VerifyContext): Promise<VerificationR
         return fail('server certificate could not be parsed');
       }
       const chain = await certChainsTo(serverCert, ctx.serverRoot, ctx.now);
-      if (!chain.ok)
-        return fail(`server certificate does not chain to a trusted root: ${chain.reason}`);
+      if (!chain.ok) return fail(`server certificate does not chain to a trusted root: ${chain.reason}`);
       const names = certDnsNames(serverCert);
       if (!names.includes(record.fqdn)) {
-        return fail(
-          `server certificate is for ${names.join(', ') || 'no name'}, not ${record.fqdn}`,
-        );
+        return fail(`server certificate is for ${names.join(', ') || 'no name'}, not ${record.fqdn}`);
       }
       if ((await fingerprint(serverCert)) !== record.serverCertFingerprint) {
         return fail('server certificate is not the one registered for this name');
       }
-      return pass(
-        'chains to the trusted server root',
-        `name matches ${record.fqdn}`,
-        'matches registered fingerprint',
-      );
+      return pass('chains to the trusted server root', `name matches ${record.fqdn}`, 'matches registered fingerprint');
     },
     // 3. Live challenge-response
     async () => {
@@ -112,16 +90,8 @@ export async function runVerification(ctx: VerifyContext): Promise<VerificationR
         ephemeralPublicKey: challenge.ephemeralPublicKey,
         fqdn: record.fqdn,
       });
-      const idOk = await verifyBytes(
-        await certPublicKey(identityCert),
-        bytes,
-        challenge.presentation.challengeSignatureIdentity,
-      );
-      const srvOk = await verifyBytes(
-        await certPublicKey(serverCert),
-        bytes,
-        challenge.presentation.challengeSignatureServer,
-      );
+      const idOk = await verifyBytes(await certPublicKey(identityCert), bytes, challenge.presentation.challengeSignatureIdentity);
+      const srvOk = await verifyBytes(await certPublicKey(serverCert), bytes, challenge.presentation.challengeSignatureServer);
       if (!idOk) return fail('identity key did not sign this session’s fresh challenge');
       if (!srvOk) return fail('server key did not sign this session’s fresh challenge');
       return pass('fresh nonce signed by both the identity key and the server key');
@@ -131,8 +101,7 @@ export async function runVerification(ctx: VerifyContext): Promise<VerificationR
       if (!identityCert) return fail('no identity certificate');
       const chain = await certChainsTo(identityCert, ctx.identityRoot, ctx.now);
       if (!chain.ok) return fail(`identity certificate is invalid: ${chain.reason}`);
-      if (!certDnsNames(identityCert).includes(record.fqdn))
-        return fail('identity certificate is for a different name');
+      if (!certDnsNames(identityCert).includes(record.fqdn)) return fail('identity certificate is for a different name');
       if (!certUriNames(identityCert).includes(record.ansName)) {
         return fail(`identity certificate does not carry ${record.ansName}`);
       }
@@ -143,36 +112,24 @@ export async function runVerification(ctx: VerifyContext): Promise<VerificationR
       try {
         crl = await ctx.fetchCrl();
       } catch {
-        return unavailable(
-          'valid and unexpired, but the revocation list is unreachable so revocation was not checked',
-        );
+        return unavailable('valid and unexpired, but the revocation list is unreachable so revocation was not checked');
       }
-      if (!(await verifyCrl(crl, ctx.identityRoot)))
-        return fail('revocation list signature is invalid');
+      if (!(await verifyCrl(crl, ctx.identityRoot))) return fail('revocation list signature is invalid');
       if (crl.revoked.includes(identityCert.serialNumber.toLowerCase())) {
         return fail(`identity certificate ${identityCert.serialNumber} has been revoked`);
       }
-      return pass(
-        'valid, unexpired, not on the signed revocation list',
-        `version ${record.version}`,
-      );
+      return pass('valid, unexpired, not on the signed revocation list', `version ${record.version}`);
     },
     // 5. Agent version digest matches the registered version
     async () => {
       const p = challenge.presentation;
-      if (p.agentVersion !== record.version)
-        return fail(`running version ${p.agentVersion}, registered ${record.version}`);
+      if (p.agentVersion !== record.version) return fail(`running version ${p.agentVersion}, registered ${record.version}`);
       if (p.digest !== record.digest) {
-        return fail(
-          `running code digest ${p.digest.slice(0, 19)}… differs from registered ${record.digest.slice(0, 19)}…`,
-        );
+        return fail(`running code digest ${p.digest.slice(0, 19)}… differs from registered ${record.digest.slice(0, 19)}…`);
       }
       const bound = identityCert ? certDigest(identityCert) : undefined;
-      if (bound !== record.digest)
-        return fail('identity certificate is bound to a different code digest');
-      return pass(
-        `digest ${record.digest.slice(0, 19)}… matches the registered, immutable version`,
-      );
+      if (bound !== record.digest) return fail('identity certificate is bound to a different code digest');
+      return pass(`digest ${record.digest.slice(0, 19)}… matches the registered, immutable version`);
     },
     // 6. Transparency-log inclusion proof
     async () => {
@@ -196,36 +153,20 @@ export async function runVerification(ctx: VerifyContext): Promise<VerificationR
         const c = ctx.checkAppendOnly(proof.sth);
         if (!c.ok) return fail(`log consistency check failed: ${c.reason}`);
       }
-      return pass(
-        `entry ${proof.leafIndex} included under signed tree head of size ${proof.treeSize}`,
-      );
+      return pass(`entry ${proof.leafIndex} included under signed tree head of size ${proof.treeSize}`);
     },
     // 7. Sense Card signed by the same identity and schema-valid
     async () => {
       const parsed = SignedSenseCardSchema.safeParse(challenge.presentation.senseCard);
-      if (!parsed.success)
-        return fail(
-          `Sense Card is not schema-valid: ${parsed.error.issues[0]?.message ?? 'invalid'}`,
-        );
+      if (!parsed.success) return fail(`Sense Card is not schema-valid: ${parsed.error.issues[0]?.message ?? 'invalid'}`);
       const { card, signature, signerFingerprint } = parsed.data;
-      if (
-        card.agent.fqdn !== record.fqdn ||
-        card.agent.version !== record.version ||
-        card.agent.digest !== record.digest
-      ) {
+      if (card.agent.fqdn !== record.fqdn || card.agent.version !== record.version || card.agent.digest !== record.digest) {
         return fail('Sense Card describes a different agent name, version or digest');
       }
       if (!identityCert) return fail('no identity certificate');
-      if (signerFingerprint !== (await fingerprint(identityCert)))
-        return fail('Sense Card was signed by a different identity');
-      const ok = await verifyBytes(
-        await certPublicKey(identityCert),
-        new TextEncoder().encode(canonicalJson(card)),
-        signature,
-      );
-      return ok
-        ? pass('schema-valid and signed by this agent’s identity key')
-        : fail('Sense Card signature does not verify');
+      if (signerFingerprint !== (await fingerprint(identityCert))) return fail('Sense Card was signed by a different identity');
+      const ok = await verifyBytes(await certPublicKey(identityCert), new TextEncoder().encode(canonicalJson(card)), signature);
+      return ok ? pass('schema-valid and signed by this agent’s identity key') : fail('Sense Card signature does not verify');
     },
   ];
 
@@ -261,9 +202,7 @@ export async function runVerification(ctx: VerifyContext): Promise<VerificationR
     verifiedAt: ctx.now.toISOString(),
     ansMode: ctx.mode,
   } as const;
-  if (failed)
-    return { ...base, outcome: 'REJECTED', failingStep: failed.step, failingStepName: failed.name };
-  if (firstUnavailable)
-    return { ...base, outcome: 'UNVERIFIED', unavailableStep: firstUnavailable.step };
+  if (failed) return { ...base, outcome: 'REJECTED', failingStep: failed.step, failingStepName: failed.name };
+  if (firstUnavailable) return { ...base, outcome: 'UNVERIFIED', unavailableStep: firstUnavailable.step };
   return { ...base, outcome: 'VERIFIED' };
 }

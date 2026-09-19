@@ -2,13 +2,7 @@ import type { Modality, ModalitiesByUrgency, PersonaId, SensoryProfile } from '.
 import { SensoryProfileSchema } from './profile';
 import { SENSES, type Sense } from './percept';
 
-function byUrgency(
-  m0: Modality[],
-  m1: Modality[],
-  m2: Modality[],
-  m3: Modality[],
-  m4: Modality[],
-): ModalitiesByUrgency {
+function byUrgency(m0: Modality[], m1: Modality[], m2: Modality[], m3: Modality[], m4: Modality[]): ModalitiesByUrgency {
   return { '0': m0, '1': m1, '2': m2, '3': m3, '4': m4 };
 }
 
@@ -44,13 +38,7 @@ export const PERSONAS: Record<PersonaId, SensoryProfile> = {
     name: 'Deaf / hard of hearing',
     personaId: 'deaf',
     translate: translating('hearing'),
-    output: byUrgency(
-      ['visual'],
-      ['visual'],
-      ['visual'],
-      ['visual', 'haptic'],
-      ['visual', 'haptic'],
-    ),
+    output: byUrgency(['visual'], ['visual'], ['visual'], ['visual', 'haptic'], ['visual', 'haptic']),
     verbosity: 'normal',
     speechRate: 1,
     interruptFromUrgency: 3,
@@ -64,13 +52,7 @@ export const PERSONAS: Record<PersonaId, SensoryProfile> = {
     name: 'Motor-limited (Touchless)',
     personaId: 'motor',
     translate: translating('touch'),
-    output: byUrgency(
-      ['visual'],
-      ['visual'],
-      ['visual', 'speech'],
-      ['visual', 'speech', 'haptic'],
-      ['visual', 'speech', 'haptic'],
-    ),
+    output: byUrgency(['visual'], ['visual'], ['visual', 'speech'], ['visual', 'speech', 'haptic'], ['visual', 'speech', 'haptic']),
     verbosity: 'terse',
     speechRate: 1.1,
     interruptFromUrgency: 3,
@@ -104,13 +86,7 @@ export const PERSONAS: Record<PersonaId, SensoryProfile> = {
     name: 'Impaired taste (TasteLens)',
     personaId: 'ageusia',
     translate: translating('taste'),
-    output: byUrgency(
-      ['visual'],
-      ['visual'],
-      ['visual', 'speech'],
-      ['visual', 'speech', 'haptic'],
-      ['visual', 'speech', 'haptic'],
-    ),
+    output: byUrgency(['visual'], ['visual'], ['visual', 'speech'], ['visual', 'speech', 'haptic'], ['visual', 'speech', 'haptic']),
     verbosity: 'detailed',
     speechRate: 1,
     interruptFromUrgency: 3,
@@ -129,10 +105,7 @@ export function getPersona(id: PersonaId): SensoryProfile {
  * Custom profile builder. Starts from a persona (or blank defaults) and applies overrides,
  * then validates. Throws a ZodError for invalid input.
  */
-export function buildProfile(
-  overrides: Partial<SensoryProfile> & { name: string },
-  from: PersonaId = 'deaf',
-): SensoryProfile {
+export function buildProfile(overrides: Partial<SensoryProfile> & { name: string }, from: PersonaId = 'deaf'): SensoryProfile {
   const base = getPersona(from);
   return SensoryProfileSchema.parse({
     ...base,
@@ -151,11 +124,7 @@ export function buildProfile(
  * - noisy-room: drop speech and spatial audio, use visual + haptic instead.
  * Life-safety urgency always keeps at least two modalities.
  */
-export function applySituation(
-  profile: SensoryProfile,
-  preset: 'hands-full' | 'noisy-room',
-  expiresAt?: string,
-): SensoryProfile {
+export function applySituation(profile: SensoryProfile, preset: 'hands-full' | 'noisy-room', expiresAt?: string): SensoryProfile {
   const out = structuredClone(profile);
   const keys = ['0', '1', '2', '3', '4'] as const;
   for (const k of keys) {

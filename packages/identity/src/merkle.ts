@@ -13,8 +13,7 @@ const sha256 = (...parts: Uint8Array[]): Uint8Array => {
 };
 
 export const leafHash = (data: Uint8Array): Uint8Array => sha256(new Uint8Array([0]), data);
-export const nodeHash = (l: Uint8Array, r: Uint8Array): Uint8Array =>
-  sha256(new Uint8Array([1]), l, r);
+export const nodeHash = (l: Uint8Array, r: Uint8Array): Uint8Array => sha256(new Uint8Array([1]), l, r);
 
 function largestPowerOfTwoBelow(n: number): number {
   let k = 1;
@@ -32,9 +31,7 @@ function mth(hashes: Uint8Array[]): Uint8Array {
 function path(m: number, hashes: Uint8Array[]): Uint8Array[] {
   if (hashes.length <= 1) return [];
   const k = largestPowerOfTwoBelow(hashes.length);
-  return m < k
-    ? [...path(m, hashes.slice(0, k)), mth(hashes.slice(k))]
-    : [...path(m - k, hashes.slice(k)), mth(hashes.slice(0, k))];
+  return m < k ? [...path(m, hashes.slice(0, k)), mth(hashes.slice(k))] : [...path(m - k, hashes.slice(k)), mth(hashes.slice(0, k))];
 }
 
 /** RFC 9162 section 2.1.3.2 inclusion-proof verification. */
@@ -84,14 +81,9 @@ export interface InclusionProof {
 }
 
 const sthBytes = (s: Pick<SignedTreeHead, 'size' | 'rootHash' | 'timestamp'>): Uint8Array =>
-  new TextEncoder().encode(
-    canonicalJson({ size: s.size, rootHash: s.rootHash, timestamp: s.timestamp }),
-  );
+  new TextEncoder().encode(canonicalJson({ size: s.size, rootHash: s.rootHash, timestamp: s.timestamp }));
 
-export async function verifySthSignature(
-  sth: SignedTreeHead,
-  logPublicKey: CryptoKey,
-): Promise<boolean> {
+export async function verifySthSignature(sth: SignedTreeHead, logPublicKey: CryptoKey): Promise<boolean> {
   return verifyBytes(logPublicKey, sthBytes(sth), sth.signature);
 }
 
@@ -153,8 +145,7 @@ export async function verifyInclusionProof(args: {
   if (!(await verifySthSignature(proof.sth, args.logPublicKey))) {
     return { ok: false, reason: 'signed tree head signature is invalid' };
   }
-  if (proof.sth.size !== proof.treeSize)
-    return { ok: false, reason: 'proof size does not match tree head' };
+  if (proof.sth.size !== proof.treeSize) return { ok: false, reason: 'proof size does not match tree head' };
   let path: Uint8Array[];
   try {
     path = proof.path.map(fromHex);
@@ -175,12 +166,8 @@ export async function verifyInclusionProof(args: {
  * Simplified append-only check: the log's root at the previously seen size must equal the
  * previously pinned root. (RFC 6962 consistency proofs are on the roadmap.)
  */
-export function verifyAppendOnly(
-  previous: SignedTreeHead,
-  log: MerkleLog,
-): { ok: boolean; reason?: string } {
-  if (log.size < previous.size)
-    return { ok: false, reason: 'log shrank since the pinned tree head' };
+export function verifyAppendOnly(previous: SignedTreeHead, log: MerkleLog): { ok: boolean; reason?: string } {
+  if (log.size < previous.size) return { ok: false, reason: 'log shrank since the pinned tree head' };
   return log.rootAt(previous.size) === previous.rootHash
     ? { ok: true }
     : { ok: false, reason: 'history was rewritten since the pinned tree head' };

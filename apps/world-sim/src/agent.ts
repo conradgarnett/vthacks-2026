@@ -67,8 +67,7 @@ export class SimAgent {
   async handle(raw: unknown): Promise<unknown> {
     if (this.offline) throw new Error(`${this.fqdn} is unreachable`);
     const parsed = AgentRequestSchema.safeParse(raw);
-    if (!parsed.success)
-      return this.error('unknown-session', 'bad_request', 'request failed validation');
+    if (!parsed.success) return this.error('unknown-session', 'bad_request', 'request failed validation');
     const req = parsed.data;
     switch (req.type) {
       case 'hello':
@@ -77,8 +76,7 @@ export class SimAgent {
         const denied = this.checkScope(req.capability, req.scope);
         if (denied) return this.error(req.sessionId, 'scope_denied', denied);
         const provider = this.providers[req.capability];
-        if (!provider)
-          return this.error(req.sessionId, 'unsupported', `no ${req.capability} capability`);
+        if (!provider) return this.error(req.sessionId, 'unsupported', `no ${req.capability} capability`);
         const data = await provider(req.params ?? {});
         return this.identity.sign<CapabilityResponse>({
           v: 1,
@@ -134,9 +132,7 @@ export class SimAgent {
     const cap = this.identity.card().capabilities.find((c) => c.id === capability);
     if (!cap) return `${capability} is not offered by this agent`;
     const extra = scope.filter((s) => !cap.scopes.includes(s));
-    return extra.length > 0
-      ? `scope not offered for ${capability}: ${extra.join(', ')}`
-      : undefined;
+    return extra.length > 0 ? `scope not offered for ${capability}: ${extra.join(', ')}` : undefined;
   }
 
   private async pushTo(subscriptionId: string, data?: unknown): Promise<void> {
@@ -168,11 +164,7 @@ export class SimAgent {
   }
 
   /** Publish a fully formed signed push to the unsolicited channel (attacker behaviour). */
-  async pushUnsolicited(
-    capability: CapabilityId,
-    data: unknown,
-    sessionId = 'unsolicited-session',
-  ): Promise<PushMessage> {
+  async pushUnsolicited(capability: CapabilityId, data: unknown, sessionId = 'unsolicited-session'): Promise<PushMessage> {
     const msg = await this.identity.sign<PushMessage>({
       v: 1,
       id: `push-${++this.counter}`,

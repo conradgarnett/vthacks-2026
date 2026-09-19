@@ -81,12 +81,7 @@ export class LocalCA {
     });
   }
 
-  async issueIdentityCert(args: {
-    fqdn: string;
-    version: string;
-    digest: string;
-    publicKey: CryptoKey;
-  }): Promise<x509.X509Certificate> {
+  async issueIdentityCert(args: { fqdn: string; version: string; digest: string; publicKey: CryptoKey }): Promise<x509.X509Certificate> {
     return issueCertificate(this.identity, args.publicKey, {
       serialNumber: randomHex(10),
       commonName: `${args.fqdn}@${args.version}`,
@@ -147,13 +142,9 @@ export interface StoredCa {
   identityKeyPem: string;
 }
 
-const crlBytes = (body: { revoked: string[]; issuedAt: string }): Uint8Array =>
-  new TextEncoder().encode(canonicalJson(body));
+const crlBytes = (body: { revoked: string[]; issuedAt: string }): Uint8Array => new TextEncoder().encode(canonicalJson(body));
 
-export async function verifyCrl(
-  crl: SignedCrl,
-  identityRoot: x509.X509Certificate,
-): Promise<boolean> {
+export async function verifyCrl(crl: SignedCrl, identityRoot: x509.X509Certificate): Promise<boolean> {
   const { signature, ...body } = crl;
   return verifyBytes(await certPublicKey(identityRoot), crlBytes(body), signature);
 }
@@ -174,10 +165,7 @@ export interface Authority {
  * Load the dev CA and log key from `dir`, creating and saving them on first run. With no `dir`
  * (tests) everything stays in memory. Keys live in a gitignored directory (`.sense/keys`).
  */
-export async function loadOrCreateAuthority(
-  dir: string | undefined,
-  clock: Clock = systemClock,
-): Promise<Authority> {
+export async function loadOrCreateAuthority(dir: string | undefined, clock: Clock = systemClock): Promise<Authority> {
   if (!dir) return { ca: await LocalCA.create(clock), logKeys: await generateKeyPair() };
   const caFile = join(dir, 'ca.json');
   const logFile = join(dir, 'log.json');

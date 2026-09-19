@@ -1,9 +1,4 @@
-import type {
-  AccessibilityFeaturesPayload,
-  IndoorMapPayload,
-  MenuAllergensPayload,
-  Point2,
-} from '@sense/protocol';
+import type { AccessibilityFeaturesPayload, IndoorMapPayload, MenuAllergensPayload, Point2 } from '@sense/protocol';
 
 /** Everything in this file is invented for the simulation. Nothing here describes a real place. */
 
@@ -92,14 +87,7 @@ export const BELLA_MENU: MenuAllergensPayload = {
       id: 'sesame-noodles',
       name: 'Sesame noodle bowl',
       description: 'Silky wheat noodles in our house sauce with scallion and chili oil.',
-      ingredients: [
-        'wheat noodles',
-        'soy sauce',
-        'sesame oil',
-        'peanut sauce',
-        'scallion',
-        'chili oil',
-      ],
+      ingredients: ['wheat noodles', 'soy sauce', 'sesame oil', 'peanut sauce', 'scallion', 'chili oil'],
       allergens: { contains: ['wheat', 'soy', 'sesame', 'peanut'], mayContain: ['tree nut'] },
       preparation: 'Tossed to order in a wok and served warm.',
       spice: 3,

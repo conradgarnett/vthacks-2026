@@ -24,18 +24,9 @@ export async function signBytes(privateKey: CryptoKey, data: Uint8Array): Promis
   return toBase64(new Uint8Array(sig));
 }
 
-export async function verifyBytes(
-  publicKey: CryptoKey,
-  data: Uint8Array,
-  signatureB64: string,
-): Promise<boolean> {
+export async function verifyBytes(publicKey: CryptoKey, data: Uint8Array, signatureB64: string): Promise<boolean> {
   try {
-    return await subtle.verify(
-      SIGN_ALG,
-      publicKey,
-      fromBase64(signatureB64) as BufferSource,
-      data as BufferSource,
-    );
+    return await subtle.verify(SIGN_ALG, publicKey, fromBase64(signatureB64) as BufferSource, data as BufferSource);
   } catch {
     return false;
   }
@@ -88,12 +79,7 @@ export interface CertOptions {
   digest?: string;
 }
 
-export async function createRootCertificate(
-  keys: KeyPair,
-  name: string,
-  notBefore: Date,
-  notAfter: Date,
-): Promise<x509.X509Certificate> {
+export async function createRootCertificate(keys: KeyPair, name: string, notBefore: Date, notAfter: Date): Promise<x509.X509Certificate> {
   return x509.X509CertificateGenerator.createSelfSigned({
     serialNumber: randomHex(8),
     name: `CN=${name}`,
@@ -103,10 +89,7 @@ export async function createRootCertificate(
     keys,
     extensions: [
       new x509.BasicConstraintsExtension(true, 0, true),
-      new x509.KeyUsagesExtension(
-        x509.KeyUsageFlags.keyCertSign | x509.KeyUsageFlags.cRLSign,
-        true,
-      ),
+      new x509.KeyUsagesExtension(x509.KeyUsageFlags.keyCertSign | x509.KeyUsageFlags.cRLSign, true),
     ],
   });
 }
@@ -125,9 +108,7 @@ export async function issueCertificate(
   ];
   if (names.length > 0) extensions.push(new x509.SubjectAlternativeNameExtension(names));
   if (opts.digest) {
-    extensions.push(
-      new x509.Extension(DIGEST_EXTENSION_OID, false, new TextEncoder().encode(opts.digest)),
-    );
+    extensions.push(new x509.Extension(DIGEST_EXTENSION_OID, false, new TextEncoder().encode(opts.digest)));
   }
   return x509.X509CertificateGenerator.create({
     serialNumber: opts.serialNumber,
@@ -175,8 +156,7 @@ export async function certChainsTo(
   root: x509.X509Certificate,
   date: Date,
 ): Promise<{ ok: boolean; reason?: string }> {
-  if (cert.issuer !== root.subject)
-    return { ok: false, reason: `issuer ${cert.issuer} is not ${root.subject}` };
+  if (cert.issuer !== root.subject) return { ok: false, reason: `issuer ${cert.issuer} is not ${root.subject}` };
   if (date < cert.notBefore) return { ok: false, reason: 'certificate is not yet valid' };
   if (date > cert.notAfter) return { ok: false, reason: 'certificate has expired' };
   const sigOk = await cert.verify({ publicKey: root.publicKey, signatureOnly: true });

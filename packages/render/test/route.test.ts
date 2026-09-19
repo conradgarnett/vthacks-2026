@@ -32,14 +32,12 @@ const make = (over: Partial<Percept> = {}): Percept => ({
   ...over,
 });
 
-const mods = (persona: PersonaId, over: Partial<Percept>): Modality[] =>
-  [...selectModalities(PERSONAS[persona], make(over))].sort();
+const mods = (persona: PersonaId, over: Partial<Percept>): Modality[] => [...selectModalities(PERSONAS[persona], make(over))].sort();
 const sorted = (...m: Modality[]) => [...m].sort();
 
 describe('routing matrix: explicit expectations per persona', () => {
   it('Blind / low vision: audio first, escalating with urgency', () => {
-    const v = (urgency: number, safety = false) =>
-      mods('blind', { sense: 'vision', urgency, safety });
+    const v = (urgency: number, safety = false) => mods('blind', { sense: 'vision', urgency, safety });
     expect(v(0)).toEqual(sorted('speech'));
     expect(v(1)).toEqual(sorted('speech'));
     expect(v(2)).toEqual(sorted('speech', 'spatial-audio'));
@@ -48,8 +46,7 @@ describe('routing matrix: explicit expectations per persona', () => {
   });
 
   it('Deaf / hard of hearing: visual and haptic, never speech or spatial audio', () => {
-    const h = (urgency: number, safety = false) =>
-      mods('deaf', { sense: 'hearing', urgency, safety });
+    const h = (urgency: number, safety = false) => mods('deaf', { sense: 'hearing', urgency, safety });
     expect(h(0)).toEqual(['visual']);
     expect(h(2)).toEqual(['visual']);
     expect(h(3, true)).toEqual(sorted('visual', 'haptic'));
@@ -57,16 +54,14 @@ describe('routing matrix: explicit expectations per persona', () => {
   });
 
   it('Motor-limited: visual plus speech, haptic when urgent', () => {
-    const t = (urgency: number, safety = false) =>
-      mods('motor', { sense: 'touch', urgency, safety });
+    const t = (urgency: number, safety = false) => mods('motor', { sense: 'touch', urgency, safety });
     expect(t(1)).toEqual(['visual']);
     expect(t(2)).toEqual(sorted('visual', 'speech'));
     expect(t(4, true)).toEqual(sorted('visual', 'speech', 'haptic'));
   });
 
   it('Cannot smell (ScentGuard): haptic joins visual early, everything at life-safety', () => {
-    const s = (urgency: number, safety = true) =>
-      mods('anosmia', { sense: 'smell', urgency, safety });
+    const s = (urgency: number, safety = true) => mods('anosmia', { sense: 'smell', urgency, safety });
     expect(s(1)).toEqual(['visual']);
     expect(s(2)).toEqual(sorted('visual', 'haptic'));
     expect(s(3)).toEqual(sorted('visual', 'haptic', 'speech'));
@@ -74,8 +69,7 @@ describe('routing matrix: explicit expectations per persona', () => {
   });
 
   it('Impaired taste (TasteLens): visual plus speech', () => {
-    const t = (urgency: number, safety = false) =>
-      mods('ageusia', { sense: 'taste', urgency, safety });
+    const t = (urgency: number, safety = false) => mods('ageusia', { sense: 'taste', urgency, safety });
     expect(t(0)).toEqual(['visual']);
     expect(t(2)).toEqual(sorted('visual', 'speech'));
     expect(t(4, true)).toEqual(sorted('visual', 'speech', 'haptic'));
@@ -87,9 +81,7 @@ describe('routing rules', () => {
     // Deaf user, a vision-sense status at urgency 3 that is not safety-related: quiet visual only.
     expect(mods('deaf', { sense: 'vision', urgency: 3, safety: false })).toEqual(['visual']);
     // ...but the same percept flagged as safety-critical gets full escalation.
-    expect(mods('deaf', { sense: 'vision', urgency: 3, safety: true })).toEqual(
-      sorted('visual', 'haptic'),
-    );
+    expect(mods('deaf', { sense: 'vision', urgency: 3, safety: true })).toEqual(sorted('visual', 'haptic'));
   });
 
   it('safety percepts at urgency >= 3 always get at least two modalities, even for thin profiles', () => {
@@ -103,12 +95,8 @@ describe('routing rules', () => {
         '4': ['speech'],
       },
     });
-    expect(
-      selectModalities(thin, make({ urgency: 3, safety: true })).length,
-    ).toBeGreaterThanOrEqual(2);
-    expect(
-      selectModalities(thin, make({ urgency: 4, safety: true })).length,
-    ).toBeGreaterThanOrEqual(2);
+    expect(selectModalities(thin, make({ urgency: 3, safety: true })).length).toBeGreaterThanOrEqual(2);
+    expect(selectModalities(thin, make({ urgency: 4, safety: true })).length).toBeGreaterThanOrEqual(2);
     expect(selectModalities(thin, make({ urgency: 4, safety: true }))).toContain('speech');
   });
 
@@ -121,14 +109,8 @@ describe('routing rules', () => {
   });
 
   it('per-sense overrides win over the default row', () => {
-    const p = buildProfile(
-      { name: 'Override', senseOverrides: { hearing: { '2': ['haptic', 'visual'] } } },
-      'deaf',
-    );
-    expect(selectModalities(p, make({ sense: 'hearing', urgency: 2 }))).toEqual([
-      'haptic',
-      'visual',
-    ]);
+    const p = buildProfile({ name: 'Override', senseOverrides: { hearing: { '2': ['haptic', 'visual'] } } }, 'deaf');
+    expect(selectModalities(p, make({ sense: 'hearing', urgency: 2 }))).toEqual(['haptic', 'visual']);
     expect(selectModalities(p, make({ sense: 'vision', urgency: 2 }))).toEqual(['visual']);
   });
 
@@ -138,10 +120,7 @@ describe('routing rules', () => {
     expect(plan.speech).toBeUndefined();
     expect(plan.spatialAudio).toBeUndefined();
     expect(plan.modalities).toEqual(expect.arrayContaining(['visual', 'haptic']));
-    const hands = route(
-      make({ sense: 'hearing', urgency: 2 }),
-      applySituation(PERSONAS.deaf, 'hands-full'),
-    );
+    const hands = route(make({ sense: 'hearing', urgency: 2 }), applySituation(PERSONAS.deaf, 'hands-full'));
     expect(hands.speech).toBeDefined();
   });
 
@@ -157,9 +136,7 @@ describe('routing invariants over every persona, sense, urgency and safety flag'
   const cases = PERSONA_IDS.flatMap((persona) =>
     (SENSES as readonly Sense[]).flatMap((sense) =>
       [0, 1, 2, 3, 4].flatMap((urgency) =>
-        [false, true].flatMap((safety) =>
-          [true, false].map((withSpatial) => ({ persona, sense, urgency, safety, withSpatial })),
-        ),
+        [false, true].flatMap((safety) => [true, false].map((withSpatial) => ({ persona, sense, urgency, safety, withSpatial }))),
       ),
     ),
   );
@@ -178,8 +155,7 @@ describe('routing invariants over every persona, sense, urgency and safety flag'
       expect(plan.modalities.length, where).toBeGreaterThan(0);
       expect(new Set(plan.modalities).size, where).toBe(plan.modalities.length);
       expect(plan.aria, where).toBe(c.urgency >= 3 ? 'assertive' : 'polite');
-      if (c.safety && c.urgency >= 3)
-        expect(plan.modalities.length, where).toBeGreaterThanOrEqual(2);
+      if (c.safety && c.urgency >= 3) expect(plan.modalities.length, where).toBeGreaterThanOrEqual(2);
       // captions for every audio output
       if (plan.speech || plan.spatialAudio) expect(plan.caption, where).toBeTruthy();
       else expect(plan.caption, where).toBeUndefined();
@@ -201,8 +177,7 @@ describe('routing invariants over every persona, sense, urgency and safety flag'
           where,
         ).toBe(true);
       }
-      if (plan.haptic && c.urgency > 0)
-        expect(plan.haptic.pattern.length, where).toBeGreaterThan(0);
+      if (plan.haptic && c.urgency > 0) expect(plan.haptic.pattern.length, where).toBeGreaterThan(0);
       if (plan.speech && c.safety && c.urgency >= 3 && p.kind === 'alert') {
         expect(plan.speech.rate, where).toBeGreaterThanOrEqual(MIN_ALERT_SPEECH_RATE);
         expect(estimateSpeechSeconds(p.short, plan.speech.rate), where).toBeLessThanOrEqual(2.05);
@@ -222,9 +197,7 @@ describe('speech text', () => {
       provenance: { tier: 'INFERRED', source: 'device-camera', confidence: 0.72, evidence: [] },
     });
     expect(speechText(p, blind)).toBe('Door ahead on your left. Inferred 72 percent.');
-    expect(
-      speechText({ ...p, provenance: { ...p.provenance, tier: 'UNVERIFIED' } }, blind),
-    ).toContain('Unverified');
+    expect(speechText({ ...p, provenance: { ...p.provenance, tier: 'UNVERIFIED' } }, blind)).toContain('Unverified');
   });
 
   it('does not add a hedge to safety percepts (they already state tier and source)', () => {
@@ -246,10 +219,7 @@ describe('speech text', () => {
     expect(right.spatialAudio?.pan).toBe(1);
     const left = route(make({ sense: 'vision', urgency: 2, spatial: { bearingDeg: 270 } }), blind);
     expect(left.spatialAudio?.pan).toBe(-1);
-    const behind = route(
-      make({ sense: 'vision', urgency: 2, spatial: { bearingDeg: 180 } }),
-      blind,
-    );
+    const behind = route(make({ sense: 'vision', urgency: 2, spatial: { bearingDeg: 180 } }), blind);
     expect(behind.spatialAudio?.behind).toBe(true);
     const none = route(make({ sense: 'vision', urgency: 2, spatial: undefined }), blind);
     expect(none.spatialAudio?.pan).toBe(0);
@@ -264,8 +234,6 @@ describe('speech text', () => {
         '4': ['spatial-audio', 'visual'],
       },
     });
-    expect(
-      route(make({ sense: 'vision', urgency: 2, spatial: undefined }), audioOnly).caption,
-    ).toMatch(/direction unknown/);
+    expect(route(make({ sense: 'vision', urgency: 2, spatial: undefined }), audioOnly).caption).toMatch(/direction unknown/);
   });
 });

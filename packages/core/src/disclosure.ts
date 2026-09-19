@@ -1,11 +1,4 @@
-import {
-  AgentRequestSchema,
-  canonicalJson,
-  iso,
-  type AgentRequest,
-  type Clock,
-  type SensoryProfile,
-} from '@sense/protocol';
+import { AgentRequestSchema, canonicalJson, iso, type AgentRequest, type Clock, type SensoryProfile } from '@sense/protocol';
 
 export interface DisclosureEntry {
   id: string;
@@ -72,12 +65,10 @@ export class DisclosureLog {
   /** Validate and record an outbound request. Throws OutboundBlocked instead of sending. */
   approve(to: string, msg: AgentRequest): DisclosureEntry {
     const parsed = AgentRequestSchema.safeParse(msg);
-    if (!parsed.success)
-      throw new OutboundBlocked('outbound message does not match the request schema');
+    if (!parsed.success) throw new OutboundBlocked('outbound message does not match the request schema');
     const sent = canonicalJson(parsed.data);
     const leaked = leaksProfile(sent, this.getProfile());
-    if (leaked)
-      throw new OutboundBlocked(`outbound message would disclose profile data ("${leaked}")`);
+    if (leaked) throw new OutboundBlocked(`outbound message would disclose profile data ("${leaked}")`);
     const entry: DisclosureEntry = {
       id: `d-${++this.n}`,
       timestamp: iso(this.clock),

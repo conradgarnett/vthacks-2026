@@ -122,14 +122,7 @@ describe('sanitizer', () => {
 
 describe('safety guard', () => {
   it('rejects assurance wording in generated text', () => {
-    for (const t of [
-      'The air is safe',
-      'All clear',
-      'This is harmless',
-      'safely eaten',
-      'No danger',
-      'Fine to eat',
-    ]) {
+    for (const t of ['The air is safe', 'All clear', 'This is harmless', 'safely eaten', 'No danger', 'Fine to eat']) {
       expect(() => assertNoAssurance(t), t).toThrow(SafetyViolation);
     }
     expect(() => assertNoAssurance('No hazard reported by verified sources')).not.toThrow();
@@ -162,10 +155,7 @@ describe('safety guard', () => {
   });
 
   it('fitShort keeps percepts speakable', () => {
-    const s = fitShort(
-      'Fire alarm in the very long named east stairwell annex today.',
-      'Verified, Riverside Hall.',
-    );
+    const s = fitShort('Fire alarm in the very long named east stairwell annex today.', 'Verified, Riverside Hall.');
     expect(s.split(/\s+/).length).toBeLessThanOrEqual(10);
     expect(s.endsWith('Verified, Riverside Hall.')).toBe(true);
   });
@@ -235,8 +225,7 @@ describe('rate limiter', () => {
   it('collapses identical percepts and holds back routine floods', () => {
     const clock = new ManualClock();
     const rl = new RateLimiter(clock);
-    const routine = (key: string) =>
-      rl.admit({ source: 'chatty.sim', key, urgency: 2, tier: 'VERIFIED' });
+    const routine = (key: string) => rl.admit({ source: 'chatty.sim', key, urgency: 2, tier: 'VERIFIED' });
     expect(routine('a').admit).toBe(true);
     const dup = routine('a');
     expect(dup).toMatchObject({ admit: false, reason: 'duplicate', count: 2 });
@@ -250,23 +239,16 @@ describe('rate limiter', () => {
 
   it('never suppresses a distinct urgency >= 3 percept from a VERIFIED source', () => {
     const rl = new RateLimiter(new ManualClock());
-    for (let i = 0; i < 50; i++)
-      rl.admit({ source: 's.sim', key: `noise${i}`, urgency: 1, tier: 'VERIFIED' });
+    for (let i = 0; i < 50; i++) rl.admit({ source: 's.sim', key: `noise${i}`, urgency: 1, tier: 'VERIFIED' });
     for (let i = 0; i < 40; i++) {
-      expect(
-        rl.admit({ source: 's.sim', key: `critical${i}`, urgency: i % 2 ? 3 : 4, tier: 'VERIFIED' })
-          .admit,
-      ).toBe(true);
+      expect(rl.admit({ source: 's.sim', key: `critical${i}`, urgency: i % 2 ? 3 : 4, tier: 'VERIFIED' }).admit).toBe(true);
     }
   });
 
   it('does not exempt urgent percepts from unverified sources', () => {
     const rl = new RateLimiter(new ManualClock());
-    for (let i = 0; i < 50; i++)
-      rl.admit({ source: 'u.sim', key: `n${i}`, urgency: 1, tier: 'UNVERIFIED' });
-    expect(rl.admit({ source: 'u.sim', key: 'urgent', urgency: 4, tier: 'UNVERIFIED' }).admit).toBe(
-      false,
-    );
+    for (let i = 0; i < 50; i++) rl.admit({ source: 'u.sim', key: `n${i}`, urgency: 1, tier: 'UNVERIFIED' });
+    expect(rl.admit({ source: 'u.sim', key: 'urgent', urgency: 4, tier: 'UNVERIFIED' }).admit).toBe(false);
   });
 
   it('identical critical repeats (heartbeats) collapse, and reset() re-announces', () => {
@@ -325,9 +307,7 @@ describe('disclosure gate', () => {
         params: { who: 'Deaf / hard of hearing' },
       }),
     ).toThrow(OutboundBlocked);
-    expect(() =>
-      log.approve('x.sim', { ...base, type: 'hello', profile: { name: 'x' } } as never),
-    ).toThrow(/schema/);
+    expect(() => log.approve('x.sim', { ...base, type: 'hello', profile: { name: 'x' } } as never)).toThrow(/schema/);
     expect(log.entries()).toHaveLength(1);
   });
 

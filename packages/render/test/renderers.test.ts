@@ -73,9 +73,7 @@ describe('haptics', () => {
     expect(r.fire({ pattern: [100, 50, 100], description: 'x' })).toBe('vibrated');
     expect(vibrate).toHaveBeenCalledWith([100, 50, 100]);
     expect(r.fire({ pattern: [], description: '' })).toBe('unsupported');
-    expect(
-      new HapticRenderer({ vibrate: () => false }).fire({ pattern: [10], description: 'x' }),
-    ).toBe('unsupported');
+    expect(new HapticRenderer({ vibrate: () => false }).fire({ pattern: [10], description: 'x' })).toBe('unsupported');
   });
 });
 
@@ -204,31 +202,19 @@ describe('presenter', () => {
 
   it('drives visual + haptic for the Deaf persona and reports the haptic fallback honestly', () => {
     const vibrate = vi.fn(() => true);
-    const p = new Presenter(
-      new SpeechRenderer({}),
-      new SpatialAudioRenderer({}),
-      new HapticRenderer({ vibrate }),
-    );
+    const p = new Presenter(new SpeechRenderer({}), new SpatialAudioRenderer({}), new HapticRenderer({ vibrate }));
     const res = p.present(percept, getPersona('deaf'));
     expect(res.plan.modalities.sort()).toEqual(['haptic', 'visual']);
     expect(res.speech).toBeUndefined();
     expect(res.audio).toBeUndefined();
     expect(res.haptic).toBe('vibrated');
     expect(vibrate).toHaveBeenCalled();
-    const noVibration = new Presenter(
-      new SpeechRenderer({}),
-      new SpatialAudioRenderer({}),
-      new HapticRenderer({}),
-    );
+    const noVibration = new Presenter(new SpeechRenderer({}), new SpatialAudioRenderer({}), new HapticRenderer({}));
     expect(noVibration.present(percept, getPersona('deaf')).haptic).toBe('unsupported');
   });
 
   it('drives speech + spatial audio for the Blind persona, degrading to captions when unavailable', () => {
-    const p = new Presenter(
-      new SpeechRenderer({}),
-      new SpatialAudioRenderer({}),
-      new HapticRenderer({}),
-    );
+    const p = new Presenter(new SpeechRenderer({}), new SpatialAudioRenderer({}), new HapticRenderer({}));
     const res = p.present({ ...percept, sense: 'vision' }, getPersona('blind'));
     expect(res.speech).toBe('captions-only');
     expect(res.audio).toBe('unavailable');

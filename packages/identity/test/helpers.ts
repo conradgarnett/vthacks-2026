@@ -1,9 +1,4 @@
-import {
-  ManualClock,
-  type CapabilityId,
-  type HelloRequest,
-  type SenseCardCapability,
-} from '@sense/protocol';
+import { ManualClock, type CapabilityId, type HelloRequest, type SenseCardCapability } from '@sense/protocol';
 import {
   PublisherIdentity,
   SimulatedAnsClient,
@@ -15,10 +10,7 @@ import {
   type AgentRecord,
 } from '../src';
 
-export const capability = (
-  id: CapabilityId,
-  over: Partial<SenseCardCapability> = {},
-): SenseCardCapability => ({
+export const capability = (id: CapabilityId, over: Partial<SenseCardCapability> = {}): SenseCardCapability => ({
   id,
   summary: `${id} capability`,
   basis: 'direct-sensor',
@@ -33,19 +25,13 @@ export async function makeWorld() {
   const authority = await loadOrCreateAuthority(undefined, clock);
   const registry = new SimulatedRegistry(authority, clock);
   const client = new SimulatedAnsClient(registry, clock);
-  const publish = (
-    fqdn: string,
-    over: Partial<Parameters<typeof PublisherIdentity.create>[0]> = {},
-  ) =>
+  const publish = (fqdn: string, over: Partial<Parameters<typeof PublisherIdentity.create>[0]> = {}) =>
     PublisherIdentity.create({
       registry,
       fqdn,
       version: '1.0.0',
       name: fqdn,
-      capabilities: [
-        capability('alarm-feed'),
-        capability('indoor-map', { basis: 'static', freshness: { maxAgeSeconds: null } }),
-      ],
+      capabilities: [capability('alarm-feed'), capability('indoor-map', { basis: 'static', freshness: { maxAgeSeconds: null } })],
       covers: ['riverside'],
       clock,
       ...over,

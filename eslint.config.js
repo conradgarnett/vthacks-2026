@@ -6,14 +6,7 @@ import jsxA11y from 'eslint-plugin-jsx-a11y';
 
 export default tseslint.config(
   {
-    ignores: [
-      '**/dist/**',
-      'node_modules/**',
-      '.tools/**',
-      'coverage/**',
-      '.sense/keys/**',
-      'docs/**',
-    ],
+    ignores: ['**/dist/**', 'node_modules/**', '.tools/**', 'coverage/**', '.sense/keys/**', 'docs/**'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
@@ -21,10 +14,7 @@ export default tseslint.config(
     languageOptions: { globals: { ...globals.node, ...globals.browser } },
     rules: {
       '@typescript-eslint/no-explicit-any': 'error',
-      '@typescript-eslint/no-unused-vars': [
-        'error',
-        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
-      ],
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
       '@typescript-eslint/no-floating-promises': 'off',
       'no-console': 'off',
     },

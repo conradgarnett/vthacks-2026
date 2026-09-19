@@ -15,16 +15,7 @@ import {
   type SenseCardCapability,
   type SignedSenseCard,
 } from '@sense/protocol';
-import {
-  certPem,
-  fingerprint,
-  generateKeyPair,
-  parseCertificate,
-  randomHex,
-  sha256Hex,
-  signBytes,
-  type KeyPair,
-} from './crypto';
+import { certPem, fingerprint, generateKeyPair, parseCertificate, randomHex, sha256Hex, signBytes, type KeyPair } from './crypto';
 import type { Registration, SimulatedRegistry } from './registry';
 import type { AgentRecord } from './types';
 
@@ -68,15 +59,7 @@ export class PublisherIdentity {
   static async create(opts: PublisherOptions): Promise<PublisherIdentity> {
     const clock = opts.clock ?? systemClock;
     const digest = `sha256:${await sha256Hex(opts.codeIdentity ?? `${opts.fqdn}@${opts.version}`)}`;
-    const pub = new PublisherIdentity(
-      opts.fqdn,
-      opts.version,
-      digest,
-      await generateKeyPair(),
-      await generateKeyPair(),
-      clock,
-      opts,
-    );
+    const pub = new PublisherIdentity(opts.fqdn, opts.version, digest, await generateKeyPair(), await generateKeyPair(), clock, opts);
     const req = {
       fqdn: opts.fqdn,
       version: opts.version,
@@ -87,9 +70,7 @@ export class PublisherIdentity {
       capabilities: opts.capabilities.map((c) => c.id as CapabilityId),
       covers: opts.covers,
     };
-    pub.registration = opts.skipLog
-      ? await opts.registry.registerUnlogged(req)
-      : await opts.registry.register(req);
+    pub.registration = opts.skipLog ? await opts.registry.registerUnlogged(req) : await opts.registry.register(req);
     pub.serverCert = parseCertificate(pub.registration.serverCertPem);
     pub.identityCert = parseCertificate(pub.registration.identityCertPem);
     pub.signedCard = await pub.signCard();
@@ -120,10 +101,7 @@ export class PublisherIdentity {
     const card = this.card();
     return {
       card,
-      signature: await signBytes(
-        this.identityKeys.privateKey,
-        new TextEncoder().encode(canonicalJson(card)),
-      ),
+      signature: await signBytes(this.identityKeys.privateKey, new TextEncoder().encode(canonicalJson(card))),
       signerFingerprint: await fingerprint(this.identityCert),
     };
   }
@@ -158,10 +136,7 @@ export class PublisherIdentity {
 
   /** Sign a `capability_response` or `push` body with the identity key. */
   async sign<T extends CapabilityResponse | PushMessage>(msg: Omit<T, 'signature'>): Promise<T> {
-    const signature = await signBytes(
-      this.identityKeys.privateKey,
-      signingPayload({ ...msg, signature: '' } as T),
-    );
+    const signature = await signBytes(this.identityKeys.privateKey, signingPayload({ ...msg, signature: '' } as T));
     return { ...msg, signature } as T;
   }
 }

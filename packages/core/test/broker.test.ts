@@ -3,8 +3,7 @@ import type { AgentTransport, Percept, SecurityEvent } from '@sense/protocol';
 import { ATTACKERS } from '@sense/world-sim';
 import { makeHarness, settle, waitFor, type Harness } from './helpers';
 
-const events = (h: Harness, kind: SecurityEvent['kind']) =>
-  h.broker.securityEvents().filter((e) => e.kind === kind);
+const events = (h: Harness, kind: SecurityEvent['kind']) => h.broker.securityEvents().filter((e) => e.kind === kind);
 const bySource = (ps: Percept[], fqdn: string) => ps.filter((p) => p.provenance.source === fqdn);
 
 async function arrived(opts: Parameters<typeof makeHarness>[0] = {}, attackers = false) {
@@ -29,13 +28,11 @@ describe('scene 1: arrive', () => {
     expect(hall?.result.outcome).toBe('VERIFIED');
     expect(hall?.result.steps.filter((s) => s.status === 'pass')).toHaveLength(7);
     expect(hall?.simulated).toBe(true);
-    expect(
-      h.broker.verifications().find((v) => v.fqdn === 'riverside-hall.sim')?.subscriptions,
-    ).toEqual(expect.arrayContaining(['alarm-feed', 'air-quality']));
-
-    const hello = bySource(h.broker.allPercepts(), 'riverside-hall.sim').find((p) =>
-      p.short.includes('Verified'),
+    expect(h.broker.verifications().find((v) => v.fqdn === 'riverside-hall.sim')?.subscriptions).toEqual(
+      expect.arrayContaining(['alarm-feed', 'air-quality']),
     );
+
+    const hello = bySource(h.broker.allPercepts(), 'riverside-hall.sim').find((p) => p.short.includes('Verified'));
     expect(hello?.provenance.tier).toBe('VERIFIED');
     expect(hello?.provenance.sourceLabel).toBe('Riverside Hall');
     expect(hello?.provenance.evidence[0]).toMatch(/7\/7 identity checks passed \(ANS-modeled\)/);
@@ -48,9 +45,7 @@ describe('scene 1: arrive', () => {
     const { h } = await arrived();
     const entries = h.broker.disclosure.entries();
     expect(entries.length).toBeGreaterThan(5);
-    expect(new Set(entries.map((e) => e.messageType))).toEqual(
-      new Set(['hello', 'capability_query', 'subscribe']),
-    );
+    expect(new Set(entries.map((e) => e.messageType))).toEqual(new Set(['hello', 'capability_query', 'subscribe']));
     const sessionByAgent = new Map<string, string>();
     for (const e of entries) {
       expect(e.profileDataSent).toBe(false);
@@ -61,18 +56,14 @@ describe('scene 1: arrive', () => {
     const serialized = h.sent.map((s) => JSON.stringify(s.msg)).join('\n');
     expect(serialized).not.toMatch(/peanut|blind|persona|allergens"/i);
     // capability queries only ever request declared, minimum scopes
-    for (const s of h.sent)
-      if (s.msg.type === 'capability_query')
-        expect(s.msg.scope).toEqual([`${s.msg.capability}:read`]);
+    for (const s of h.sent) if (s.msg.type === 'capability_query') expect(s.msg.scope).toEqual([`${s.msg.capability}:read`]);
   });
 
   it('reuses a fresh session but reconnects when forced', async () => {
     const { h } = await arrived();
     const first = h.broker.verifications().find((v) => v.fqdn === 'riverside-hall.sim')?.sessionId;
     expect((await h.broker.connect('riverside-hall.sim')).sessionId).toBe(first);
-    expect((await h.broker.connect('riverside-hall.sim', { force: true })).sessionId).not.toBe(
-      first,
-    );
+    expect((await h.broker.connect('riverside-hall.sim', { force: true })).sessionId).not.toBe(first);
   });
 });
 
@@ -108,9 +99,7 @@ describe('scene 4: real alarm + spoof', () => {
     const all = JSON.stringify(h.broker.allPercepts());
     expect(all).not.toMatch(/false alarm|all clear|ignore/i);
     expect(bySource(h.broker.allPercepts(), ATTACKERS.spoofer)).toHaveLength(0);
-    expect(
-      h.broker.allPercepts().some((p) => p.urgency === 4 && p.provenance.tier === 'VERIFIED'),
-    ).toBe(true);
+    expect(h.broker.allPercepts().some((p) => p.urgency === 4 && p.provenance.tier === 'VERIFIED')).toBe(true);
   });
 
   it('a legitimate clear is reported as the source’s report, never as an all-clear from SENSE', async () => {
@@ -119,9 +108,7 @@ describe('scene 4: real alarm + spoof', () => {
     await settle();
     await h.world.trigger('clear-alarm');
     await settle();
-    const cleared = h.broker
-      .allPercepts()
-      .find((p) => p.short.startsWith('Alarm cleared')) as Percept;
+    const cleared = h.broker.allPercepts().find((p) => p.short.startsWith('Alarm cleared')) as Percept;
     expect(cleared.kind).toBe('status');
     expect(cleared.provenance.tier).toBe('VERIFIED');
     expect(cleared.long).toMatch(/cannot confirm current conditions/);
@@ -160,9 +147,7 @@ describe('prompt injection from a VERIFIED agent (5.4 #6)', () => {
     expect(ev.length).toBeGreaterThanOrEqual(1);
     expect(ev[0]?.message).toMatch(/notes/);
     expect(ev[0]?.message).toMatch(/never obeyed/);
-    const p = bySource(h.broker.allPercepts(), ATTACKERS.injector).find(
-      (x) => x.kind === 'description',
-    ) as Percept;
+    const p = bySource(h.broker.allPercepts(), ATTACKERS.injector).find((x) => x.kind === 'description') as Percept;
     expect(p.long).toContain('braille signage');
     expect(JSON.stringify(p)).not.toMatch(/ignore|admin|safe|profile/i);
     const data = h.broker.latest(ATTACKERS.injector, 'accessibility-features');
@@ -190,9 +175,7 @@ describe('prompt injection from a VERIFIED agent (5.4 #6)', () => {
     await waitFor(() => expect(h.broker.allPercepts().some((p) => p.urgency === 4)).toBe(true));
     const alarm = h.broker.allPercepts().find((p) => p.urgency === 4) as Percept;
     expect(alarm.long).not.toMatch(/ignore|safe/i);
-    expect(
-      events(h, 'INJECTION_NEUTRALIZED').some((e) => e.message.includes('alarms[0].message')),
-    ).toBe(true);
+    expect(events(h, 'INJECTION_NEUTRALIZED').some((e) => e.message.includes('alarms[0].message'))).toBe(true);
   });
 });
 
@@ -208,9 +191,7 @@ describe('stale data (5.4 #7)', () => {
     expect(rec?.tier).toBe('UNVERIFIED');
     expect(rec?.freshness).toMatchObject({ stale: true, maxAgeSeconds: 60 });
     expect(rec?.freshness.ageSeconds).toBeGreaterThanOrEqual(120);
-    expect(
-      h.broker.verifications().find((v) => v.fqdn === 'riverside-hall.sim')?.result.outcome,
-    ).toBe('VERIFIED');
+    expect(h.broker.verifications().find((v) => v.fqdn === 'riverside-hall.sim')?.result.outcome).toBe('VERIFIED');
     const ev = events(h, 'STALE_DOWNGRADED')[0];
     expect(ev?.message).toMatch(/Downgraded from VERIFIED to UNVERIFIED/);
     expect(rec?.source.evidence.join(' ')).toMatch(/identity checks/);
@@ -220,22 +201,16 @@ describe('stale data (5.4 #7)', () => {
 describe('flooding (5.4 #8)', () => {
   it('collapses duplicates and rate-limits a noisy verified agent without suppressing the real alarm', async () => {
     const { h } = await arrived({}, true);
-    expect(
-      h.broker.verifications().find((v) => v.fqdn === ATTACKERS.flooder)?.subscriptions,
-    ).toContain('alarm-feed');
+    expect(h.broker.verifications().find((v) => v.fqdn === ATTACKERS.flooder)?.subscriptions).toContain('alarm-feed');
     await h.world.trigger('flood', 200);
     await h.world.trigger('fire-alarm');
     await settle(400);
-    const noisy = bySource(h.broker.allPercepts(), ATTACKERS.flooder).filter(
-      (p) => p.kind === 'alert',
-    );
+    const noisy = bySource(h.broker.allPercepts(), ATTACKERS.flooder).filter((p) => p.kind === 'alert');
     expect(noisy.length).toBeLessThanOrEqual(8);
     expect(noisy.length).toBeGreaterThan(0);
     expect(events(h, 'RATE_LIMITED')).toHaveLength(1);
     expect(events(h, 'RATE_LIMITED')[0]?.message).toMatch(/never held back/);
-    const real = bySource(h.broker.allPercepts(), 'riverside-hall.sim').filter(
-      (p) => p.urgency === 4,
-    );
+    const real = bySource(h.broker.allPercepts(), 'riverside-hall.sim').filter((p) => p.urgency === 4);
     expect(real).toHaveLength(1);
   });
 
@@ -272,9 +247,7 @@ describe('flooding (5.4 #8)', () => {
       });
     }
     await settle(600);
-    const urgent = bySource(h.broker.allPercepts(), ATTACKERS.flooder).filter(
-      (p) => p.urgency === 3,
-    );
+    const urgent = bySource(h.broker.allPercepts(), ATTACKERS.flooder).filter((p) => p.urgency === 3);
     expect(urgent).toHaveLength(12);
   });
 });
@@ -286,9 +259,7 @@ describe('fail loud, not silent', () => {
     h.world.clock.advance(45_000);
     await h.world.tick();
     h.broker.checkFreshness();
-    const silent = h.broker
-      .allPercepts()
-      .find((p) => p.short.startsWith('Alarm feed silent')) as Percept;
+    const silent = h.broker.allPercepts().find((p) => p.short.startsWith('Alarm feed silent')) as Percept;
     expect(silent.provenance.tier).toBe('UNVERIFIED');
     expect(silent.urgency).toBe(3);
     expect(silent.long).toMatch(/does not know the current state/);
@@ -298,11 +269,7 @@ describe('fail loud, not silent', () => {
     h.world.muteAlarmFeed(false);
     h.world.clock.advance(10_000);
     await h.world.tick();
-    await waitFor(() =>
-      expect(h.broker.allPercepts().some((p) => p.short.startsWith('Alarm feed restored'))).toBe(
-        true,
-      ),
-    );
+    await waitFor(() => expect(h.broker.allPercepts().some((p) => p.short.startsWith('Alarm feed restored'))).toBe(true));
   });
 
   it('an unreachable source is reported and queries fall back to null', async () => {
@@ -321,9 +288,7 @@ describe('fail loud, not silent', () => {
     await settle();
     const hall = h.broker.verifications().find((v) => v.fqdn === 'riverside-hall.sim');
     expect(hall?.result.outcome).toBe('UNVERIFIED');
-    const p = bySource(h.broker.allPercepts(), 'riverside-hall.sim').find((x) =>
-      x.short.includes('checks'),
-    ) as Percept;
+    const p = bySource(h.broker.allPercepts(), 'riverside-hall.sim').find((x) => x.short.includes('checks')) as Percept;
     expect(p.provenance.tier).toBe('UNVERIFIED');
     expect(p.short).toBe('Riverside Hall: Unverified, 6 of 7 checks.');
     expect(p.long).toMatch(/Step 6 could not run/);

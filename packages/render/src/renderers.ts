@@ -121,8 +121,7 @@ export interface HapticEnv {
 }
 
 export function browserHapticEnv(): HapticEnv {
-  const nav = (globalThis as unknown as { navigator?: { vibrate?: (p: number[]) => boolean } })
-    .navigator;
+  const nav = (globalThis as unknown as { navigator?: { vibrate?: (p: number[]) => boolean } }).navigator;
   return nav?.vibrate ? { vibrate: (p) => nav.vibrate?.(p) ?? false } : {};
 }
 

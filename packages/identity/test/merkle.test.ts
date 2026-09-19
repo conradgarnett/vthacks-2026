@@ -74,10 +74,7 @@ describe('MerkleLog tamper detection', () => {
     bad[0] = (bad[0] ?? 0) ^ 0xff;
     const forged = {
       ...proof,
-      path: [
-        Array.from(bad, (b) => b.toString(16).padStart(2, '0')).join(''),
-        ...proof.path.slice(1),
-      ],
+      path: [Array.from(bad, (b) => b.toString(16).padStart(2, '0')).join(''), ...proof.path.slice(1)],
     };
     expect(
       (

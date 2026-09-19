@@ -44,10 +44,7 @@ export class RateLimiter {
     }
 
     const bucket = this.buckets.get(input.source) ?? { tokens: this.opts.capacity, updated: now };
-    bucket.tokens = Math.min(
-      this.opts.capacity,
-      bucket.tokens + ((now - bucket.updated) / 1000) * this.opts.refillPerSecond,
-    );
+    bucket.tokens = Math.min(this.opts.capacity, bucket.tokens + ((now - bucket.updated) / 1000) * this.opts.refillPerSecond);
     bucket.updated = now;
     this.buckets.set(input.source, bucket);
 

@@ -2,13 +2,7 @@ import { systemClock, type CapabilityId, type Clock } from '@sense/protocol';
 import { certPem, exportSpki, fingerprint } from './crypto';
 import { ansName, type Authority, type SignedCrl, type TrustAnchors } from './ca';
 import { MerkleLog, type InclusionProof, type SignedTreeHead } from './merkle';
-import {
-  LogUnavailableError,
-  NotFoundError,
-  type AgentRecord,
-  type LogEntry,
-  type SearchQuery,
-} from './types';
+import { LogUnavailableError, NotFoundError, type AgentRecord, type LogEntry, type SearchQuery } from './types';
 
 export interface RegistrationRequest {
   fqdn: string;
@@ -68,9 +62,7 @@ export class SimulatedRegistry {
   private async registerInternal(req: RegistrationRequest, logged: boolean): Promise<Registration> {
     const existing = this.records.get(req.fqdn) ?? [];
     if (existing.some((r) => r.version === req.version)) {
-      throw new Error(
-        `version ${req.version} of ${req.fqdn} is already registered (versions are immutable)`,
-      );
+      throw new Error(`version ${req.version} of ${req.fqdn} is already registered (versions are immutable)`);
     }
     const ca = this.authority.ca;
     const serverCert = await ca.issueServerCert(req.fqdn, req.serverPublicKey);
@@ -136,8 +128,7 @@ export class SimulatedRegistry {
       if (!r) continue;
       if (q.capability && !r.capabilities.includes(q.capability)) continue;
       if (q.area && !r.covers.includes(q.area)) continue;
-      if (q.text && !`${r.displayName} ${r.fqdn}`.toLowerCase().includes(q.text.toLowerCase()))
-        continue;
+      if (q.text && !`${r.displayName} ${r.fqdn}`.toLowerCase().includes(q.text.toLowerCase())) continue;
       out.push(r);
     }
     return out.sort((a, b) => a.fqdn.localeCompare(b.fqdn));

@@ -1,11 +1,4 @@
-import {
-  MIN_ALERT_SPEECH_RATE,
-  describeDirection,
-  type Modality,
-  type Percept,
-  type SensoryProfile,
-  type Urgency,
-} from '@sense/protocol';
+import { MIN_ALERT_SPEECH_RATE, describeDirection, type Modality, type Percept, type SensoryProfile, type Urgency } from '@sense/protocol';
 import { describeHaptic, hapticPattern, panFromBearing, pannerPosition } from './earcon';
 
 export type Emphasis = 'banner' | 'card' | 'quiet';
@@ -70,10 +63,7 @@ export function speechText(percept: Percept, profile: SensoryProfile): string {
   const hedge = !percept.safety && p.tier !== 'VERIFIED';
   if (percept.spatial && profile.verbosity !== 'terse') {
     const dir = describeDirection(percept.spatial.bearingDeg);
-    const dist =
-      percept.spatial.distanceM !== undefined
-        ? `, ${Math.round(percept.spatial.distanceM)} metres`
-        : '';
+    const dist = percept.spatial.distanceM !== undefined ? `, ${Math.round(percept.spatial.distanceM)} metres` : '';
     if (!percept.short.toLowerCase().includes(dir)) parts.push(`${dir}${dist}.`);
   }
   if (hedge) {
@@ -108,10 +98,7 @@ export function route(percept: Percept, profile: SensoryProfile): RenderPlan {
     plan.speech = {
       text,
       // Alerts are spoken fast enough that a 10-word message fits in about two seconds.
-      rate:
-        percept.kind === 'alert' && critical
-          ? Math.max(profile.speechRate, MIN_ALERT_SPEECH_RATE)
-          : profile.speechRate,
+      rate: percept.kind === 'alert' && critical ? Math.max(profile.speechRate, MIN_ALERT_SPEECH_RATE) : profile.speechRate,
       interrupt,
     };
     plan.caption = text;
@@ -125,10 +112,7 @@ export function route(percept: Percept, profile: SensoryProfile): RenderPlan {
       position:
         bearing === undefined
           ? { x: 0, y: 0, z: -1 }
-          : pannerPosition(
-              bearing,
-              percept.spatial?.distanceM ? Math.min(percept.spatial.distanceM / 5, 5) : 2,
-            ),
+          : pannerPosition(bearing, percept.spatial?.distanceM ? Math.min(percept.spatial.distanceM / 5, 5) : 2),
       behind: bearing !== undefined && bearing > 90 && bearing < 270,
     };
     plan.caption ??= `${percept.short} (${percept.spatial ? describeDirection(percept.spatial.bearingDeg) : 'direction unknown'})`;

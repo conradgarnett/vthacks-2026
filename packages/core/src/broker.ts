@@ -275,9 +275,7 @@ export class SenseBroker {
 
   private evidenceLines(v: VerificationResult): string[] {
     const passed = v.steps.filter((x) => x.status === 'pass').length;
-    const lines = [
-      `${passed}/${v.steps.length} identity checks passed (${v.ansMode === 'simulated' ? 'ANS-modeled' : 'live ANS'})`,
-    ];
+    const lines = [`${passed}/${v.steps.length} identity checks passed (${v.ansMode === 'simulated' ? 'ANS-modeled' : 'live ANS'})`];
     for (const step of v.steps) {
       if (step.status === 'fail' || step.status === 'unavailable') {
         lines.push(`step ${step.step} ${step.status}: ${step.evidence[0] ?? step.name}`);
@@ -351,9 +349,7 @@ export class SenseBroker {
       verification = await this.deps.ans.verify(record, challenge);
       if (verification.outcome !== 'REJECTED') {
         try {
-          identityKey = await certPublicKey(
-            parseCertificate(ack.data.presentation.identityCertPem),
-          );
+          identityKey = await certPublicKey(parseCertificate(ack.data.presentation.identityCertPem));
           card = ack.data.presentation.senseCard.card;
         } catch {
           verification = this.synthRejection(record, 3, 'identity certificate could not be used');
@@ -419,11 +415,7 @@ export class SenseBroker {
   // ── Queries ───────────────────────────────────────────────────────────────────────────────
 
   /** Ask a connected agent for a capability. Returns null when nothing usable came back. */
-  async query(
-    fqdn: string,
-    capability: CapabilityId,
-    params?: Record<string, string | number | boolean>,
-  ): Promise<DataRecord | null> {
+  async query(fqdn: string, capability: CapabilityId, params?: Record<string, string | number | boolean>): Promise<DataRecord | null> {
     const session = this.usable(fqdn);
     if (!session) return null;
     const scope = [...(this.policy.scopes[capability] ?? [])];
@@ -459,11 +451,7 @@ export class SenseBroker {
     }
     const msg = parsed.data;
     if (msg.type === 'error') return null;
-    if (
-      msg.type !== 'capability_response' ||
-      msg.capability !== capability ||
-      msg.sessionId !== session.sessionId
-    ) {
+    if (msg.type !== 'capability_response' || msg.capability !== capability || msg.sessionId !== session.sessionId) {
       this.security({
         kind: 'CONTENT_REJECTED',
         source: fqdn,
@@ -595,18 +583,11 @@ export class SenseBroker {
 
   // ── Ingest: signature, schema, sanitize, freshness, tier, route ──────────────────────────
 
-  private async ingest(
-    session: Session,
-    msg: CapabilityResponse | PushMessage,
-    via: 'query' | 'push',
-  ): Promise<DataRecord | null> {
+  private async ingest(session: Session, msg: CapabilityResponse | PushMessage, via: 'query' | 'push'): Promise<DataRecord | null> {
     const fqdn = session.fqdn;
     const capability = msg.capability;
 
-    if (
-      !session.identityKey ||
-      !(await verifyBytes(session.identityKey, signingPayload(msg), msg.signature))
-    ) {
+    if (!session.identityKey || !(await verifyBytes(session.identityKey, signingPayload(msg), msg.signature))) {
       this.security({
         kind: 'SIGNATURE_INVALID',
         source: fqdn,
@@ -646,10 +627,7 @@ export class SenseBroker {
         sense: capability === 'air-quality' ? 'smell' : 'hearing',
         kind: 'status',
         urgency: 1,
-        short: fitShort(
-          `${humanCap(capability)} restored.`,
-          sourceSuffix(this.sourceInfo(session, tier)),
-        ),
+        short: fitShort(`${humanCap(capability)} restored.`, sourceSuffix(this.sourceInfo(session, tier))),
         provenance: this.provenance(session, tier, freshness),
         safety: true,
         simulated: session.record.endpoints.some((e) => e.url.startsWith('sim://')),
@@ -698,11 +676,7 @@ export class SenseBroker {
     };
   }
 
-  private reportSanitizer(
-    fqdn: string,
-    capability: CapabilityId,
-    events: PayloadSanitizeEvent[],
-  ): void {
+  private reportSanitizer(fqdn: string, capability: CapabilityId, events: PayloadSanitizeEvent[]): void {
     for (const e of events) {
       if (e.neutralized) {
         this.security({
@@ -733,9 +707,7 @@ export class SenseBroker {
         }
         break;
       case 'arrivals':
-        this.emitPercept(
-          arrivalsPercept(rec.payload as never, { source: rec.source, freshness, nextId, now }),
-        );
+        this.emitPercept(arrivalsPercept(rec.payload as never, { source: rec.source, freshness, nextId, now }));
         break;
       case 'accessibility-features':
         this.emitPercept(
@@ -811,10 +783,7 @@ export class SenseBroker {
         long: c.message,
         provenance: {
           ...c.leader.percept.provenance,
-          evidence: [
-            ...c.leader.percept.provenance.evidence,
-            'conflict policy: higher tier leads, nothing discarded',
-          ],
+          evidence: [...c.leader.percept.provenance.evidence, 'conflict policy: higher tier leads, nothing discarded'],
         },
         safety: true,
         simulated: c.leader.percept.simulated ?? false,
@@ -837,10 +806,8 @@ export class SenseBroker {
       views.push(view);
       const s = this.sessions.get(r.fqdn);
       if (!s || view.result.outcome === 'REJECTED') continue;
-      for (const cap of ARRIVAL_FETCH)
-        if (r.capabilities.includes(cap)) await this.query(r.fqdn, cap);
-      for (const cap of ARRIVAL_SUBSCRIBE)
-        if (r.capabilities.includes(cap)) await this.subscribe(r.fqdn, cap);
+      for (const cap of ARRIVAL_FETCH) if (r.capabilities.includes(cap)) await this.query(r.fqdn, cap);
+      for (const cap of ARRIVAL_SUBSCRIBE) if (r.capabilities.includes(cap)) await this.subscribe(r.fqdn, cap);
       this.announceConnection(s);
     }
     return views;
@@ -912,10 +879,7 @@ export class SenseBroker {
 }
 
 function humanCap(c: CapabilityId): string {
-  return (
-    { 'alarm-feed': 'Alarm feed', 'air-quality': 'Air quality feed' }[c as 'alarm-feed'] ??
-    c.replace(/-/g, ' ')
-  );
+  return { 'alarm-feed': 'Alarm feed', 'air-quality': 'Air quality feed' }[c as 'alarm-feed'] ?? c.replace(/-/g, ' ');
 }
 
 function errMsg(e: unknown): string {

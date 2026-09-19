@@ -41,18 +41,9 @@ const INSTRUCTION_RULES: [string, RegExp][] = [
     'address-the-assistant',
     /\b(tell|inform|assure|convince|instruct|order|command)\b[^.\n]{0,20}\b(the )?(user|users|them|everyone|people|assistant|model)\b/i,
   ],
-  [
-    'suppress-warning',
-    /\b(do not|don't|never)\b[^.\n]{0,20}\b(tell|warn|alert|inform|notify|mention)\b/i,
-  ],
-  [
-    'markup-injection',
-    /```|<\/?\s*(system|assistant|tool|instructions?|prompt)\b|\[\/?INST\]|<\|[a-z_]+\|>/i,
-  ],
-  [
-    'tool-invocation',
-    /\b(call|invoke|execute|run|use)\b[^.\n]{0,20}\b(the )?(tool|function|command|script)\b/i,
-  ],
+  ['suppress-warning', /\b(do not|don't|never)\b[^.\n]{0,20}\b(tell|warn|alert|inform|notify|mention)\b/i],
+  ['markup-injection', /```|<\/?\s*(system|assistant|tool|instructions?|prompt)\b|\[\/?INST\]|<\|[a-z_]+\|>/i],
+  ['tool-invocation', /\b(call|invoke|execute|run|use)\b[^.\n]{0,20}\b(the )?(tool|function|command|script)\b/i],
 ];
 
 /** Claims that would reassure the user. SENSE never asserts safety it cannot verify. */
@@ -114,10 +105,7 @@ export interface PayloadSanitizeEvent {
  * Sanitize every string in an already schema-validated payload. Fields that look like
  * instructions or reassurance are dropped entirely (set to ""), never partially edited.
  */
-export function sanitizePayload<T>(
-  payload: T,
-  opts: { maxLen?: number } = {},
-): { value: T; events: PayloadSanitizeEvent[] } {
+export function sanitizePayload<T>(payload: T, opts: { maxLen?: number } = {}): { value: T; events: PayloadSanitizeEvent[] } {
   const events: PayloadSanitizeEvent[] = [];
   const walk = (v: unknown, path: string): unknown => {
     if (typeof v === 'string') {
@@ -129,12 +117,7 @@ export function sanitizePayload<T>(
     }
     if (Array.isArray(v)) return v.map((x, i) => walk(x, `${path}[${i}]`));
     if (v !== null && typeof v === 'object') {
-      return Object.fromEntries(
-        Object.entries(v as Record<string, unknown>).map(([k, x]) => [
-          k,
-          walk(x, path ? `${path}.${k}` : k),
-        ]),
-      );
+      return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, walk(x, path ? `${path}.${k}` : k)]));
     }
     return v;
   };

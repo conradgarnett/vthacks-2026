@@ -93,10 +93,6 @@ export class LiveAnsClient implements AnsClient {
 }
 
 /** Choose the client for `ANS_MODE`. `live` returns the stub, which throws NotConfigured on use. */
-export function createAnsClient(
-  mode: string | undefined,
-  registry: SimulatedRegistry,
-  clock: Clock = systemClock,
-): AnsClient {
+export function createAnsClient(mode: string | undefined, registry: SimulatedRegistry, clock: Clock = systemClock): AnsClient {
   return mode === 'live' ? new LiveAnsClient() : new SimulatedAnsClient(registry, clock);
 }

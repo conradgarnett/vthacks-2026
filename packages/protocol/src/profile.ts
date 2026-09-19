@@ -5,15 +5,7 @@ export const MODALITIES = ['speech', 'spatial-audio', 'visual', 'haptic'] as con
 export const ModalitySchema = z.enum(MODALITIES);
 export type Modality = z.infer<typeof ModalitySchema>;
 
-export const INPUT_METHODS = [
-  'touch',
-  'keyboard',
-  'switch',
-  'gaze',
-  'head',
-  'hand',
-  'voice',
-] as const;
+export const INPUT_METHODS = ['touch', 'keyboard', 'switch', 'gaze', 'head', 'hand', 'voice'] as const;
 export const InputMethodSchema = z.enum(INPUT_METHODS);
 export type InputMethod = z.infer<typeof InputMethodSchema>;
 
@@ -39,12 +31,7 @@ export const SensoryProfileSchema = z.strictObject({
   /** Preferred output modalities per urgency (0..4). */
   output: ModalitiesByUrgencySchema,
   /** Optional per-sense overrides of `output`. */
-  senseOverrides: z
-    .partialRecord(
-      z.enum(SENSES),
-      z.partialRecord(UrgencyKeySchema, z.array(ModalitySchema).max(4)),
-    )
-    .optional(),
+  senseOverrides: z.partialRecord(z.enum(SENSES), z.partialRecord(UrgencyKeySchema, z.array(ModalitySchema).max(4))).optional(),
   verbosity: z.enum(['terse', 'normal', 'detailed']),
   speechRate: z.number().min(0.5).max(3),
   /** Percepts at or above this urgency interrupt whatever is currently being presented. */

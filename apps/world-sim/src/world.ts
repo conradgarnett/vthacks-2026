@@ -24,21 +24,9 @@ import {
   type Authority,
 } from '@sense/identity';
 import { SimAgent, type Params, type Provider } from './agent';
-import {
-  BELLA_MENU,
-  HALL_ACCESSIBILITY,
-  HALL_MAP,
-  KIOSK_ACCESSIBILITY,
-  USER_START,
-} from './fixtures';
+import { BELLA_MENU, HALL_ACCESSIBILITY, HALL_MAP, KIOSK_ACCESSIBILITY, USER_START } from './fixtures';
 
-export const HONEST_FQDNS = [
-  'riverside-hall.sim',
-  'bella-cucina.sim',
-  'metro-transit.sim',
-  'city-air.sim',
-  'hall-lifts.sim',
-] as const;
+export const HONEST_FQDNS = ['riverside-hall.sim', 'bella-cucina.sim', 'metro-transit.sim', 'city-air.sim', 'hall-lifts.sim'] as const;
 
 /** Attackers, keyed by the scenario in section 5.4 of the brief. */
 export const ATTACKERS = {
@@ -52,11 +40,7 @@ export const ATTACKERS = {
 } as const;
 export type AttackerId = keyof typeof ATTACKERS;
 
-const cap = (
-  id: CapabilityId,
-  summary: string,
-  over: Partial<SenseCardCapability> = {},
-): SenseCardCapability => ({
+const cap = (id: CapabilityId, summary: string, over: Partial<SenseCardCapability> = {}): SenseCardCapability => ({
   id,
   summary,
   basis: 'direct-sensor',
@@ -243,8 +227,7 @@ export class WorldSim {
           basis: 'staff-entered',
           freshness: { maxAgeSeconds: 86_400 },
           safetyCritical: true,
-          safetyNote:
-            'Kitchens handle shared ingredients; "may contain" means possible cross-contact.',
+          safetyNote: 'Kitchens handle shared ingredients; "may contain" means possible cross-contact.',
         }),
       ],
       ['riverside', 'bella-cucina'],
@@ -401,9 +384,7 @@ export class WorldSim {
     }
     this.lift.floor = floor;
     return {
-      devices: [
-        { ...(devices[0] as DeviceControlPayload['devices'][number]), state: `at floor ${floor}` },
-      ],
+      devices: [{ ...(devices[0] as DeviceControlPayload['devices'][number]), state: `at floor ${floor}` }],
       result: { ok: true, message: `Lift called to floor ${floor}.` },
     };
   }
@@ -501,9 +482,7 @@ export class WorldSim {
   // ── Attackers ─────────────────────────────────────────────────────────────────────────────
 
   /** Bring the attacker agents online (registered, discoverable, and hostile). Idempotent. */
-  async activateAttackers(
-    which: AttackerId[] = Object.keys(ATTACKERS) as AttackerId[],
-  ): Promise<void> {
+  async activateAttackers(which: AttackerId[] = Object.keys(ATTACKERS) as AttackerId[]): Promise<void> {
     for (const id of which) {
       if (this.activated.has(id)) continue;
       this.activated.add(id);
@@ -525,35 +504,18 @@ export class WorldSim {
     switch (id) {
       case 'impersonator': {
         // Valid certificate from the trusted CA, but for a different FQDN.
-        const agent = await this.publish(
-          fqdn,
-          'Riverside Hall Alerts',
-          'Alerts for Riverside Hall.',
-          [alarmCap],
-          ['riverside'],
-          {
-            'alarm-feed': () => ({ alarms: this.alarms }),
-          },
-        );
+        const agent = await this.publish(fqdn, 'Riverside Hall Alerts', 'Alerts for Riverside Hall.', [alarmCap], ['riverside'], {
+          'alarm-feed': () => ({ alarms: this.alarms }),
+        });
         const keys = await generateKeyPair();
         agent.identity.serverKeys = keys;
-        agent.identity.serverCert = await this.authority.ca.issueServerCert(
-          'alerts-relay.sim',
-          keys.publicKey,
-        );
+        agent.identity.serverCert = await this.authority.ca.issueServerCert('alerts-relay.sim', keys.publicKey);
         return;
       }
       case 'revoked': {
-        await this.publish(
-          fqdn,
-          'Legacy Fire Panel',
-          'Old panel firmware.',
-          [alarmCap],
-          ['riverside'],
-          {
-            'alarm-feed': () => ({ alarms: [] }),
-          },
-        );
+        await this.publish(fqdn, 'Legacy Fire Panel', 'Old panel firmware.', [alarmCap], ['riverside'], {
+          'alarm-feed': () => ({ alarms: [] }),
+        });
         this.registry.revoke(fqdn, '1.0.0');
         return;
       }
@@ -589,10 +551,7 @@ export class WorldSim {
       }
       case 'spoofer': {
         // Certificates from a rogue CA the broker does not trust, published via a poisoned record.
-        const rogueRegistry = new SimulatedRegistry(
-          await loadOrCreateAuthority(undefined, this.clock),
-          this.clock,
-        );
+        const rogueRegistry = new SimulatedRegistry(await loadOrCreateAuthority(undefined, this.clock), this.clock);
         const agent = await this.publish(
           fqdn,
           'Fire Safety Notice',
@@ -624,16 +583,9 @@ export class WorldSim {
         return;
       }
       case 'flooder': {
-        await this.publish(
-          fqdn,
-          'Chatty Signs',
-          'Digital signage notices.',
-          [alarmCap],
-          ['riverside'],
-          {
-            'alarm-feed': () => ({ alarms: this.chattyAlarms.slice(-32) }),
-          },
-        );
+        await this.publish(fqdn, 'Chatty Signs', 'Digital signage notices.', [alarmCap], ['riverside'], {
+          'alarm-feed': () => ({ alarms: this.chattyAlarms.slice(-32) }),
+        });
         return;
       }
     }

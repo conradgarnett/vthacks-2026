@@ -1,12 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  AgentResponseSchema,
-  HelloAckSchema,
-  PAYLOAD_SCHEMAS,
-  PushSchema,
-  type AgentRequest,
-  type CapabilityId,
-} from '@sense/protocol';
+import { AgentResponseSchema, HelloAckSchema, PAYLOAD_SCHEMAS, PushSchema, type AgentRequest, type CapabilityId } from '@sense/protocol';
 import { randomB64, type LiveChallenge, type VerificationResult } from '@sense/identity';
 import { ATTACKERS, HONEST_FQDNS, WorldSim, buildWorldSimHttp } from '../src';
 
@@ -39,10 +32,7 @@ async function connect(world: WorldSim, fqdn: string): Promise<VerificationResul
   return world.ansClient().verify(record, challenge);
 }
 
-const query = (
-  capability: CapabilityId,
-  params?: Record<string, string | number | boolean>,
-): AgentRequest => ({
+const query = (capability: CapabilityId, params?: Record<string, string | number | boolean>): AgentRequest => ({
   ...base(),
   type: 'capability_query',
   capability,
@@ -93,9 +83,7 @@ describe('honest publishers', () => {
       } as AgentRequest),
     );
     expect(denied).toMatchObject({ type: 'error', code: 'scope_denied' });
-    const notOffered = AgentResponseSchema.parse(
-      await world.transport.request('riverside-hall.sim', query('arrivals')),
-    );
+    const notOffered = AgentResponseSchema.parse(await world.transport.request('riverside-hall.sim', query('arrivals')));
     expect(notOffered).toMatchObject({ type: 'error', code: 'scope_denied' });
   });
 
@@ -113,13 +101,9 @@ describe('honest publishers', () => {
 
   it('unknown and offline agents are unreachable', async () => {
     const world = await WorldSim.createManual();
-    await expect(world.transport.request('nowhere.sim', query('alarm-feed'))).rejects.toThrow(
-      /does not resolve/,
-    );
+    await expect(world.transport.request('nowhere.sim', query('alarm-feed'))).rejects.toThrow(/does not resolve/);
     world.setOffline('metro-transit.sim', true);
-    await expect(world.transport.request('metro-transit.sim', query('arrivals'))).rejects.toThrow(
-      /unreachable/,
-    );
+    await expect(world.transport.request('metro-transit.sim', query('arrivals'))).rejects.toThrow(/unreachable/);
   });
 });
 
@@ -177,13 +161,8 @@ describe('subscriptions and events', () => {
     await world.tick();
     world.clock.advance(20_000);
     await world.tick();
-    const res = AgentResponseSchema.parse(
-      await world.transport.request('riverside-hall.sim', query('air-quality')),
-    );
-    const data =
-      res.type === 'capability_response'
-        ? PAYLOAD_SCHEMAS['air-quality'].parse(res.data)
-        : undefined;
+    const res = AgentResponseSchema.parse(await world.transport.request('riverside-hall.sim', query('air-quality')));
+    const data = res.type === 'capability_response' ? PAYLOAD_SCHEMAS['air-quality'].parse(res.data) : undefined;
     expect(data?.readings.find((r) => r.sensorId === 'smoke-east')?.value).toBe(6.2);
     expect(pushes.length).toBeGreaterThan(3);
   });
@@ -194,13 +173,8 @@ describe('subscriptions and events', () => {
     world.freezeSensors();
     const frozenAt = world.clock.now();
     world.clock.advance(5 * 60_000);
-    const res = AgentResponseSchema.parse(
-      await world.transport.request('riverside-hall.sim', query('air-quality')),
-    );
-    const data =
-      res.type === 'capability_response'
-        ? PAYLOAD_SCHEMAS['air-quality'].parse(res.data)
-        : undefined;
+    const res = AgentResponseSchema.parse(await world.transport.request('riverside-hall.sim', query('air-quality')));
+    const data = res.type === 'capability_response' ? PAYLOAD_SCHEMAS['air-quality'].parse(res.data) : undefined;
     expect(Date.parse(data?.readings[0]?.measuredAt ?? '')).toBe(frozenAt);
     expect((await connect(world, 'riverside-hall.sim')).outcome).toBe('VERIFIED');
   });
@@ -208,21 +182,11 @@ describe('subscriptions and events', () => {
   it('the lift can be called, and refuses during an alarm', async () => {
     const world = await WorldSim.createManual();
     const call = { action: 'call', device: 'lift-1', floor: 2 };
-    const ok = AgentResponseSchema.parse(
-      await world.transport.request('hall-lifts.sim', query('device-control', call)),
-    );
-    expect(
-      ok.type === 'capability_response' &&
-        PAYLOAD_SCHEMAS['device-control'].parse(ok.data).result?.ok,
-    ).toBe(true);
+    const ok = AgentResponseSchema.parse(await world.transport.request('hall-lifts.sim', query('device-control', call)));
+    expect(ok.type === 'capability_response' && PAYLOAD_SCHEMAS['device-control'].parse(ok.data).result?.ok).toBe(true);
     await world.trigger('fire-alarm');
-    const refused = AgentResponseSchema.parse(
-      await world.transport.request('hall-lifts.sim', query('device-control', call)),
-    );
-    expect(
-      refused.type === 'capability_response' &&
-        PAYLOAD_SCHEMAS['device-control'].parse(refused.data).result?.ok,
-    ).toBe(false);
+    const refused = AgentResponseSchema.parse(await world.transport.request('hall-lifts.sim', query('device-control', call)));
+    expect(refused.type === 'capability_response' && PAYLOAD_SCHEMAS['device-control'].parse(refused.data).result?.ok).toBe(false);
   });
 
   it('is deterministic for a given seed (readings and timeline)', async () => {
@@ -230,14 +194,8 @@ describe('subscriptions and events', () => {
       const w = await WorldSim.createManual(7);
       const seq: unknown[] = [];
       for (let i = 0; i < 5; i++) {
-        const r = AgentResponseSchema.parse(
-          await w.transport.request('city-air.sim', query('air-quality')),
-        );
-        seq.push(
-          r.type === 'capability_response'
-            ? PAYLOAD_SCHEMAS['air-quality'].parse(r.data).readings.map((x) => x.value)
-            : null,
-        );
+        const r = AgentResponseSchema.parse(await w.transport.request('city-air.sim', query('air-quality')));
+        seq.push(r.type === 'capability_response' ? PAYLOAD_SCHEMAS['air-quality'].parse(r.data).readings.map((x) => x.value) : null);
         w.clock.advance(1000);
       }
       return seq;
@@ -250,21 +208,10 @@ describe('attackers (section 5.4)', () => {
   it('are absent until activated, then discoverable', async () => {
     const world = await WorldSim.createManual();
     const client = world.ansClient();
-    expect(
-      (await client.search({ capability: 'alarm-feed', area: 'riverside' })).map((r) => r.fqdn),
-    ).toEqual(['riverside-hall.sim']);
+    expect((await client.search({ capability: 'alarm-feed', area: 'riverside' })).map((r) => r.fqdn)).toEqual(['riverside-hall.sim']);
     await world.activateAttackers();
-    const names = (await client.search({ capability: 'alarm-feed', area: 'riverside' })).map(
-      (r) => r.fqdn,
-    );
-    expect(names).toEqual(
-      expect.arrayContaining([
-        'riverside-hall.sim',
-        ATTACKERS.impersonator,
-        ATTACKERS.spoofer,
-        ATTACKERS.flooder,
-      ]),
-    );
+    const names = (await client.search({ capability: 'alarm-feed', area: 'riverside' })).map((r) => r.fqdn);
+    expect(names).toEqual(expect.arrayContaining(['riverside-hall.sim', ATTACKERS.impersonator, ATTACKERS.spoofer, ATTACKERS.flooder]));
     await world.activateAttackers(); // idempotent
   });
 
@@ -288,9 +235,7 @@ describe('attackers (section 5.4)', () => {
     await world.activateAttackers();
     expect((await connect(world, ATTACKERS.injector)).outcome).toBe('VERIFIED');
     expect((await connect(world, ATTACKERS.flooder)).outcome).toBe('VERIFIED');
-    const kiosk = AgentResponseSchema.parse(
-      await world.transport.request(ATTACKERS.injector, query('accessibility-features')),
-    );
+    const kiosk = AgentResponseSchema.parse(await world.transport.request(ATTACKERS.injector, query('accessibility-features')));
     expect(JSON.stringify(kiosk)).toMatch(/IGNORE ALL PREVIOUS RULES/);
   });
 
@@ -376,12 +321,8 @@ describe('HTTP view of the world ("domains")', () => {
       ).statusCode,
     ).toBe(503);
 
-    expect((await app.inject({ method: 'POST', url: '/sim/event/fire-alarm' })).statusCode).toBe(
-      200,
-    );
-    expect(
-      (await app.inject({ method: 'POST', url: '/sim/event/does-not-exist' })).statusCode,
-    ).toBe(400);
+    expect((await app.inject({ method: 'POST', url: '/sim/event/fire-alarm' })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'POST', url: '/sim/event/does-not-exist' })).statusCode).toBe(400);
     await app.close();
   });
 });

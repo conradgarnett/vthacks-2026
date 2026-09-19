@@ -63,10 +63,7 @@ export function panFromBearing(bearingDeg: number): number {
 }
 
 /** 3D position for a PannerNode (metres, listener at origin facing -z, +x to the right). */
-export function pannerPosition(
-  bearingDeg: number,
-  distanceM = 2,
-): { x: number; y: number; z: number } {
+export function pannerPosition(bearingDeg: number, distanceM = 2): { x: number; y: number; z: number } {
   const rad = (((bearingDeg % 360) + 360) % 360) * (Math.PI / 180);
   const d = Math.min(Math.max(distanceM, 0.5), 5);
   const r = (v: number) => Math.round(v * 1000) / 1000 + 0; // + 0 normalises -0
@@ -90,13 +87,7 @@ const PULSES: Record<HapticDirection, number> = { none: 0, ahead: 1, right: 2, b
 /** Vibration pattern (ms, alternating vibrate/pause): a direction prefix, then an urgency body. */
 export function hapticPattern(urgency: Urgency, bearingDeg?: number): number[] {
   if (urgency === 0) return [];
-  const bodies: number[][] = [
-    [],
-    [60],
-    [120, 80, 120],
-    [250, 100, 250, 100, 250],
-    [500, 150, 500, 150, 500, 150, 500],
-  ];
+  const bodies: number[][] = [[], [60], [120, 80, 120], [250, 100, 250, 100, 250], [500, 150, 500, 150, 500, 150, 500]];
   const body = bodies[Math.min(4, Math.max(0, Math.round(urgency)))] ?? [];
   const prefix: number[] = [];
   for (let i = 0; i < PULSES[hapticDirection(bearingDeg)]; i++) prefix.push(40, 70);

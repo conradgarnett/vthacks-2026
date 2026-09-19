@@ -39,22 +39,11 @@ const inferred = (over: Partial<Percept> = {}): Percept => ({
 
 describe('INVARIANT: SENSE never asserts safety it cannot verify', () => {
   it('any percept containing assurance wording is refused, whatever its tier', () => {
-    const assurances = [
-      'safe',
-      'safely',
-      'all clear',
-      'all-clear',
-      'harmless',
-      'no danger',
-      'risk-free',
-      'fine to eat',
-    ];
+    const assurances = ['safe', 'safely', 'all clear', 'all-clear', 'harmless', 'no danger', 'risk-free', 'fine to eat'];
     fc.assert(
       fc.property(
         fc.constantFrom(...assurances),
-        fc.constantFrom('INFERRED', 'UNVERIFIED', 'VERIFIED') as fc.Arbitrary<
-          Percept['provenance']['tier']
-        >,
+        fc.constantFrom('INFERRED', 'UNVERIFIED', 'VERIFIED') as fc.Arbitrary<Percept['provenance']['tier']>,
         fc.string({ maxLength: 20 }).map((s) => s.replace(/[^a-z ]/gi, '')),
         (word, tier, filler) => {
           const p = inferred({
@@ -122,32 +111,21 @@ describe('INVARIANT: SENSE never asserts safety it cannot verify', () => {
     await waitFor(() => expect(h.broker.allPercepts().some((p) => p.kind === 'alert')).toBe(true));
     for (const p of h.broker.allPercepts().filter((x) => x.safety)) {
       expect(p.short.toLowerCase()).toContain(p.provenance.tier.toLowerCase());
-      expect(p.short.toLowerCase()).toContain(
-        (p.provenance.sourceLabel ?? p.provenance.source).toLowerCase(),
-      );
+      expect(p.short.toLowerCase()).toContain((p.provenance.sourceLabel ?? p.provenance.source).toLowerCase());
     }
   });
 });
 
 describe('INVARIANT: a verified alarm is never suppressed by unverified or rejected input', () => {
-  type Hostile =
-    'spoof' | 'flood' | 'stale' | 'inject' | 'chatty-clear' | 'offline-others' | 'mute-other';
+  type Hostile = 'spoof' | 'flood' | 'stale' | 'inject' | 'chatty-clear' | 'offline-others' | 'mute-other';
 
   it('holds under arbitrary interleavings of hostile events', async () => {
     await fc.assert(
       fc.asyncProperty(
-        fc.array(
-          fc.constantFrom<Hostile>(
-            'spoof',
-            'flood',
-            'stale',
-            'inject',
-            'chatty-clear',
-            'offline-others',
-            'mute-other',
-          ),
-          { minLength: 1, maxLength: 6 },
-        ),
+        fc.array(fc.constantFrom<Hostile>('spoof', 'flood', 'stale', 'inject', 'chatty-clear', 'offline-others', 'mute-other'), {
+          minLength: 1,
+          maxLength: 6,
+        }),
         fc.boolean(),
         async (actions, alarmFirst) => {
           const h = await makeHarness({ persona: 'deaf' });
@@ -203,17 +181,13 @@ describe('INVARIANT: a verified alarm is never suppressed by unverified or rejec
           const all = h.broker.allPercepts();
           const verifiedAlarms = all.filter(
             (p) =>
-              p.kind === 'alert' &&
-              p.urgency === 4 &&
-              p.provenance.tier === 'VERIFIED' &&
-              p.provenance.source === 'riverside-hall.sim',
+              p.kind === 'alert' && p.urgency === 4 && p.provenance.tier === 'VERIFIED' && p.provenance.source === 'riverside-hall.sim',
           );
           expect(verifiedAlarms.length).toBeGreaterThanOrEqual(1);
           // Nothing from an unverified or rejected source ever cancels or replaces it.
           for (const p of all) {
             expect(p.provenance.tier).not.toBe('REJECTED');
-            if (p.provenance.source === ATTACKERS.spoofer)
-              throw new Error('spoofer percept was routed');
+            if (p.provenance.source === ATTACKERS.spoofer) throw new Error('spoofer percept was routed');
             expect(p.short).not.toMatch(/false alarm|ignore/i);
           }
           // The source of truth for the alarm is still "active".
@@ -267,24 +241,20 @@ describe('INVARIANT: the user profile never appears in outbound messages', () =>
       ts: '2026-01-15T10:00:00.000Z',
     };
     fc.assert(
-      fc.property(
-        fc.array(fc.stringMatching(/^[a-z]{4,12}$/), { minLength: 1, maxLength: 4 }),
-        (allergens) => {
-          const profile = { ...getPersona('blind'), allergens };
-          const log = new DisclosureLog(new ManualClock(), () => profile);
-          const allowed = {
-            ...base,
-            type: 'capability_query' as const,
-            capability: 'arrivals' as const,
-            scope: ['arrivals:read'],
-            params: { stop: 'qqqq-9' },
-          };
-          const blocked = { ...allowed, params: { stop: allergens[0] as string } };
-          if (!allergens.includes('qqqq'))
-            expect(() => log.approve('metro-transit.sim', allowed)).not.toThrow();
-          expect(() => log.approve('metro-transit.sim', blocked)).toThrow(OutboundBlocked);
-        },
-      ),
+      fc.property(fc.array(fc.stringMatching(/^[a-z]{4,12}$/), { minLength: 1, maxLength: 4 }), (allergens) => {
+        const profile = { ...getPersona('blind'), allergens };
+        const log = new DisclosureLog(new ManualClock(), () => profile);
+        const allowed = {
+          ...base,
+          type: 'capability_query' as const,
+          capability: 'arrivals' as const,
+          scope: ['arrivals:read'],
+          params: { stop: 'qqqq-9' },
+        };
+        const blocked = { ...allowed, params: { stop: allergens[0] as string } };
+        if (!allergens.includes('qqqq')) expect(() => log.approve('metro-transit.sim', allowed)).not.toThrow();
+        expect(() => log.approve('metro-transit.sim', blocked)).toThrow(OutboundBlocked);
+      }),
       { numRuns: 60 },
     );
   });
@@ -304,16 +274,9 @@ describe('INVARIANT: injected instructions never alter policy, profile or tool p
     expect(policyHash(h.broker.policy)).toBe(policyHash(createPolicy()));
     expect(JSON.stringify(h.profile)).toBe(profileBefore);
     expect(Object.isFrozen(h.broker.policy)).toBe(true);
-    expect(h.broker.policy.allowedTools).toEqual([
-      'hello',
-      'capability_query',
-      'subscribe',
-      'unsubscribe',
-    ]);
+    expect(h.broker.policy.allowedTools).toEqual(['hello', 'capability_query', 'subscribe', 'unsubscribe']);
     // the broker never asked for anything beyond declared minimum scopes, before or after the injection
-    for (const s of h.sent)
-      if (s.msg.type === 'capability_query')
-        expect(s.msg.scope).toEqual(h.broker.policy.scopes[s.msg.capability]);
+    for (const s of h.sent) if (s.msg.type === 'capability_query') expect(s.msg.scope).toEqual(h.broker.policy.scopes[s.msg.capability]);
   });
 
   it('sanitizer output never contains an instruction-like string (property)', () => {
@@ -326,19 +289,14 @@ describe('INVARIANT: injected instructions never alter policy, profile or tool p
       'system prompt',
     ];
     fc.assert(
-      fc.property(
-        fc.constantFrom(...attacks),
-        fc.string({ maxLength: 40 }),
-        fc.string({ maxLength: 40 }),
-        (attack, pre, post) => {
-          const { value } = sanitizePayload({
-            note: `${pre} ${attack} ${post}`,
-            nested: [{ n: `${attack}` }],
-          });
-          expect(value.note).toBe('');
-          expect(value.nested[0]?.n).toBe('');
-        },
-      ),
+      fc.property(fc.constantFrom(...attacks), fc.string({ maxLength: 40 }), fc.string({ maxLength: 40 }), (attack, pre, post) => {
+        const { value } = sanitizePayload({
+          note: `${pre} ${attack} ${post}`,
+          nested: [{ n: `${attack}` }],
+        });
+        expect(value.note).toBe('');
+        expect(value.nested[0]?.n).toBe('');
+      }),
       { numRuns: 80 },
     );
   });
@@ -347,17 +305,13 @@ describe('INVARIANT: injected instructions never alter policy, profile or tool p
 describe('INVARIANT: stale data is never shown as VERIFIED', () => {
   it('for every age beyond the publisher limit (property)', () => {
     fc.assert(
-      fc.property(
-        fc.integer({ min: 1, max: 100_000 }),
-        fc.integer({ min: 0, max: 100_000 }),
-        (max, extra) => {
-          const now = Date.parse('2026-01-15T10:00:00Z');
-          const at = new Date(now - (max + 1 + extra) * 1000).toISOString();
-          const f = assessFreshness({ freshness: { maxAgeSeconds: max } }, [at], now);
-          expect(f.stale).toBe(true);
-          expect(tierFor('VERIFIED', f)).not.toBe('VERIFIED');
-        },
-      ),
+      fc.property(fc.integer({ min: 1, max: 100_000 }), fc.integer({ min: 0, max: 100_000 }), (max, extra) => {
+        const now = Date.parse('2026-01-15T10:00:00Z');
+        const at = new Date(now - (max + 1 + extra) * 1000).toISOString();
+        const f = assessFreshness({ freshness: { maxAgeSeconds: max } }, [at], now);
+        expect(f.stale).toBe(true);
+        expect(tierFor('VERIFIED', f)).not.toBe('VERIFIED');
+      }),
       { numRuns: 200 },
     );
   });

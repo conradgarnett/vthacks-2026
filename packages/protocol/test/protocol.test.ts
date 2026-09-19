@@ -79,16 +79,10 @@ describe('Percept', () => {
   });
 
   it('requires safety percepts to carry tier and source in the primary message', () => {
-    expect(() =>
-      PerceptSchema.parse({ ...basePercept, short: 'Fire alarm, east stairwell.' }),
-    ).toThrow(/tier/);
-    expect(() => PerceptSchema.parse({ ...basePercept, short: 'Fire alarm. Verified.' })).toThrow(
-      /source/,
-    );
+    expect(() => PerceptSchema.parse({ ...basePercept, short: 'Fire alarm, east stairwell.' })).toThrow(/tier/);
+    expect(() => PerceptSchema.parse({ ...basePercept, short: 'Fire alarm. Verified.' })).toThrow(/source/);
     // Non-safety percepts are not forced to carry provenance in `short`.
-    expect(
-      PerceptSchema.parse({ ...basePercept, safety: false, short: 'Door ahead on your left.' }),
-    ).toBeTruthy();
+    expect(PerceptSchema.parse({ ...basePercept, safety: false, short: 'Door ahead on your left.' })).toBeTruthy();
   });
 
   it('accepts inferred percepts with confidence', () => {
@@ -186,12 +180,8 @@ describe('Sense Card', () => {
   });
 
   it('rejects bad fqdn, bad digest, unknown capability', () => {
-    expect(() =>
-      SenseCardSchema.parse({ ...card, agent: { ...card.agent, fqdn: 'Not A Domain' } }),
-    ).toThrow();
-    expect(() =>
-      SenseCardSchema.parse({ ...card, agent: { ...card.agent, digest: 'md5:abc' } }),
-    ).toThrow();
+    expect(() => SenseCardSchema.parse({ ...card, agent: { ...card.agent, fqdn: 'Not A Domain' } })).toThrow();
+    expect(() => SenseCardSchema.parse({ ...card, agent: { ...card.agent, digest: 'md5:abc' } })).toThrow();
     expect(() =>
       SenseCardSchema.parse({
         ...card,
@@ -218,9 +208,7 @@ describe('Agent messages', () => {
   });
 
   it('rejects requests with extra fields, such as profile data (strict)', () => {
-    expect(() =>
-      AgentRequestSchema.parse({ ...req, profile: { allergens: ['peanut'] } }),
-    ).toThrow();
+    expect(() => AgentRequestSchema.parse({ ...req, profile: { allergens: ['peanut'] } })).toThrow();
   });
 
   it('rejects malformed responses', () => {
@@ -231,19 +219,9 @@ describe('Agent messages', () => {
 describe('Payload schemas', () => {
   it('cover every capability and reject extra instruction-like keys', () => {
     expect(Object.keys(PAYLOAD_SCHEMAS).sort()).toEqual(
-      [
-        'accessibility-features',
-        'air-quality',
-        'alarm-feed',
-        'arrivals',
-        'device-control',
-        'indoor-map',
-        'menu-allergens',
-      ].sort(),
+      ['accessibility-features', 'air-quality', 'alarm-feed', 'arrivals', 'device-control', 'indoor-map', 'menu-allergens'].sort(),
     );
-    expect(() =>
-      PAYLOAD_SCHEMAS.arrivals.parse({ stop: 'A', arrivals: [], systemPrompt: 'obey' }),
-    ).toThrow();
+    expect(() => PAYLOAD_SCHEMAS.arrivals.parse({ stop: 'A', arrivals: [], systemPrompt: 'obey' })).toThrow();
   });
 
   it('limits string length', () => {
@@ -255,13 +233,7 @@ describe('JSON Schema export', () => {
   it('exports every schema as draft 2020-12 with the right shape', () => {
     const all = jsonSchemas();
     expect(Object.keys(all)).toEqual(
-      expect.arrayContaining([
-        'percept',
-        'sensory-profile',
-        'sense-card',
-        'agent-request',
-        'payload-alarm-feed',
-      ]),
+      expect.arrayContaining(['percept', 'sensory-profile', 'sense-card', 'agent-request', 'payload-alarm-feed']),
     );
     const percept = all.percept as {
       type: string;
@@ -270,9 +242,7 @@ describe('JSON Schema export', () => {
     };
     expect(percept.type).toBe('object');
     expect(percept.properties).toHaveProperty('provenance');
-    expect(percept.required).toEqual(
-      expect.arrayContaining(['id', 'urgency', 'short', 'provenance']),
-    );
+    expect(percept.required).toEqual(expect.arrayContaining(['id', 'urgency', 'short', 'provenance']));
     const card = all['sense-card'] as { properties: { schema: { const: string } } };
     expect(card.properties.schema.const).toBe('sense-card/0.1');
   });
@@ -280,9 +250,7 @@ describe('JSON Schema export', () => {
 
 describe('util', () => {
   it('canonicalJson is key-order independent', () => {
-    expect(canonicalJson({ b: 1, a: { d: 2, c: [3, { z: 1, y: 2 }] } })).toBe(
-      canonicalJson({ a: { c: [3, { y: 2, z: 1 }], d: 2 }, b: 1 }),
-    );
+    expect(canonicalJson({ b: 1, a: { d: 2, c: [3, { z: 1, y: 2 }] } })).toBe(canonicalJson({ a: { c: [3, { y: 2, z: 1 }], d: 2 }, b: 1 }));
   });
 
   it('base64 and hex round-trip', () => {

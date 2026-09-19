@@ -1,10 +1,5 @@
 import { vi } from 'vitest';
-import {
-  getPersona,
-  type AgentRequest,
-  type AgentTransport,
-  type SensoryProfile,
-} from '@sense/protocol';
+import { getPersona, type AgentRequest, type AgentTransport, type SensoryProfile } from '@sense/protocol';
 import { WorldSim } from '@sense/world-sim';
 import { SenseBroker } from '../src';
 

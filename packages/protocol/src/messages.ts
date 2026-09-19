@@ -147,13 +147,6 @@ export function signingPayload(msg: CapabilityResponse | PushMessage): Uint8Arra
 }
 
 /** Bytes both identity and server keys sign to prove live control of the private key. */
-export function helloChallengeBytes(args: {
-  nonce: string;
-  sessionId: string;
-  ephemeralPublicKey: string;
-  fqdn: string;
-}): Uint8Array {
-  return new TextEncoder().encode(
-    `${PROTOCOL_VERSION}|hello|${args.fqdn}|${args.nonce}|${args.sessionId}|${args.ephemeralPublicKey}`,
-  );
+export function helloChallengeBytes(args: { nonce: string; sessionId: string; ephemeralPublicKey: string; fqdn: string }): Uint8Array {
+  return new TextEncoder().encode(`${PROTOCOL_VERSION}|hello|${args.fqdn}|${args.nonce}|${args.sessionId}|${args.ephemeralPublicKey}`);
 }

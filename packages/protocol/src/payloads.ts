@@ -26,9 +26,7 @@ export const IndoorMapPayloadSchema = z.strictObject({
       }),
     )
     .max(200),
-  edges: z
-    .array(z.strictObject({ from: id(), to: id(), meters: z.number().min(0).max(10_000) }))
-    .max(400),
+  edges: z.array(z.strictObject({ from: id(), to: id(), meters: z.number().min(0).max(10_000) })).max(400),
   notes: text(300).optional(),
 });
 export type IndoorMapPayload = z.infer<typeof IndoorMapPayloadSchema>;

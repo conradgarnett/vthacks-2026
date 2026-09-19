@@ -39,20 +39,11 @@ export function redactAssurance(text: string): string {
  * `redacted` tells the caller so it can log a security event.
  */
 export function guardPercept(p: Percept): Percept;
-export function guardPercept(
-  p: Percept,
-  opts: { redact: true },
-): { percept: Percept; redacted: boolean };
-export function guardPercept(
-  p: Percept,
-  opts?: { redact: true },
-): Percept | { percept: Percept; redacted: boolean } {
+export function guardPercept(p: Percept, opts: { redact: true }): { percept: Percept; redacted: boolean };
+export function guardPercept(p: Percept, opts?: { redact: true }): Percept | { percept: Percept; redacted: boolean } {
   let candidate = p;
   let redacted = false;
-  if (
-    opts?.redact &&
-    (containsAssurance(p.short) || (p.long !== undefined && containsAssurance(p.long)))
-  ) {
+  if (opts?.redact && (containsAssurance(p.short) || (p.long !== undefined && containsAssurance(p.long)))) {
     candidate = {
       ...p,
       short: redactAssurance(p.short),

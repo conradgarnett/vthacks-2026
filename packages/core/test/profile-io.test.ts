@@ -9,10 +9,7 @@ describe('portable signed profile', () => {
     const profile = applySituation({ ...getPersona('deaf'), allergens: ['peanut'] }, 'noisy-room');
     const file = await exportProfile(profile, keys);
     expect(file.format).toBe('sense-profile/0.1');
-    const back = await importProfile(
-      JSON.parse(JSON.stringify(file)),
-      await exportSpki(keys.publicKey),
-    );
+    const back = await importProfile(JSON.parse(JSON.stringify(file)), await exportSpki(keys.publicKey));
     expect(back).toEqual(profile);
   });
 
@@ -27,14 +24,10 @@ describe('portable signed profile', () => {
     const owner = await generateKeyPair();
     const other = await generateKeyPair();
     const file = await exportProfile(getPersona('motor'), other);
-    await expect(importProfile(file, await exportSpki(owner.publicKey))).rejects.toThrow(
-      /different key/,
-    );
+    await expect(importProfile(file, await exportSpki(owner.publicKey))).rejects.toThrow(/different key/);
   });
 
   it('rejects files that fail schema validation', async () => {
-    await expect(
-      importProfile({ format: 'sense-profile/0.1', profile: {}, publicKey: 'x', signature: 'y' }),
-    ).rejects.toThrow();
+    await expect(importProfile({ format: 'sense-profile/0.1', profile: {}, publicKey: 'x', signature: 'y' })).rejects.toThrow();
   });
 });

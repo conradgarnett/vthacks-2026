@@ -12,8 +12,7 @@ import type { WorldSim } from './world';
 export async function buildWorldSimHttp(world: WorldSim): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
 
-  const hostOf = (req: FastifyRequest): string | undefined =>
-    (req.headers.host ?? '').split(':')[0]?.toLowerCase();
+  const hostOf = (req: FastifyRequest): string | undefined => (req.headers.host ?? '').split(':')[0]?.toLowerCase();
   const agentFor = (fqdn: string | undefined) => (fqdn ? world.agents.get(fqdn) : undefined);
 
   app.get('/', async () => ({
@@ -62,20 +61,14 @@ export async function buildWorldSimHttp(world: WorldSim): Promise<FastifyInstanc
   });
 
   // Sim control (demo only): fire scripted events by name.
-  app.post<{ Params: { name: string }; Querystring: { arg?: string } }>(
-    '/sim/event/:name',
-    async (req, reply) => {
-      try {
-        await world.trigger(
-          req.params.name,
-          req.query.arg === undefined ? undefined : Number(req.query.arg),
-        );
-        return { ok: true };
-      } catch (err) {
-        return reply.code(400).send({ error: err instanceof Error ? err.message : 'failed' });
-      }
-    },
-  );
+  app.post<{ Params: { name: string }; Querystring: { arg?: string } }>('/sim/event/:name', async (req, reply) => {
+    try {
+      await world.trigger(req.params.name, req.query.arg === undefined ? undefined : Number(req.query.arg));
+      return { ok: true };
+    } catch (err) {
+      return reply.code(400).send({ error: err instanceof Error ? err.message : 'failed' });
+    }
+  });
 
   return app;
 }

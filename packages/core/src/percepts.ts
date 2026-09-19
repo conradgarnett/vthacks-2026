@@ -66,8 +66,7 @@ export function fitShort(core: string, suffix = ''): string {
 }
 
 /** "Verified, Riverside Hall." with the label trimmed if needed. */
-export const sourceSuffix = (source: SourceInfo): string =>
-  `${tierWord(source.tier)}, ${source.label}.`;
+export const sourceSuffix = (source: SourceInfo): string => `${tierWord(source.tier)}, ${source.label}.`;
 
 const ALARM_LABEL: Record<AlarmFeedPayload['alarms'][number]['type'], string> = {
   fire: 'Fire alarm',
@@ -105,23 +104,18 @@ export function alarmPercepts(
   return payload.alarms.map((alarm) => {
     const active = alarm.state === 'active';
     const cleared = alarm.state === 'cleared';
-    const label =
-      alarm.state === 'test' ? 'Alarm test' : cleared ? 'Alarm cleared' : ALARM_LABEL[alarm.type];
+    const label = alarm.state === 'test' ? 'Alarm test' : cleared ? 'Alarm cleared' : ALARM_LABEL[alarm.type];
     // Life-safety urgency needs a VERIFIED source; an unverified report is surfaced but capped.
     let urgency = alarm.state === 'test' ? 1 : cleared ? 2 : ALARM_URGENCY[alarm.type];
     if (ctx.source.tier !== 'VERIFIED') urgency = Math.min(urgency, 3);
     const spatial = spatialFrom(ctx.pose.position, alarm.location, ctx.pose.headingDeg);
     const where = `${spatial.distanceM} m, ${spatial.clockPosition} o'clock`;
-    const note = alarm.message
-      ? ` Publisher note (unverified text, shown as data): "${alarm.message}".`
-      : '';
+    const note = alarm.message ? ` Publisher note (unverified text, shown as data): "${alarm.message}".` : '';
     const clearedNote = cleared
       ? ' This is the source’s own report that the alarm cleared. SENSE cannot confirm current conditions; check with people on site.'
       : '';
     const unverifiedNote =
-      ctx.source.tier === 'VERIFIED'
-        ? ''
-        : ' This source is not fully verified, so treat this report with caution and check another way.';
+      ctx.source.tier === 'VERIFIED' ? '' : ' This source is not fully verified, so treat this report with caution and check another way.';
     const percept: Percept = {
       id: ctx.nextId(),
       timestamp: ctx.now,
@@ -158,10 +152,7 @@ export function arrivalsPercept(
 ): Percept {
   const next = [...payload.arrivals].sort((a, b) => a.etaMinutes - b.etaMinutes)[0];
   const list = payload.arrivals
-    .map(
-      (a) =>
-        `route ${a.route} to ${a.destination} in ${a.etaMinutes} min${a.accessible ? '' : ' (not step-free)'}`,
-    )
+    .map((a) => `route ${a.route} to ${a.destination} in ${a.etaMinutes} min${a.accessible ? '' : ' (not step-free)'}`)
     .join('; ');
   return {
     id: ctx.nextId(),
@@ -169,9 +160,7 @@ export function arrivalsPercept(
     sense: 'vision',
     kind: 'status',
     urgency: 0,
-    short: next
-      ? fitShort(`Next ${next.route} to ${next.destination}, ${next.etaMinutes} min.`)
-      : 'No arrivals listed.',
+    short: next ? fitShort(`Next ${next.route} to ${next.destination}, ${next.etaMinutes} min.`) : 'No arrivals listed.',
     long: `${payload.stop}: ${list}. From ${ctx.source.label} (${ctx.source.tier}).`,
     provenance: provenanceFor(ctx.source, ctx.freshness),
     simulated: ctx.source.simulated,

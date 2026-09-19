@@ -1,11 +1,5 @@
 import { z } from 'zod';
-import {
-  CapabilityIdSchema,
-  DigestSchema,
-  FqdnSchema,
-  type CapabilityId,
-  type Presentation,
-} from '@sense/protocol';
+import { CapabilityIdSchema, DigestSchema, FqdnSchema, type CapabilityId, type Presentation } from '@sense/protocol';
 import type { InclusionProof } from './merkle';
 
 export const AgentRecordSchema = z.strictObject({
