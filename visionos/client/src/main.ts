@@ -384,13 +384,22 @@ async function readText(): Promise<void> {
     // Let an autofocus lens settle on the label first; a burst captured
     // mid-hunt is three soft frames that agree on nothing.
     await camera.refocus();
+    // Turn the exposure down for the burst: a glossy label blows out to
+    // white under automatic exposure, and the ink is what the reader
+    // needs. Put back straight after, so the preview and scans are as
+    // they were.
+    await camera.dimForRead();
     const captured: Blob[] = [];
-    for (let i = 0; i < READ_BURST_FRAMES; i++) {
-      const frame = await camera.captureDetailed();
-      if (frame) captured.push(frame);
-      if (i < READ_BURST_FRAMES - 1) {
-        await new Promise((resolve) => setTimeout(resolve, READ_BURST_GAP_MS));
+    try {
+      for (let i = 0; i < READ_BURST_FRAMES; i++) {
+        const frame = await camera.captureDetailed();
+        if (frame) captured.push(frame);
+        if (i < READ_BURST_FRAMES - 1) {
+          await new Promise((resolve) => setTimeout(resolve, READ_BURST_GAP_MS));
+        }
       }
+    } finally {
+      await camera.restoreExposure();
     }
 
     if (captured.length === 0) {

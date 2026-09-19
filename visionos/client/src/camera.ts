@@ -43,6 +43,15 @@ type Window = typeof READ_WINDOW;
 export type ScreenRect = { left: number; top: number; width: number; height: number };
 // Time for a single-shot autofocus to settle before the burst is captured.
 const REFOCUS_MS = 600;
+// Time for the sensor to settle after exposure is turned down for a read.
+const EXPOSURE_SETTLE_MS = 300;
+// How far down the picture goes for a read, as a fraction of each control's
+// range. A webcam's automatic exposure blows a glossy label out to white,
+// and the ink is what the reader needs; a quarter of the range is a stop
+// or so, dark enough to keep the whites and not so dark that shadows go.
+const READ_EXPOSURE_DROP = 0.25;
+const READ_BRIGHTNESS_DROP = 0.2;
+const READ_CONTRAST_RAISE = 0.15;
 
 // Cameras that live in the machine rather than on the user.
 const BUILT_IN = /integrated|built-?in|facetime|internal|easycamera|true ?vision|wide ?vision|user.facing|front/i;
@@ -52,10 +61,18 @@ const EXTERNAL = /usb|logitech|brio|uvc|razer|elgato|obsbot|insta360|external|ki
 const VENDOR_ID = /\s*\([0-9a-f]{4}:[0-9a-f]{4}\)/i;
 const REMEMBERED = "visionos.camera";
 
-// Focus control is not in the TypeScript DOM typings yet; browsers expose it
-// on cameras whose driver offers it.
+// Focus and exposure controls are not in the TypeScript DOM typings yet;
+// browsers expose them on cameras whose driver offers them.
 type FocusCapabilities = { focusMode?: string[] };
 type FocusConstraint = { focusMode: string };
+type Range = { min: number; max: number; step?: number };
+type ImageCapabilities = { exposureCompensation?: Range; brightness?: Range; contrast?: Range };
+type ImageSettings = Record<string, number | string | undefined>;
+const EXPOSURE_CONTROLS: Array<[keyof ImageCapabilities, number]> = [
+  ["exposureCompensation", -READ_EXPOSURE_DROP],
+  ["brightness", -READ_BRIGHTNESS_DROP],
+  ["contrast", READ_CONTRAST_RAISE],
+];
 
 export class Camera {
   private video: HTMLVideoElement;
@@ -64,6 +81,8 @@ export class Camera {
   private cameras: MediaDeviceInfo[] = [];
   /** "autofocus" or "no focus control", once started; spoken with the name. */
   focus = "";
+  /** Exposure settings to put back after a read, while one is dimmed. */
+  private exposureBefore: Record<string, number> | null = null;
 
   constructor(video: HTMLVideoElement) {
     this.video = video;
@@ -130,6 +149,58 @@ export class Camera {
       if (modes.includes("continuous")) await this.setFocus(track, "continuous");
     } catch {
       // Focus is best effort; the read goes ahead with what the lens gives.
+    }
+  }
+
+  /**
+   * Turn the picture down for a read. A webcam's automatic exposure blows
+   * a glossy label out to white, and the ink is what the reader needs.
+   * Uses whichever of exposure compensation, brightness and contrast the
+   * camera offers; does nothing on one that offers none. Put back with
+   * `restoreExposure`, so the preview and the scan frames are untouched.
+   */
+  async dimForRead(): Promise<void> {
+    const track = this.track();
+    if (!track || this.exposureBefore) return;
+    const capabilities = (track.getCapabilities?.() ?? {}) as ImageCapabilities;
+    const settings = (track.getSettings?.() ?? {}) as ImageSettings;
+
+    const before: Record<string, number> = {};
+    const dimmed: Record<string, number> = {};
+    for (const [name, change] of EXPOSURE_CONTROLS) {
+      const range = capabilities[name];
+      if (!range || !(range.max > range.min)) continue;
+      const current = typeof settings[name] === "number" ? (settings[name] as number) : (range.min + range.max) / 2;
+      const step = range.step && range.step > 0 ? range.step : 0;
+      let target = current + (range.max - range.min) * change;
+      target = Math.min(range.max, Math.max(range.min, target));
+      if (step) target = range.min + Math.round((target - range.min) / step) * step;
+      if (target === current) continue;
+      before[name] = current;
+      dimmed[name] = target;
+    }
+    if (Object.keys(dimmed).length === 0) return;
+
+    try {
+      await track.applyConstraints({ advanced: [dimmed as unknown as MediaTrackConstraintSet] });
+      this.exposureBefore = before;
+      await new Promise((resolve) => setTimeout(resolve, EXPOSURE_SETTLE_MS));
+    } catch {
+      // The camera refused; the read goes ahead with the picture as it is.
+      this.exposureBefore = null;
+    }
+  }
+
+  /** Put the exposure back the way it was before `dimForRead`. */
+  async restoreExposure(): Promise<void> {
+    const track = this.track();
+    const before = this.exposureBefore;
+    this.exposureBefore = null;
+    if (!track || !before) return;
+    try {
+      await track.applyConstraints({ advanced: [before as unknown as MediaTrackConstraintSet] });
+    } catch {
+      // Nothing more to do; the next read will try again from wherever it is.
     }
   }
 
