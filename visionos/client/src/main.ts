@@ -49,7 +49,11 @@ let started = false;
 // While true the fast frame loop is suspended so a 640px frame cannot
 // overwrite the hi-res one a read depends on.
 let readPending = false;
-const READ_TIMEOUT_MS = 6000;
+const READ_TIMEOUT_MS = 8000;
+// Enough frames for majority agreement; the gap lets the scene shift slightly
+// so blur and glare differ between them, which is what makes the vote useful.
+const READ_BURST_FRAMES = 3;
+const READ_BURST_GAP_MS = 120;
 
 let voiceIndex = 0;
 const VOICE_SAMPLE =
@@ -262,16 +266,28 @@ async function begin(): Promise<void> {
 
 async function sendDetailedThen(intent: string): Promise<void> {
   // The frame loop is suspended for the whole operation. WebSocket delivery
-  // is ordered, so with no fast frame interleaved the hi-res frame is
-  // guaranteed to be the one the server reads from.
+  // is ordered, so with no fast frame interleaved the burst below is exactly
+  // what the server reads from.
   readPending = true;
   try {
-    const frame = await camera.captureDetailed();
-    if (!frame) {
+    // A burst, not one frame. Hand-held capture blurs and glares differently
+    // each time, and the server keeps only text that several frames agree on
+    // -- which is what separates real text from OCR noise.
+    const captured: Blob[] = [];
+    for (let i = 0; i < READ_BURST_FRAMES; i++) {
+      const frame = await camera.captureDetailed();
+      if (frame) captured.push(frame);
+      if (i < READ_BURST_FRAMES - 1) {
+        await new Promise((resolve) => setTimeout(resolve, READ_BURST_GAP_MS));
+      }
+    }
+
+    if (captured.length === 0) {
       reportFailure("Couldn't capture the image to read.");
       return;
     }
-    connection.sendFrame(frame);
+
+    captured.forEach((frame) => connection.sendFrame(frame));
     connection.sendIntent(intent);
   } finally {
     // Cleared on the trace event; this is the backstop if none arrives.

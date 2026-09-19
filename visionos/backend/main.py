@@ -9,8 +9,13 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+# Three is the useful minimum for majority agreement; more costs latency the
+# read budget cannot spare.
+OCR_CONSENSUS_FRAMES = 3
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -114,6 +119,10 @@ class Session:
         self.perception = perception
         self.ocr = ocr
         self.latest_frame: bytes | None = None
+        # Recent frames for OCR consensus. Hand-held capture blurs and glares
+        # differently frame to frame, and OCR noise moves with it while real
+        # text stays put -- so agreement across frames is what separates them.
+        self.recent_frames: deque[bytes] = deque(maxlen=OCR_CONSENSUS_FRAMES)
 
         settings = get_settings()
         self.hazards_enabled = settings.hazards_enabled
@@ -128,6 +137,7 @@ class Session:
 
     async def handle_frame(self, frame: bytes) -> None:
         self.latest_frame = frame
+        self.recent_frames.append(frame)
         await self.perception.process(frame)
 
         # Deterministic, microseconds, and ahead of everything else. Nothing
@@ -167,8 +177,9 @@ class Session:
         a read: the 640px fast-path frame loses the strokes OCR needs.
         """
         trace = LatencyTrace(label="read_local")
+        frames = list(self.recent_frames) or ([self.latest_frame] if self.latest_frame else [])
         with trace.stage("ocr"):
-            lines = await self.ocr.read(self.latest_frame or b"")
+            lines = await self.ocr.read_consensus(frames)
 
         # Escalate only if there is something better to escalate to.
         escalation_available = type(self.provider).__name__ == "ClaudeVisionProvider"
