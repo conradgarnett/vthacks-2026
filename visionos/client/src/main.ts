@@ -465,6 +465,8 @@ window.setInterval(() => {
  * arrive normalized to the frame; the frame is letterboxed on screen, so
  * they are mapped through the same geometry as the read area.
  */
+const UNBOXED = new Set(["wall"]);
+
 function drawBoxes(items: Boxed[]): void {
   drawn = items;
   const frame = camera.frameOnScreen();
@@ -481,8 +483,8 @@ function drawBoxes(items: Boxed[]): void {
   ctx.font = "13px system-ui, sans-serif";
   for (const item of items) {
     // Hand-held things clutter the picture and are spoken only when asked
-    // about, so they are not drawn either.
-    if (item.scale === "small") continue;
+    // about, so they are not drawn either; a wall is the whole picture.
+    if (item.scale === "small" || UNBOXED.has(item.label)) continue;
     const [x1, y1, x2, y2] = item.box;
     const left = frame.left + x1 * frame.width;
     const top = frame.top + y1 * frame.height;

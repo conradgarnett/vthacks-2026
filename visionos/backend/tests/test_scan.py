@@ -59,7 +59,9 @@ class TestPicture:
         assert describe_group(group) == "a person standing by a chair, which is empty"
 
     def test_nothing_seen_says_so(self):
-        assert describe_scan(SceneModel(), []) == "I can't make out anything specific right now."
+        assert describe_scan(SceneModel(), []) == (
+            "I can't make out anything specific right now. I can't tell whether the way ahead is clear."
+        )
 
     def test_a_glimpse_is_hedged_and_only_when_sure(self):
         spoken = describe_scan(SceneModel(), [seen("chair", 0, 1.5)], [seen("door", 40.0, 3.0, 0.9, 1)])
@@ -74,7 +76,7 @@ class TestPicture:
 
     def test_the_inventory_lists_everything_with_confidence(self):
         text = inventory_sentence([seen("person", 0, 6.0, 0.91)], [seen("bottle", 5, 1.0, 0.35, 1)])
-        assert text == "Seen in both frames: person 91% about 6 meters. Seen once: bottle 35% about 1 meters."
+        assert text == "Seen in both frames: person 91% about 6 meters. Seen once: bottle 35% about 1 meter."
 
 
 def text(line, left, top, height=0.03):
@@ -99,7 +101,8 @@ class TestActivity:
         spoken = describe_scan(SceneModel(), self.DESK)
         assert spoken == (
             "This looks like an office. About 2 meters straight ahead, "
-            "it looks like a person using a laptop at a desk, with an empty chair."
+            "it looks like a person using a laptop at a desk, with an empty chair. "
+            "The way ahead is blocked by a person about 2 meters straight ahead."
         )
 
     def test_an_unsure_laptop_is_only_listed(self):
@@ -156,7 +159,9 @@ class TestNotableText:
 
     def test_the_scan_speaks_the_sign_after_the_picture(self):
         spoken = describe_scan(SceneModel(), [seen("chair", 0, 1.5)], [], [text("FIRE EXIT", 0.8, 0.2)])
-        assert spoken.endswith("A sign to your right says FIRE EXIT.")
+        assert "A sign to your right says FIRE EXIT." in spoken
+        # The walkway comes last, every time.
+        assert spoken.endswith("The way ahead is blocked by a chair about 1.5 meters straight ahead."), spoken
 
 
 def replace_conf(item, confidence):
@@ -259,7 +264,10 @@ async def test_a_scan_burst_is_detected_at_scan_size_and_painted():
     session = Session(socket, FakeProvider(), FakePerception(detector), NullReader())
     await session.handle_scan([frame(), frame()])
     assert detector.sizes == [1280, 1280]
-    assert socket.spoken() == ["About 2 meters straight ahead, a chair."]
+    assert socket.spoken() == [
+        "About 2 meters straight ahead, a chair. "
+        "The way ahead is blocked by a chair about 2 meters straight ahead."
+    ]
     inventory = [p for p in socket.sent if p.get("type") == "inventory"]
     assert inventory and inventory[0]["items"][0]["label"] == "chair" and inventory[0]["items"][0]["frames"] == 2
 
@@ -356,3 +364,50 @@ def test_a_person_in_an_armchair_is_sitting():
     chair = seen("armchair", 0.0, 2.0, box=(0.35, 0.4, 0.65, 0.95))
     spoken = describe_scan(SceneModel(), [person, chair])
     assert "sitting in an armchair" in spoken, spoken
+
+
+# --- Every scan ends with the walkway ---------------------------------------
+
+
+def test_a_scan_ends_with_a_blocked_walkway():
+    spoken = describe_scan(SceneModel(), [seen("chair", 5.0, 0.8), seen("door", 2.0, 4.0)])
+    assert spoken.endswith("The way ahead is blocked by a chair less than a meter straight ahead."), spoken
+
+
+def test_a_clear_walkway_says_what_it_leads_to():
+    spoken = describe_scan(SceneModel(), [seen("chair", 40.0, 1.0), seen("door", 3.0, 4.0)])
+    assert spoken.endswith(
+        "The way ahead looks clear, as far as I can tell, and leads to a door about 4 meters ahead."
+    ), spoken
+
+
+def test_a_clear_walkway_with_nothing_ahead_says_so():
+    spoken = describe_scan(SceneModel(), [seen("couch", 60.0, 2.0)])
+    assert spoken.endswith("but I can't see what it leads to."), spoken
+
+
+def test_a_hand_held_thing_is_not_what_the_way_leads_to():
+    spoken = describe_scan(SceneModel(), [seen("cup", 0.0, 2.0), seen("table", 1.0, 3.5)])
+    assert "leads to a table" in spoken and "cup" not in spoken, spoken
+
+
+def test_stairs_ahead_are_named_even_without_a_distance():
+    spoken = describe_scan(SceneModel(), [seen("stairs", 2.0, None)])
+    assert "Straight ahead there are stairs; I can't tell how far." in spoken, spoken
+
+
+def test_the_fallback_scene_description_ends_with_the_walkway_too():
+    from backend.scene.inference import describe_scene
+    from backend.tests.test_scene import build_scene, make_detection
+
+    scene = build_scene([make_detection(label="chair", azimuth=0.0, distance=1.2)])
+    spoken = describe_scene(scene)
+    assert spoken.endswith("The way ahead is blocked by a chair about 1 meter straight ahead."), spoken
+
+
+def test_a_wall_is_what_a_clear_way_leads_to_and_is_never_listed():
+    spoken = describe_scan(SceneModel(), [seen("wall", 0.0, None), seen("chair", 50.0, 2.0)])
+    assert spoken.endswith("leads to a wall; I can't tell how far."), spoken
+    assert spoken.count("wall") == 1, spoken
+    with_door = describe_scan(SceneModel(), [seen("wall", 0.0, None), seen("door", 4.0, 3.0)])
+    assert "leads to a door about 3 meters ahead" in with_door and "wall" not in with_door, with_door

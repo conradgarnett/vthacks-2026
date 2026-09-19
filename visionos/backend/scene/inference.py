@@ -24,7 +24,7 @@ from collections import Counter
 from dataclasses import dataclass, replace
 from typing import Iterable
 
-from backend.perception.geometry import clock_position, describe_direction
+from backend.perception.geometry import clock_position, describe_direction, lateral_offset_m
 from backend.perception.vocabulary import LANDMARK_CLASSES, is_obstacle, is_small
 from backend.scene.model import SceneModel, SceneObject
 from backend.scene.queries import summarize
@@ -128,8 +128,8 @@ def tentative_objects(detections, scene: SceneModel, limit: int = 2) -> list[Ten
         if detection.confidence < _TENTATIVE_MIN_CONFIDENCE:
             continue
         # A possible cup is never worth a mention; a real one is spoken
-        # only when asked about.
-        if is_small(detection.label):
+        # only when asked about. A wall is never a hint.
+        if is_small(detection.label) or detection.label in _STRUCTURE_LABELS:
             continue
         if detection.label in confirmed or detection.label in seen:
             continue
@@ -220,6 +220,9 @@ def describe_scene(scene: SceneModel, detections=()) -> str:
     if reminder:
         sentences.append(reminder)
 
+    sentences.append(walkway_sentence(
+        [Seen(o.label, o.confidence, o.azimuth_deg, o.distance_m) for o in scene.all_objects() if o.visible]
+    ))
     return " ".join(sentences)
 
 
@@ -269,6 +272,8 @@ class Seen:
 
 # Things that describe the place rather than sit in it.
 _SETTING_LABELS = {"hallway": "You're looking down a hallway."}
+# Structure: spoken only by the walkway sentence, never as a thing in view.
+_STRUCTURE_LABELS = {"wall"}
 # Furniture a person sits at or in.
 _TABLES = {"table", "dining table", "desk", "counter", "coffee table"}
 _SEATS = {"chair", "armchair", "stool", "couch", "bench"}
@@ -318,6 +323,13 @@ _NOTABLE_WORDS = {
 }
 _SIGN_LIKE = {"sign", "exit sign", "door", "doorway", "elevator"}
 _MAX_NOTABLE = 2
+# The walkway: a strip this wide and this long straight ahead, the same
+# corridor the path question checks. Something known to be walked into,
+# inside it, blocks it; the nearest thing of size within this angle of
+# straight ahead is what the way leads to.
+_WALK_WIDTH_M = 1.0
+_WALK_DISTANCE_M = 3.0
+_AHEAD_DEG = 15.0
 
 
 def _about(distance_m: float | None) -> str:
@@ -326,7 +338,8 @@ def _about(distance_m: float | None) -> str:
     if distance_m < 1.0:
         return "less than a meter"
     if distance_m < 3.0:
-        return f"about {round(distance_m * 2) / 2:g} meters"
+        value = round(distance_m * 2) / 2
+        return f"about {value:g} {'meter' if value == 1 else 'meters'}"
     return f"about {round(distance_m)} meters"
 
 
@@ -524,6 +537,55 @@ def _where(group: list[Seen], hallway: bool, farthest: bool) -> str:
     return f"{where} {direction}".strip()
 
 
+def walkway_sentence(seen: list[Seen]) -> str:
+    """The last thing a scan says: whether the way straight ahead is clear,
+    and what it leads to.
+
+    Only obstacles the detector recognizes can block it, so a clear way is
+    always hedged: "as far as I can tell". A thing with no distance (stairs,
+    an escalator) straight ahead is named without one rather than dropped,
+    since those are the things a foot finds first.
+    """
+    if not seen:
+        return "I can't tell whether the way ahead is clear."
+    ahead = [s for s in seen if abs(s.azimuth_deg) <= _AHEAD_DEG]
+    blockers = [
+        s for s in seen
+        if is_obstacle(s.label) and s.distance_m is not None and s.distance_m <= _WALK_DISTANCE_M
+        and lateral_offset_m(s.azimuth_deg, s.distance_m) <= _WALK_WIDTH_M / 2
+    ]
+    if blockers:
+        nearest = min(blockers, key=lambda s: s.distance_m or 0.0)
+        where = f"{_about(nearest.distance_m)} {describe_direction(nearest.azimuth_deg)}".strip()
+        return f"The way ahead is blocked by {with_article(nearest.label)} {where}."
+
+    unplaced = [
+        s for s in ahead
+        if s.distance_m is None and is_obstacle(s.label) and s.label not in _STRUCTURE_LABELS
+    ]
+    if unplaced:
+        return (
+            f"Straight ahead there {'are' if unplaced[0].label.endswith('s') else 'is'} "
+            f"{with_article(unplaced[0].label)}; I can't tell how far."
+        )
+
+    targets = sorted(
+        (s for s in ahead if s.distance_m is not None and not is_small(s.label)),
+        key=lambda s: s.distance_m or 0.0,
+    )
+    if targets:
+        target = targets[0]
+        return (
+            f"The way ahead looks clear, as far as I can tell, and leads to "
+            f"{with_article(target.label)} {_about(target.distance_m)} ahead."
+        )
+    if any(s.label == "wall" for s in ahead):
+        return "The way ahead looks clear, as far as I can tell, and leads to a wall; I can't tell how far."
+    if any(s.label == "hallway" for s in seen):
+        return "The way ahead looks clear down the hallway, as far as I can tell."
+    return "The way ahead looks clear as far as I can tell, but I can't see what it leads to."
+
+
 def describe_scan(
     scene: SceneModel, seen: list[Seen], glimpsed: Iterable[Seen] = (), text_lines=()
 ) -> str:
@@ -544,7 +606,7 @@ def describe_scan(
         sentences.append(room)
 
     hallway = "hallway" in labels
-    things = [s for s in seen if s.label not in _SETTING_LABELS]
+    things = [s for s in seen if s.label not in _SETTING_LABELS and s.label not in _STRUCTURE_LABELS]
     # Small things still group, since a cup in reach says what a person is
     # doing, but a group with nothing bigger in it is not spoken.
     groups = [g for g in group_seen(things) if any(not is_small(s.label) for s in g)]
@@ -564,7 +626,8 @@ def describe_scan(
 
     sure = [
         g for g in glimpsed
-        if g.confidence >= _TENTATIVE_MIN_CONFIDENCE and g.label not in labels and not is_small(g.label)
+        if g.confidence >= _TENTATIVE_MIN_CONFIDENCE and g.label not in labels
+        and not is_small(g.label) and g.label not in _STRUCTURE_LABELS
     ]
     if sure:
         parts = [f"{with_article(g.label)} {describe_direction(g.azimuth_deg)}" for g in sure[:2]]
@@ -573,6 +636,8 @@ def describe_scan(
     reminder = reminder_sentence(scene)
     if reminder:
         sentences.append(reminder)
+    # Last, every time: the user's rule. Where the feet go next.
+    sentences.append(walkway_sentence(seen))
     return " ".join(sentences)
 
 

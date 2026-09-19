@@ -59,6 +59,11 @@ VOCABULARY: dict[str, ClassSpec] = {
     "sign": ClassSpec(0.30, False, True),
     "window": ClassSpec(1.20, False),
     "hallway": ClassSpec(None, False, True),
+    # A wall is what a clear walkway leads to when nothing else does. No
+    # height prior, so no distance: "a wall, I can't tell how far" beats a
+    # made-up number. Never boxed on the preview and never listed in a
+    # scan's picture; the walkway sentence is its only voice.
+    "wall": ClassSpec(None, True, scale="large"),
     # -- Obstacles you walk into ------------------------------------------
     "chair": ClassSpec(0.90, True),
     "couch": ClassSpec(0.80, True),

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from backend.perception.vocabulary import is_small
 
-PROMPT_VERSION = "v3"
+PROMPT_VERSION = "v4"
 
 SYSTEM_PROMPT = """You are VisionOS, the visual sense of a blind or low-vision \
 user. You perceive their surroundings through a camera and a tracked spatial \
@@ -39,7 +39,8 @@ SCAN_PROMPT = """Describe this room for someone who cannot see it. Sweep \
 left to right. Name the major objects and where each one is, using clock \
 positions and approximate distances. Mention anything in the walking path \
 first. Leave out small hand-held things such as cups, bottles and phones
-unless asked about them. Two or three sentences."""
+unless asked about them. End with whether the walking path straight ahead is
+clear and what it leads to. Two or three sentences."""
 
 READ_PROMPT = """Read all the text visible in this image aloud, exactly as \
 written and in natural reading order: top to bottom, left to right. Include \
