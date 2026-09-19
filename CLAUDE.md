@@ -92,7 +92,7 @@ second, lower pass; tiling still applies.
 
 ```bash
 cd visionos
-.venv/bin/python -m pytest backend/tests -q          # 486 tests (3 Apple-only)
+.venv/bin/python -m pytest backend/tests -q          # 493 tests (3 Apple-only)
 PYTHONPATH=. .venv/bin/python eval/run_ocr_eval.py 60
 ```
 
@@ -235,9 +235,16 @@ tested.
   per-class floor table fitted on one half did worse on the other, and a
   minimum box height separated nothing. Client: the Voice and Camera
   buttons are gone at the user's request; the glasses webcam is chosen
-  every time and the voice stays on Daniel (`?voice=` overrides). Suite
-  486 passed, 3 skipped. `HAZARDS_ENABLED` is still false and the depth
-  pass is gated on it.
+  every time and the voice stays on Daniel (`?voice=` overrides). Live
+  frames: one in flight at a time, paused during scans, every 300 ms on
+  a CPU (the loop alone took 80% of this laptop at 150 ms); boxes live
+  2.5x the server's answer gap. Every scan ends with the walkway: blocked
+  by what and how far, or clear (hedged) and what it leads to; `wall` is
+  in the vocabulary with no height, spoken by direction only, never
+  listed or boxed, 0/24 invented on the blank textures. Reading a scan's
+  signs while detecting was measured (2.28 -> 2.53 s here) and reverted.
+  Suite 493 passed, 3 skipped. `HAZARDS_ENABLED` is still false and the
+  depth pass is gated on it.
 - **2026-09-19, evening, visionOS-2:** merged 81b0add (lexicon, 38 bundled
   fonts; their `eval/fonts.py` supersedes ours, helper renamed `typefaces.py`);
   RapidOCR detects at 1280 px and recognizes on full-res crops (657 ms/frame,
