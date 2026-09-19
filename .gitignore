@@ -1,0 +1,17 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+# local dev CA + log keys (never commit)
+.sense/keys/
+.sense-keys/
+*.pem
+*.key
+# portable Node toolchain used by the autonomous build
+.tools/
+*.log
+.vite/
+playwright-report/
+test-results/

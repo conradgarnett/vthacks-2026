@@ -1,0 +1,27 @@
+{
+  "name": "@sense/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@sense/protocol": "*",
+    "@sense/identity": "*",
+    "@sense/core": "*",
+    "@sense/providers": "*",
+    "@sense/render": "*",
+    "@sense/vision": "*",
+    "@sense/hearing": "*",
+    "@sense/touchless": "*",
+    "@sense/scent": "*",
+    "@sense/taste": "*",
+    "@sense/crowd": "*",
+    "@sense/world-sim": "*",
+    "fastify": "^5.12.5",
+    "ws": "^8.21.3",
+    "zod": "^4.6.5"
+  }
+}
