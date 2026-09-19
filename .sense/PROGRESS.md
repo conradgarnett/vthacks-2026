@@ -23,3 +23,9 @@ Append one entry per milestone: date, what was done, verify result, tag.
 - Attackers (activated on demand): impersonator, revoked, codeSwap, unlogged, spoofer (rogue CA + unsolicited push), injector (VERIFIED kiosk with hostile notes), flooder (VERIFIED noisy signs).
 - HTTP view with virtual hosting (Host header or /agents/:fqdn path) + /.well-known/sense-card.json + SSE events + /sim/event control.
 - 21 world-sim tests. verify green (81 tests total). Tag `m3-done`.
+
+## M4 — Core broker (done)
+- `packages/core`: sanitizer (unicode cleanup + instruction/assurance detection, drops whole field), safety guard (assurance-wording ban, redaction of remote labels, REJECTED never routed), trust engine (freshness from payload timestamps, tierFor, conflict reconcile), rate limiter (dedupe + token bucket, verified urgency>=3 always admitted), disclosure gate (strict schema + profile leak scan + log), frozen policy, signed portable profile, percept mapping, and `SenseBroker` (discover/arrive, ephemeral-session hello + 7-step verify, query/subscribe/unsubscribe, signed+schema-validated+sanitized ingest, unsolicited-push handling, freshness watchdog).
+- Tests: units (39), broker integration (23: every 5.4 scenario), invariants suite (12, property-based), profile-io (4). Core coverage 92% stmts / 94% lines.
+- Bugs found by tests and fixed: disclosure gate matched "allergens" in capability id `menu-allergens`; conflict percept lacked source label; push handlers now fail loud into the security log instead of unhandled rejections; fitShort keeps sentence punctuation.
+- verify green (159 tests). Tag `m4-done`.
