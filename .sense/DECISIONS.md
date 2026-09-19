@@ -13,3 +13,7 @@ Format: `D<n>` — decision — rationale. Newest at the bottom.
 - D9 — `Percept.short` is capped at 10 words. Assumption (not measured): 2.8 words/s at speech rate 1.0 and alerts spoken at >= 1.8x, so 10 words ~ 2 s. Safety percepts must contain the tier word and source label inside `short` (enforced in the schema).
 - D10 — Agent payload schemas use `strictObject`: unknown keys make the payload REJECTED rather than being silently stripped, so smuggled fields like `systemPrompt` become visible security events.
 - D11 — Personas, situational presets and the profile builder live in `@sense/protocol` (pure data + validation) so core, render, server and web share one definition.
+- D12 — ANS research used 3 fetches (limit was ~10); enough for the design. ansinfo.ai describes ANS as GoDaddy-led open source, not Linux-Foundation-governed, so docs say so. Proof-of-control (ACME) is not modeled; documented as a gap.
+- D13 — Verification stops at the first failing step (later steps shown as "skipped" in the inspector); an *unavailable* step (log/CRL down) yields UNVERIFIED and later steps still run. Unlogged agent = REJECTED (log reachable, entry absent); unreachable log = UNVERIFIED.
+- D14 — `@peculiar/x509` needs `reflect-metadata` (tsyringe); added as an identity dependency.
+- D15 — Append-only property is checked by pinning the last-seen signed tree head and comparing `rootAt(size)`; RFC 6962 consistency proofs are roadmap.
