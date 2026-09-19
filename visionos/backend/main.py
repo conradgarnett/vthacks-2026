@@ -120,6 +120,8 @@ class Session:
             distance_m=settings.hazard_distance_m,
             cone_deg=settings.hazard_cone_deg,
             cooldown_s=settings.hazard_cooldown_s,
+            min_hits=settings.hazard_min_hits,
+            min_confidence=settings.hazard_min_confidence,
         )
         self.beacon_label: str | None = None
 

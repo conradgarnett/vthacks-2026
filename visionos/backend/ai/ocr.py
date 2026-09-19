@@ -30,6 +30,12 @@ OCR_UNAVAILABLE = "I can't read text right now."
 
 # Vision's confidence is coarse; this only filters obvious noise.
 _MIN_CONFIDENCE = 0.3
+# Fraction of frame height. Vision defaults to 1/32 (~0.031) and silently
+# skips anything smaller, which is most signage seen from across a room.
+_MIN_TEXT_HEIGHT = 0.012
+# Second pass, only when the first finds nothing: catches small print at the
+# cost of more time and more noise.
+_MIN_TEXT_HEIGHT_RETRY = 0.005
 # Two lines within this fraction of frame height count as the same row, so a
 # two-column sign reads left-to-right rather than zig-zagging down the page.
 _SAME_LINE_TOLERANCE = 0.04
@@ -77,9 +83,24 @@ class AppleVisionOCR:
             log.exception("OCR warmup failed")
 
     def read_sync(self, frame_jpeg: bytes) -> list[TextLine]:
+        """Read text, retrying once for small or distant text.
+
+        Vision defaults to a minimum text height of 1/32 of the frame and
+        silently ignores anything smaller -- which is most real signage, since
+        a sign photographed from across a room occupies very little of it.
+        The first pass is tuned for that; the retry goes smaller still, and
+        only runs when the first pass found nothing, so the common case keeps
+        its fast path.
+        """
         if not self._available:
             return []
 
+        lines = self._recognize(frame_jpeg, minimum_height=_MIN_TEXT_HEIGHT)
+        if not lines:
+            lines = self._recognize(frame_jpeg, minimum_height=_MIN_TEXT_HEIGHT_RETRY)
+        return lines
+
+    def _recognize(self, frame_jpeg: bytes, minimum_height: float) -> list[TextLine]:
         import Foundation
         import Vision
 
@@ -89,6 +110,17 @@ class AppleVisionOCR:
         request = Vision.VNRecognizeTextRequest.alloc().init()
         request.setRecognitionLevel_(1)  # accurate; fast mode misreads signage
         request.setUsesLanguageCorrection_(True)
+
+        # Each of these is best-effort: pyobjc exposes whatever the running
+        # macOS supports, and an unavailable setter must not fail the read.
+        for setter, value in (
+            ("setMinimumTextHeight_", minimum_height),
+            ("setRecognitionLanguages_", ["en-US"]),
+        ):
+            try:
+                getattr(request, setter)(value)
+            except Exception:  # pragma: no cover - depends on OS version
+                log.debug("OCR setting %s unavailable", setter)
 
         success, error = handler.performRequests_error_([request], None)
         if not success:

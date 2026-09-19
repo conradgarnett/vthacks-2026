@@ -54,6 +54,59 @@ class TestObstacleDetection:
         assert engine.evaluate(SceneModel()) == []
 
 
+class TestCredibility:
+    """Alerts demand more evidence than descriptions.
+
+    Reported from real use: open-vocabulary detection flickers, and every
+    one-frame ghost inside the cone became a spoken warning.
+    """
+
+    def test_a_flickering_one_frame_detection_does_not_alert(self, engine):
+        scene = build_scene(
+            [make_detection(label="chair", azimuth=0.0, distance=1.0)], frames=1
+        )
+        assert engine.evaluate(scene) == []
+
+    def test_a_persistent_detection_does_alert(self, engine):
+        scene = build_scene(
+            [make_detection(label="chair", azimuth=0.0, distance=1.0)], frames=4
+        )
+        assert len(engine.evaluate(scene)) == 1
+
+    def test_a_low_confidence_detection_does_not_alert(self, engine):
+        """Good enough to mention; not good enough to interrupt for."""
+        scene = build_scene(
+            [
+                make_detection(
+                    label="chair", azimuth=0.0, distance=1.0, confidence=0.22
+                )
+            ],
+            frames=4,
+        )
+        assert engine.evaluate(scene) == []
+
+    def test_a_remembered_object_does_not_alert(self, engine):
+        """Warning about something we can no longer see is a false alarm."""
+        from backend.perception.tracker import Tracker
+        from backend.scene.model import SceneModel
+
+        tracker, scene = Tracker(), SceneModel()
+        detection = make_detection(label="chair", azimuth=0.0, distance=1.0)
+        for _ in range(4):
+            tracker.update([detection])
+        tracker.update([])  # leaves view
+        scene.update(tracker.visible(), tracker.remembered())
+
+        assert engine.evaluate(scene) == []
+
+    def test_the_threshold_is_configurable(self):
+        scene = build_scene(
+            [make_detection(label="chair", azimuth=0.0, distance=1.0)], frames=2
+        )
+        assert HazardEngine(min_hits=10).evaluate(scene) == []
+        assert len(HazardEngine(min_hits=1).evaluate(scene)) == 1
+
+
 class TestSeverity:
     def test_very_close_obstacle_is_urgent_and_uses_steps(self, engine):
         """At arm's length, 'two steps' beats a decimal measurement."""

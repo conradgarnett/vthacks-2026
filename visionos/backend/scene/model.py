@@ -35,6 +35,15 @@ class SceneObject:
     last_seen: float
     visible: bool
     is_obstacle: bool
+    # Frames this object has actually been detected in. Open-vocabulary
+    # detection flickers, and a one-frame ghost is indistinguishable from a
+    # real object on any single frame -- persistence is the only signal that
+    # separates them.
+    hit_count: int = 1
+
+    @property
+    def age_s(self) -> float:
+        return max(0.0, time.monotonic() - self.first_seen)
 
     @property
     def clock(self) -> str:
@@ -108,11 +117,13 @@ class SceneModel:
                     last_seen=track.last_seen,
                     visible=is_visible,
                     is_obstacle=detection.is_obstacle,
+                    hit_count=track.hit_count,
                 )
                 continue
 
             existing.visible = is_visible
             existing.last_seen = track.last_seen
+            existing.hit_count = track.hit_count
             if is_visible:
                 # Only refresh geometry from a live observation; a remembered
                 # object must keep the position it was last actually seen at.

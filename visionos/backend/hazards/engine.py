@@ -51,11 +51,32 @@ _DROPOFF_SEVERITY_FLOOR = 0.6
 
 @dataclass
 class HazardEngine:
+    """Alerts require more evidence than descriptions do.
+
+    An interruption has a cost a description does not: it talks over whatever
+    the user was listening to, and a tool that cries wolf gets switched off.
+    So a hazard must clear three bars a merely-described object does not --
+    seen across several frames, above a higher confidence floor, and not
+    announced again inside the cooldown.
+    """
+
     distance_m: float = 1.5
     cone_deg: float = 30.0
     cooldown_s: float = 3.0
+    # Open-vocabulary detection flickers; a single frame is not evidence.
+    min_hits: int = 3
+    # Well above the detector's floor, which is tuned for recall, not for
+    # deciding whether to interrupt someone.
+    min_confidence: float = 0.35
 
     _last_spoken: dict[str, float] = field(default_factory=dict)
+
+    def _is_credible(self, obj) -> bool:
+        return (
+            obj.hit_count >= self.min_hits
+            and obj.confidence >= self.min_confidence
+            and obj.visible
+        )
 
     def evaluate(self, scene: SceneModel, dropoffs: list | None = None) -> list[HazardAlert]:
         """Current hazards, already debounced. Safe to call every frame."""
@@ -79,7 +100,7 @@ class HazardEngine:
             break  # one floor warning is enough; more is noise
 
         for obj in objects_in_cone(scene, self.cone_deg, self.distance_m):
-            if obj.distance_m is None:
+            if obj.distance_m is None or not self._is_credible(obj):
                 continue
             urgent = obj.distance_m <= _URGENT_DISTANCE_M
             steps = steps_away(obj.distance_m)

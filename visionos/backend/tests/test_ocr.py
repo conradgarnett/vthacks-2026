@@ -119,6 +119,56 @@ class TestAppleVision:
         assert "EXIT" in spoken.upper()
         assert spoken.upper().index("EXIT") < spoken.upper().index("204B")
 
+    @staticmethod
+    def distant_sign_jpeg(font_px: int) -> bytes:
+        """Small text in a large frame: a sign seen from across a room."""
+        import io
+
+        from PIL import Image, ImageDraw, ImageFont
+
+        width, height = 1600, 1200
+        image = Image.new("RGB", (width, height), "#d8d8d8")
+        draw = ImageDraw.Draw(image)
+        draw.rectangle(
+            [width // 2 - 260, height // 2 - 70, width // 2 + 260, height // 2 + 70],
+            fill="white",
+            outline="black",
+            width=2,
+        )
+        try:
+            font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", font_px)
+        except OSError:  # pragma: no cover - font layout varies by OS build
+            font = ImageFont.load_default()
+        draw.text(
+            (width // 2 - 240, height // 2 - font_px // 2),
+            "EXIT 204B",
+            fill="black",
+            font=font,
+        )
+
+        buffer = io.BytesIO()
+        image.save(buffer, "JPEG", quality=90)
+        return buffer.getvalue()
+
+    def test_reads_small_distant_text(self, ocr):
+        """Regression: reads were 'sometimes bad'.
+
+        Vision defaults to a minimum text height of 1/32 of the frame and
+        silently drops anything smaller -- which is most real signage. At 26px
+        in a 1200px frame (2.2%) the default misses this entirely.
+        """
+        lines = ocr.read_sync(self.distant_sign_jpeg(26))
+        assert "204" in format_for_speech(lines)
+
+    def test_tuning_beats_the_vision_default_on_small_text(self, ocr):
+        """Pins the improvement itself, not just the outcome."""
+        jpeg = self.distant_sign_jpeg(26)
+        untuned = ocr._recognize(jpeg, minimum_height=0.031)
+        tuned = ocr.read_sync(jpeg)
+
+        assert "204" not in format_for_speech(untuned), "default unexpectedly read it"
+        assert "204" in format_for_speech(tuned)
+
     def test_blank_image_yields_no_text_rather_than_noise(self, ocr):
         import io
 

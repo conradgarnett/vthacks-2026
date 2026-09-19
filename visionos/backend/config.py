@@ -51,8 +51,9 @@ class Settings(BaseSettings):
     open_vocab_weights: str = "yolov8s-world.pt"
     detector_weights: str = "yolo11m.pt"
     # Open-vocabulary scores run lower than closed-set ones; dangerous classes
-    # get a stricter floor of their own in vocabulary.py.
-    detector_confidence: float = 0.12
+    # get a stricter floor of their own in vocabulary.py. Raised from 0.12
+    # after real-world use produced a stream of flickering false detections.
+    detector_confidence: float = 0.20
     depth_model: str = "depth-anything/Depth-Anything-V2-Small-hf"
     # Horizontal FOV of a typical phone rear camera. Drives pixel->azimuth.
     camera_hfov_deg: float = 66.0
@@ -62,8 +63,11 @@ class Settings(BaseSettings):
     hazard_distance_m: float = 1.5
     hazard_cone_deg: float = 30.0
     hazard_cooldown_s: float = 3.0
-    # Below this, a depth reading is too noisy to assert a hazard from.
-    hazard_min_confidence: float = 0.45
+    # An interruption costs more than a description, so alerts need more
+    # evidence: several frames of persistence and a higher confidence floor.
+    # Without these, open-vocabulary flicker produced constant false warnings.
+    hazard_min_hits: int = 3
+    hazard_min_confidence: float = 0.35
 
     # --- Scene model ------------------------------------------------------
     # How long a departed object stays remembered ("it was there a moment ago").

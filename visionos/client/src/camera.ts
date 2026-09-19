@@ -8,8 +8,11 @@
 
 const FAST_WIDTH = 640;
 const FAST_QUALITY = 0.6;
-const HIRES_WIDTH = 1280;
-const HIRES_QUALITY = 0.85;
+// Reading is resolution-bound: OCR needs the strokes, and text photographed
+// from across a room occupies very few pixels. Worth the extra bytes on a
+// once-per-request capture, unlike the per-frame fast path.
+const HIRES_WIDTH = 1600;
+const HIRES_QUALITY = 0.9;
 
 export class Camera {
   private video: HTMLVideoElement;

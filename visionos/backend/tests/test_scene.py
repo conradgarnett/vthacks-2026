@@ -42,8 +42,13 @@ def make_detection(
     )
 
 
-def build_scene(detections: list[Detection], frames: int = 2) -> SceneModel:
-    """Run detections through the tracker enough times to confirm them."""
+def build_scene(detections: list[Detection], frames: int = 4) -> SceneModel:
+    """Run detections through the tracker enough times to confirm them.
+
+    Four frames by default so objects clear the hazard engine's persistence
+    bar as well as the tracker's -- alerts require more evidence than mere
+    presence does.
+    """
     tracker, scene = Tracker(), SceneModel()
     for _ in range(frames):
         tracker.update(detections)

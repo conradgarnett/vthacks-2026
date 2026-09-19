@@ -45,6 +45,11 @@ let announcedDisconnect = false;
 let starting = false;
 let started = false;
 
+// While true the fast frame loop is suspended so a 640px frame cannot
+// overwrite the hi-res one a read depends on.
+let readPending = false;
+const READ_TIMEOUT_MS = 6000;
+
 const setStatus = (text: string): void => {
   status.textContent = text;
 };
@@ -138,6 +143,8 @@ function onServerEvent(event: ServerEvent): void {
       break;
 
     case "trace":
+      // The read is done with the hi-res frame; let the fast loop resume.
+      if (event.label.startsWith("read")) readPending = false;
       console.info(
         `[latency] ${event.label} first_word=${event.stages.first_sentence ?? "-"}ms total=${event.total_ms}ms`
       );
@@ -233,9 +240,11 @@ async function begin(): Promise<void> {
     connection.connect();
 
     setInterval(async () => {
-      if (!camera.isRunning || !connection.isOpen) return;
+      if (!camera.isRunning || !connection.isOpen || readPending) return;
       const frame = await camera.captureFast();
-      if (frame) connection.sendFrame(frame);
+      // Re-checked after the await: a read may have started while capturing,
+      // and a 640px frame landing after the hi-res one is what made OCR miss.
+      if (frame && !readPending) connection.sendFrame(frame);
     }, FRAME_INTERVAL_MS);
   } catch (err) {
     // Anything unexpected must still surface. A silent throw here is
@@ -247,10 +256,24 @@ async function begin(): Promise<void> {
 }
 
 async function sendDetailedThen(intent: string): Promise<void> {
-  // OCR needs detail the 640px fast path throws away.
-  const frame = await camera.captureDetailed();
-  if (frame) connection.sendFrame(frame);
-  connection.sendIntent(intent);
+  // The frame loop is suspended for the whole operation. WebSocket delivery
+  // is ordered, so with no fast frame interleaved the hi-res frame is
+  // guaranteed to be the one the server reads from.
+  readPending = true;
+  try {
+    const frame = await camera.captureDetailed();
+    if (!frame) {
+      reportFailure("Couldn't capture the image to read.");
+      return;
+    }
+    connection.sendFrame(frame);
+    connection.sendIntent(intent);
+  } finally {
+    // Cleared on the trace event; this is the backstop if none arrives.
+    window.setTimeout(() => {
+      readPending = false;
+    }, READ_TIMEOUT_MS);
+  }
 }
 
 startButton.addEventListener("click", begin);
