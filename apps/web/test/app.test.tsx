@@ -171,6 +171,27 @@ describe('Echo: sounds (Deaf persona)', () => {
   });
 });
 
+describe('ScentGuard panel (Anosmia persona)', () => {
+  it('shows the level with text and a meter, the tier, and never says safe', async () => {
+    const user = userEvent.setup();
+    const { container } = await mountApp();
+    await user.click(await screen.findByLabelText(/Cannot smell/));
+    await user.click(screen.getByRole('button', { name: /arrive at riverside hall/i }));
+    await screen.findAllByText('Riverside Hall: Verified, 7 of 7 checks.');
+    await user.click(screen.getByRole('button', { name: /smoke rising \(script\)/i }));
+    const panel = screen.getByRole('region', { name: /scentguard: smoke risk/i });
+    await waitFor(() => expect(within(panel).getByText(/Level 1 of 4: Elevated/)).toBeTruthy());
+    expect(within(panel).getByRole('meter', { name: /smoke risk level 1 of 4/i })).toBeTruthy();
+    expect(within(panel).getByText('VERIFIED')).toBeTruthy();
+    expect(within(panel).getByText(/Rules that fired: S1/)).toBeTruthy();
+    const feed = screen.getByRole('list', { name: /percepts, newest first/i });
+    const card = within(feed).getAllByText('Smoke risk level 1. Verified, Riverside Hall.')[0]?.closest('li') as HTMLElement;
+    expect(card.textContent).toMatch(/Vibration:/);
+    expect(panel.textContent).not.toMatch(/\bsafe\b(?! guarantee)/);
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+});
+
 describe('profile controls', () => {
   it('switches all five personas, keeps allergens, and applies display preferences', async () => {
     const user = userEvent.setup();

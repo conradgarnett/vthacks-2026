@@ -6,6 +6,7 @@ import { WorldSim } from '@sense/world-sim';
 import { createProviders, type Providers } from '@sense/providers';
 import { VisionSense, type MapSource } from '@sense/vision';
 import { EchoSense } from '@sense/hearing';
+import { ScentGuard, type ScentAlarm, type ScentSource } from '@sense/scent';
 import { ProfileStore } from './profile-store';
 
 export interface ContextOptions {
@@ -61,6 +62,33 @@ export function activeVerifiedAlarm(broker: SenseBroker): { label: string; fqdn:
   return undefined;
 }
 
+/**
+ * Turn the broker's latest verified feeds into ScentGuard inputs. A source's tier here is its
+ * IDENTITY outcome; ScentGuard decides staleness itself from each reading's own timestamp.
+ */
+export function scentInputs(broker: SenseBroker): { sources: ScentSource[]; alarms: ScentAlarm[] } {
+  const outcome = new Map(broker.verifications().map((v) => [v.fqdn, v.result.outcome]));
+  const idTier = (fqdn: string): 'VERIFIED' | 'UNVERIFIED' => (outcome.get(fqdn) === 'VERIFIED' ? 'VERIFIED' : 'UNVERIFIED');
+  const sources: ScentSource[] = broker.latestFor('air-quality').map((d) => ({
+    fqdn: d.fqdn,
+    label: d.label,
+    tier: idTier(d.fqdn),
+    simulated: d.simulated,
+    agentVersion: d.source.agentVersion,
+    verifiedAt: d.source.verifiedAt,
+    evidence: d.source.evidence,
+    maxAgeSeconds: d.freshness.maxAgeSeconds,
+    readings: (d.payload as { readings: ScentSource['readings'] }).readings,
+  }));
+  const alarms: ScentAlarm[] = broker.latestFor('alarm-feed').map((d) => ({
+    fqdn: d.fqdn,
+    label: d.label,
+    tier: idTier(d.fqdn),
+    active: (d.payload as { alarms: { state: string }[] }).alarms.some((a) => a.state === 'active'),
+  }));
+  return { sources, alarms };
+}
+
 const toDisclosureDto = (d: DisclosureEntry): DisclosureDto => d;
 
 /**
@@ -81,6 +109,7 @@ export class SenseContext {
     readonly providers: Providers,
     readonly vision: VisionSense,
     readonly echo: EchoSense,
+    readonly scent: ScentGuard,
     /** Owner key for the signed portable profile. Stays on this device. */
     readonly ownerKeys: KeyPair,
   ) {
@@ -90,6 +119,17 @@ export class SenseContext {
     broker.on('disclosure', (entry) => this.emit({ type: 'disclosure', entry: toDisclosureDto(entry) }));
     broker.on('ack', (a) => this.emit({ type: 'ack', perceptId: a.perceptId, via: a.via }));
     this.profiles.onChange((profile) => this.emit({ type: 'profile', profile }));
+    broker.on('data', (d) => {
+      if (d.capability === 'air-quality' || d.capability === 'alarm-feed') this.updateScent();
+    });
+  }
+
+  /** Re-evaluate smoke risk from the latest verified feeds and publish a percept if it changed. */
+  updateScent(): void {
+    const { sources, alarms } = scentInputs(this.broker);
+    for (const p of this.scent.update({ sources, alarms })) this.broker.publishPercept(p);
+    const status = this.scent.status();
+    if (status) this.emit({ type: 'scent', scent: status });
   }
 
   static async create(opts: ContextOptions = {}): Promise<SenseContext> {
@@ -125,7 +165,12 @@ export class SenseContext {
       getProfile: () => profiles.current(),
       verifiedAlarm: () => activeVerifiedAlarm(broker),
     });
-    return new SenseContext(clock, world, broker, profiles, mode, providers, vision, echo, await generateKeyPair());
+    const scent = new ScentGuard({
+      clock,
+      nextId: () => broker.nextPerceptId(),
+      getPose: () => ({ position: world.user.position, headingDeg: world.user.headingDeg }),
+    });
+    return new SenseContext(clock, world, broker, profiles, mode, providers, vision, echo, scent, await generateKeyPair());
   }
 
   // ── Events and audit trail ────────────────────────────────────────────────────────────────
@@ -161,6 +206,7 @@ export class SenseContext {
       verifications: b.verifications().map(toVerificationDto),
       disclosure: b.disclosure.entries().map(toDisclosureDto),
       actions: [...this.actions],
+      scent: this.scent.status(),
       user: { place: this.world.user.place, position: this.world.user.position, headingDeg: this.world.user.headingDeg },
     };
   }
@@ -168,12 +214,18 @@ export class SenseContext {
   /** Real-time upkeep: run the world's timeline and watch for silent safety feeds. */
   startBackground(): () => void {
     const tick = setInterval(() => void this.world.tick(), 1000);
-    const watchdog = setInterval(() => this.broker.checkFreshness(), 5000);
+    const watchdog = setInterval(() => {
+      this.broker.checkFreshness();
+      this.updateScent();
+    }, 5000);
+    const poll = setInterval(() => void this.broker.pollUnsubscribed(), 60_000);
+    poll.unref();
     tick.unref();
     watchdog.unref();
     return () => {
       clearInterval(tick);
       clearInterval(watchdog);
+      clearInterval(poll);
     };
   }
 }

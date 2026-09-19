@@ -98,4 +98,5 @@ export type ServerEvent =
   | { type: 'disclosure'; entry: DisclosureDto }
   | { type: 'ack'; perceptId: string; via: string }
   | { type: 'action'; action: ActionDto }
-  | { type: 'profile'; profile: SensoryProfile };
+  | { type: 'profile'; profile: SensoryProfile }
+  | { type: 'scent'; scent: ScentStatusDto };

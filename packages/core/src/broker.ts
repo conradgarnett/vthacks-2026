@@ -809,7 +809,11 @@ export class SenseBroker {
       const s = this.sessions.get(r.fqdn);
       if (!s || view.result.outcome === 'REJECTED') continue;
       for (const cap of ARRIVAL_FETCH) if (r.capabilities.includes(cap)) await this.query(r.fqdn, cap);
-      for (const cap of ARRIVAL_SUBSCRIBE) if (r.capabilities.includes(cap)) await this.subscribe(r.fqdn, cap);
+      for (const cap of ARRIVAL_SUBSCRIBE) {
+        if (!r.capabilities.includes(cap)) continue;
+        // Regional feeds (e.g. city air) are not subscribable: fall back to a one-off query, refreshed by pollUnsubscribed().
+        if ((await this.subscribe(r.fqdn, cap)) === null) await this.query(r.fqdn, cap);
+      }
       this.announceConnection(s);
     }
     return views;
@@ -839,6 +843,17 @@ export class SenseBroker {
       },
       simulated: source.simulated,
     });
+  }
+
+  /** Re-query feeds that cannot push (no subscription), so their data does not silently age. Call periodically. */
+  async pollUnsubscribed(): Promise<void> {
+    for (const s of this.sessions.values()) {
+      if (s.verification.outcome === 'REJECTED') continue;
+      const subscribed = new Set(s.subscriptions.values());
+      for (const cap of ARRIVAL_SUBSCRIBE) {
+        if (s.record.capabilities.includes(cap) && !subscribed.has(cap)) await this.query(s.fqdn, cap);
+      }
+    }
   }
 
   // ── Watchdog ──────────────────────────────────────────────────────────────────────────────

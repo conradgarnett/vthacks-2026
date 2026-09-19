@@ -105,6 +105,9 @@ export function createStore(api: SenseApi, presenter: Presenter = new Presenter(
       case 'profile':
         withSnapshot((s) => ({ ...s, profile: e.profile }));
         break;
+      case 'scent':
+        withSnapshot((s) => ({ ...s, scent: e.scent }));
+        break;
     }
   }
 

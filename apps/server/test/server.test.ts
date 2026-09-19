@@ -242,6 +242,76 @@ describe('hearing routes', () => {
   });
 });
 
+describe('scene 5: ScentGuard through the server (Anosmia persona)', () => {
+  it('escalates level 1 -> 3 from the verified building feed plus city data, citing evidence and freshness', async () => {
+    const { ctx, post, state, settle } = await start();
+    await post('/api/profile/persona', { personaId: 'anosmia' });
+    await post('/api/arrive', { area: 'riverside' });
+    await settle();
+    const base = await state();
+    expect(base.scent).toMatchObject({ level: 0, tier: 'VERIFIED' });
+    expect(base.scent?.summary).toMatch(/not a safety guarantee/);
+    // city data was fetched even though that feed cannot push
+    expect(ctx.broker.latest('city-air.sim', 'air-quality')?.tier).toBe('VERIFIED');
+
+    for (const [smoke, level] of [
+      [0.8, 1],
+      [2.6, 2],
+      [6.2, 3],
+    ] as const) {
+      await post('/api/world/event', { name: 'smoke', arg: smoke });
+      await settle();
+      const s = await state();
+      expect(s.scent?.level).toBe(level);
+      const p = s.percepts.filter((x) => x.sense === 'smell').at(-1);
+      expect(p?.short).toBe(`Smoke risk level ${level}. Verified, Riverside Hall.`);
+      expect(p?.long).toMatch(/0s old, fires rule S\d/);
+      expect(p?.provenance.evidence.join(' ')).toMatch(/rule S\d: [\d.]+ %obs\/m >= /);
+    }
+    const s = await state();
+    const smell = s.percepts.filter((x) => x.sense === 'smell');
+    expect(smell.map((p) => p.urgency)).toEqual([1, 2, 3, 3]);
+    expect(s.scent?.rules).toEqual(['S3', 'S2', 'C2']); // east stairwell S3, lobby S2, carbon monoxide C2
+    expect(JSON.stringify(smell)).not.toMatch(/\bsafe\b|all clear/i);
+  });
+
+  it('when the sensors freeze it downgrades to UNVERIFIED and says the level is last known', async () => {
+    const { ctx, post, state, settle } = await start();
+    await post('/api/arrive', { area: 'riverside' });
+    await settle();
+    await post('/api/world/event', { name: 'smoke', arg: 6.2 });
+    await settle();
+    await post('/api/world/event', { name: 'freeze-sensors' });
+    (ctx.clock as ManualClock).advance(120_000);
+    ctx.broker.checkFreshness();
+    ctx.updateScent();
+    const s = await state();
+    const stale = s.percepts.filter((x) => x.sense === 'smell').at(-1);
+    expect(stale?.short).toBe('Smoke risk level 3, last known. Unverified, Riverside Hall.');
+    expect(stale?.provenance.tier).toBe('UNVERIFIED');
+    expect(stale?.long).toMatch(/does not assume conditions have improved/);
+    expect(s.scent).toMatchObject({ level: 3, tier: 'UNVERIFIED' });
+    // the broker independently reports the silent/stale feed
+    expect(s.security.some((e) => e.kind === 'STALE_DOWNGRADED' || e.kind === 'SOURCE_OFFLINE')).toBe(true);
+  });
+
+  it('a verified fire alarm alone raises smoke risk to level 3, and level 4 with high smoke', async () => {
+    const { post, state, settle } = await start();
+    await post('/api/arrive', { area: 'riverside' });
+    await settle();
+    await post('/api/world/event', { name: 'fire-alarm' });
+    await settle();
+    expect((await state()).scent?.level).toBe(3);
+    await post('/api/world/event', { name: 'smoke', arg: 6.2 });
+    await settle();
+    const s = await state();
+    expect(s.scent).toMatchObject({ level: 4, tier: 'VERIFIED' });
+    const p = s.percepts.filter((x) => x.sense === 'smell').at(-1);
+    expect(p?.urgency).toBe(4);
+    expect(p?.long).toMatch(/Combination rule X2/);
+  });
+});
+
 describe('static web app', () => {
   it('serves the built app, falls back to index.html, and never escapes the directory', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'sense-web-'));
