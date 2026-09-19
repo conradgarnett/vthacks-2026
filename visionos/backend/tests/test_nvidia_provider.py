@@ -45,7 +45,10 @@ def provider(fake: FakeNvidia, scene=None) -> NvidiaVisionProvider:
     settings = Settings(vision_provider="nvidia", nvidia_api_key="test-key", _env_file=None)
     scene = scene or build_scene([make_detection(label="chair", distance=2.0, azimuth=0.0)])
     local = LocalSceneProvider(lambda: scene)
-    return NvidiaVisionProvider(settings, local, client=httpx.AsyncClient(transport=httpx.MockTransport(fake.handler)))
+    return NvidiaVisionProvider(
+        settings, local, client=httpx.AsyncClient(transport=httpx.MockTransport(fake.handler)),
+        scene_getter=lambda: scene,
+    )
 
 
 async def collect(p: NvidiaVisionProvider, prompt: str, intent: str, frame: bytes = b"jpeg", context=None) -> str:
@@ -64,7 +67,9 @@ async def test_a_question_is_answered_online_with_the_picture_and_the_scene():
     assert payload["model"] == "meta/llama-3.2-11b-vision-instruct" and payload["stream"] is True
     user = payload["messages"][-1]["content"]
     assert isinstance(user, list) and user[0]["type"] == "text"
-    assert "Is there a chair?" in user[0]["text"] and "SCENE MODEL: chair" in user[0]["text"]
+    assert "Question: Is there a chair?" in user[0]["text"] and "SCENE MODEL: chair" in user[0]["text"]
+    assert "at least 80% sure of are facts" in user[0]["text"]
+    assert "found none in view" not in user[0]["text"], "the chair is in the scene"
     assert user[1]["image_url"]["url"] == "data:image/jpeg;base64," + base64.b64encode(b"jpegbytes").decode()
     assert payload["messages"][0]["role"] == "system"
 
@@ -168,3 +173,19 @@ def test_build_provider_falls_back_to_the_scene_model_without_a_key():
     assert type(build_provider(settings, lambda: scene)).__name__ == "LocalSceneProvider"
     with_key = Settings(vision_provider="nvidia", nvidia_api_key="k", _env_file=None)
     assert type(build_provider(with_key, lambda: scene)).__name__ == "NvidiaVisionProvider"
+
+
+@pytest.mark.asyncio
+async def test_the_model_is_told_when_the_detector_found_none_of_what_was_asked():
+    fake = FakeNvidia()
+    await collect(provider(fake), "Is there a dog in the room?", "ask")
+    text = json.loads(fake.requests[0].content)["messages"][-1]["content"][0]["text"]
+    assert "The detector knows what a dog looks like and found none in view." in text
+
+
+def test_the_scene_context_carries_the_detector_confidence():
+    from backend.ai.prompts import scene_context
+
+    scene = build_scene([make_detection(label="chair", distance=2.0, azimuth=0.0, confidence=0.92)])
+    text = scene_context(scene.snapshot())
+    assert "chair at" in text and "92% sure" in text and "under 80% as a possibility" in text

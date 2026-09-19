@@ -54,6 +54,16 @@ NO_DOSES = (
     "Never state a medication dose, strength, or how many to take, even if "
     "asked; say to press Read instead."
 )
+# How to weigh the picture against the detector's list, sent with every
+# question. The list carries the detector's confidence per object; the
+# user's rule is that nothing under 80% is stated as a fact.
+GROUNDING = (
+    "Answer from the picture and the detector's list together. Things the "
+    "detector is at least 80% sure of are facts. Below 80%, say 'may be'. If "
+    "the picture shows something the detector did not list, say 'I think I "
+    "see'. If neither the list nor the picture shows what was asked about, say "
+    "you can't see it. Never invent an object."
+)
 
 
 def shrink_jpeg(frame_jpeg: bytes, limit_b64: int = MAX_IMAGE_B64) -> bytes:
@@ -90,11 +100,33 @@ class NvidiaVisionProvider(VisionProvider):
         settings: Settings,
         local: VisionProvider,
         client: httpx.AsyncClient | None = None,
+        scene_getter=None,
     ) -> None:
         self._settings = settings
         self._local = local
         self._client = client or httpx.AsyncClient(timeout=TIMEOUT_S)
+        # The tracked scene, for what the detector looked for and did not
+        # find: the strongest evidence against inventing it.
+        self._scene = scene_getter
         self.note = ""
+
+    def absent_line(self, prompt: str) -> str | None:
+        """'The detector knows what a dog looks like and found none in view',
+        when the question names something the vocabulary covers and the
+        scene model does not hold. A model told this rarely invents one."""
+        from backend.ai.local_provider import asked_about
+        from backend.scene.queries import find_object
+        from backend.speech.phrasing import with_article
+
+        if self._scene is None:
+            return None
+        label = asked_about(prompt)
+        if not label:
+            return None
+        scene = self._scene()
+        if scene is None or find_object(scene, label):
+            return None
+        return f"The detector knows what {with_article(label)} looks like and found none in view."
 
     @property
     def model(self) -> str:
@@ -135,7 +167,12 @@ class NvidiaVisionProvider(VisionProvider):
 
     def build_payload(self, frame_jpeg: bytes, prompt: str, scene_context: str | None) -> dict:
         image_b64 = base64.standard_b64encode(shrink_jpeg(frame_jpeg)).decode()
-        text = (scene_context + "\n\n" if scene_context else "") + prompt
+        absent = self.absent_line(prompt)
+        text = (
+            (scene_context + "\n" if scene_context else "")
+            + (absent + "\n" if absent else "")
+            + GROUNDING + "\n\nQuestion: " + prompt
+        )
         if self._settings.nvidia_image_style == "parts":
             user_content: str | list = [
                 {"type": "text", "text": text},

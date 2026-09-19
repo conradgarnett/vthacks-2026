@@ -237,7 +237,7 @@ def build_provider(
             "Vision provider: NVIDIA %s for questions; scans and reads on-device",
             settings.nvidia_model,
         )
-        return NvidiaVisionProvider(settings, local)
+        return NvidiaVisionProvider(settings, local, scene_getter=scene_getter)
 
     if not credentials_available():
         from backend.ai.local_provider import LocalSceneProvider

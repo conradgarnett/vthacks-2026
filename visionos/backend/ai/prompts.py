@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from backend.perception.vocabulary import is_small
 
-PROMPT_VERSION = "v4"
+PROMPT_VERSION = "v5"
 
 SYSTEM_PROMPT = """You are VisionOS, the visual sense of a blind or low-vision \
 user. You perceive their surroundings through a camera and a tracked spatial \
@@ -60,25 +60,35 @@ def scene_context(snapshot: dict) -> str:
     if not objects and not tentative:
         return "SCENE MODEL: no tracked objects yet."
 
+    def sure(o: dict) -> str:
+        # How sure the detector is, so the model can weigh it: the user's
+        # rule is that nothing under 80% is stated as a fact.
+        return f", {o['confidence']:.0%} sure" if o.get("confidence") is not None else ""
+
     lines = [
-        f"- {o['label']} at {o['clock']}, about {o['distance_m']:.1f} m"
+        f"- {o['label']} at {o['clock']}, about {o['distance_m']:.1f} m{sure(o)}"
         f"{'' if o.get('visible', True) else ' (remembered, no longer in view)'}"
         f"{' (small; mention only if asked)' if is_small(o['label']) else ''}"
         for o in objects
         if o.get("distance_m") is not None
     ] + [
-        f"- {o['label']} at {o['clock']}, distance unknown"
+        f"- {o['label']} at {o['clock']}, distance unknown{sure(o)}"
         f"{' (small; mention only if asked)' if is_small(o['label']) else ''}"
         for o in objects
         if o.get("distance_m") is None
     ]
-    text = "SCENE MODEL (tracked geometry, trust over pixels):\n" + "\n".join(lines)
+    text = (
+        "SCENE MODEL (what the object detector tracked, with how sure it is; "
+        "trust it over pixels, and treat anything under 80% as a possibility):\n"
+        + "\n".join(lines)
+    )
     if room:
         text += f"\nLikely a {room}, inferred from the objects above."
     if tentative:
         text += "\nUNCONFIRMED, seen once and possibly wrong: " + "; ".join(
             f"{t['label']} at {t['clock']}"
             + (f", about {t['distance_m']:.0f} m" if t.get("distance_m") is not None else "")
+            + (f" ({t['confidence']:.0%})" if t.get("confidence") is not None else "")
             for t in tentative
         )
     return text
