@@ -19,13 +19,12 @@ when it is five. Apparent size gives metric distance directly:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import math
 from dataclasses import dataclass
-from functools import partial
 
 from backend.config import Settings
+from backend.perception.runtime import run_inference
 from backend.perception.geometry import (
     BoundingBox,
     clock_position,
@@ -191,5 +190,6 @@ class Detector:
         return detections
 
     async def detect(self, frame_bgr) -> list[Detection]:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, partial(self.detect_sync, frame_bgr))
+        # Shared single-thread pool: MPS is not thread-safe and concurrent
+        # access crashes the process. See perception/runtime.py.
+        return await run_inference(self.detect_sync, frame_bgr)

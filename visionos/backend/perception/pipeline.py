@@ -45,9 +45,11 @@ class PerceptionPipeline:
 
         self.dropoffs: list[DropoffHint] = []
         self.last_trace: dict = {}
+        self.dropped_frames = 0
         self._frame_index = 0
         self._depth_task: asyncio.Task | None = None
         self._enabled = True
+        self._busy = False
 
     def warmup(self) -> None:
         """Load weights up front. Never pay this cost mid-demo."""
@@ -62,31 +64,43 @@ class PerceptionPipeline:
         return self._enabled
 
     async def process(self, frame_jpeg: bytes) -> None:
-        """Decode, detect, track, integrate. Safe to call at frame rate."""
-        if not self._enabled:
+        """Decode, detect, track, integrate. Safe to call at frame rate.
+
+        Drops frames rather than queueing them. Inference is serialized on one
+        thread, so a phone sending faster than the GPU drains would otherwise
+        build an unbounded backlog and every answer would describe a room the
+        user has already walked out of. A stale frame is worth less than none.
+        """
+        if not self._enabled or self._busy:
+            self.dropped_frames += 1
             return
 
-        trace = LatencyTrace(label="perception")
-        loop = asyncio.get_running_loop()
+        self._busy = True
+        try:
+            trace = LatencyTrace(label="perception")
+            loop = asyncio.get_running_loop()
 
-        with trace.stage("decode"):
-            frame = await loop.run_in_executor(None, _decode_jpeg, frame_jpeg)
-        if frame is None:
-            return
+            # Decode is pure CPU, so it stays off the inference thread.
+            with trace.stage("decode"):
+                frame = await loop.run_in_executor(None, _decode_jpeg, frame_jpeg)
+            if frame is None:
+                return
 
-        with trace.stage("detect"):
-            detections = await self.detector.detect(frame)
+            with trace.stage("detect"):
+                detections = await self.detector.detect(frame)
 
-        with trace.stage("track"):
-            visible = self.tracker.update(detections)
-            self.scene.update(visible, self.tracker.remembered())
+            with trace.stage("track"):
+                visible = self.tracker.update(detections)
+                self.scene.update(visible, self.tracker.remembered())
 
-        self._frame_index += 1
-        if self._frame_index % DEPTH_EVERY_N_FRAMES == 0:
-            self._maybe_run_depth(frame)
+            self._frame_index += 1
+            if self._frame_index % DEPTH_EVERY_N_FRAMES == 0:
+                self._maybe_run_depth(frame)
 
-        trace.mark("total")
-        self.last_trace = trace.to_dict()
+            trace.mark("total")
+            self.last_trace = trace.to_dict()
+        finally:
+            self._busy = False
 
     def _maybe_run_depth(self, frame: np.ndarray) -> None:
         """Fire-and-forget: depth must never stall the detection loop."""

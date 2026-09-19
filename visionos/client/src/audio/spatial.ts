@@ -37,24 +37,53 @@ export class SpatialAudio {
   private beaconTimer: number | null = null;
   private beaconTarget: { azimuth: number; distance: number } | null = null;
 
-  /** Must be called from a user gesture; browsers start audio suspended. */
+  /**
+   * Must be called from a user gesture; browsers start audio suspended.
+   *
+   * Never throws. This runs during startup, and an exception here used to
+   * abort the whole launch sequence silently, leaving the start screen up
+   * with no error. Audio is an enhancement -- the app must run without it.
+   */
   init(): void {
-    if (this.ctx) {
-      void this.ctx.resume();
-      return;
-    }
-    const Ctor = window.AudioContext ?? (window as any).webkitAudioContext;
-    if (!Ctor) return;
+    try {
+      if (this.ctx) {
+        void this.ctx.resume();
+        return;
+      }
+      const Ctor = window.AudioContext ?? (window as any).webkitAudioContext;
+      if (!Ctor) return;
 
-    this.ctx = new Ctor();
-    if (this.ctx.listener.forwardZ !== undefined) {
-      // Listener faces -z, matching the coordinate mapping in positionOf().
-      this.ctx.listener.forwardX.value = 0;
-      this.ctx.listener.forwardY.value = 0;
-      this.ctx.listener.forwardZ.value = -1;
-      this.ctx.listener.upY.value = 1;
+      this.ctx = new Ctor();
+      this.orientListener();
+      void this.ctx.resume();
+    } catch (err) {
+      console.warn("Spatial audio unavailable:", err);
+      this.ctx = null;
     }
-    void this.ctx.resume();
+  }
+
+  /** Listener faces -z, matching the mapping in positionOf(). */
+  private orientListener(): void {
+    const listener = this.ctx?.listener as any;
+    if (!listener) return;
+    try {
+      // Modern browsers expose AudioParams; Safari still has the deprecated
+      // setOrientation(). Assigning .value on a plain number throws in the
+      // strict mode that ES modules always run under.
+      if (listener.forwardX && typeof listener.forwardX === "object") {
+        listener.forwardX.value = 0;
+        listener.forwardY.value = 0;
+        listener.forwardZ.value = -1;
+        listener.upX.value = 0;
+        listener.upY.value = 1;
+        listener.upZ.value = 0;
+      } else if (typeof listener.setOrientation === "function") {
+        listener.setOrientation(0, 0, -1, 0, 1, 0);
+      }
+    } catch (err) {
+      // Default orientation already faces -z, so this is cosmetic.
+      console.warn("Could not orient audio listener:", err);
+    }
   }
 
   get isReady(): boolean {

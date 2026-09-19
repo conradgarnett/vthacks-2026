@@ -38,9 +38,34 @@ const tts = new TtsPlayer();
 const spatial = new SpatialAudio();
 const camera = new Camera(video);
 
+// Spoken announcements are once-per-session. Reconnects re-fire the events
+// that trigger them, and a reconnect loop turns that into an endless monologue.
+let announcedMode = false;
+let announcedDisconnect = false;
+let starting = false;
+let started = false;
+
 const setStatus = (text: string): void => {
   status.textContent = text;
 };
+
+/** Surface a failure the user cannot see. Silence reads as a freeze. */
+function reportFailure(message: string): void {
+  setStatus(message);
+  show(message);
+  tts.say(message, SpeechPriority.Answer);
+}
+
+// Without this, any uncaught error during startup leaves the start screen up
+// with no explanation -- which is exactly how it presented.
+window.addEventListener("error", (event) => {
+  console.error(event.error ?? event.message);
+  setStatus(`Error: ${event.message}`);
+});
+window.addEventListener("unhandledrejection", (event) => {
+  console.error(event.reason);
+  setStatus(`Error: ${String(event.reason)}`);
+});
 
 function show(text: string, kind: "speech" | "hazard" = "speech"): void {
   const line = document.createElement("p");
@@ -75,7 +100,13 @@ function onServerEvent(event: ServerEvent): void {
       };
       const mode = modes[event.provider_active];
       setStatus(mode?.label ?? "Connected");
-      if (mode?.spoken) tts.say(mode.spoken, SpeechPriority.Answer);
+
+      // Spoken once per session, not per `ready`. The server sends `ready` on
+      // every connect, so a reconnect loop repeated this announcement forever.
+      if (mode?.spoken && !announcedMode) {
+        announcedMode = true;
+        tts.say(mode.spoken, SpeechPriority.Answer);
+      }
       break;
     }
 
@@ -118,11 +149,16 @@ const connection = new Connection(socketUrl(), {
   onEvent: onServerEvent,
   onConnectionChange: (connected) => {
     if (connected) {
+      announcedDisconnect = false;
       setStatus("Connected");
       return;
     }
     setStatus("Reconnecting…");
-    tts.say("I lost connection. Reconnecting.", SpeechPriority.Answer);
+    // Said once per outage, not once per retry.
+    if (!announcedDisconnect) {
+      announcedDisconnect = true;
+      tts.say("I lost connection. Reconnecting.", SpeechPriority.Answer);
+    }
   },
 });
 
@@ -170,32 +206,44 @@ function routeSpokenCommand(text: string): void {
 }
 
 async function begin(): Promise<void> {
-  // Both must happen inside the tap handler: iOS starts audio suspended and
-  // refuses speech synthesis until a gesture has occurred.
-  tts.prime();
-  spatial.init();
+  // Repeated taps on an apparently-stuck screen would otherwise re-run the
+  // whole sequence and stack up duplicate disclaimers and frame loops.
+  if (starting || started) return;
+  starting = true;
 
   try {
-    await camera.start();
+    // Both must happen inside the tap handler: iOS starts audio suspended and
+    // refuses speech synthesis until a gesture has occurred. Neither throws.
+    tts.prime();
+    spatial.init();
+
+    try {
+      await camera.start();
+    } catch (err) {
+      reportFailure((err as Error).message);
+      return;
+    }
+
+    started = true;
+    startButton.hidden = true;
+    tapLayer.hidden = false;
+    controls.hidden = false;
+    setStatus("Connecting…");
+    tts.say(DISCLAIMER, SpeechPriority.Answer);
+    connection.connect();
+
+    setInterval(async () => {
+      if (!camera.isRunning || !connection.isOpen) return;
+      const frame = await camera.captureFast();
+      if (frame) connection.sendFrame(frame);
+    }, FRAME_INTERVAL_MS);
   } catch (err) {
-    const message = (err as Error).message;
-    setStatus(message);
-    tts.say(message, SpeechPriority.Hazard);
-    return;
+    // Anything unexpected must still surface. A silent throw here is
+    // indistinguishable from a frozen app to someone who cannot see it.
+    reportFailure(`Couldn't start: ${(err as Error).message}`);
+  } finally {
+    starting = false;
   }
-
-  startButton.hidden = true;
-  tapLayer.hidden = false;
-  controls.hidden = false;
-  setStatus("Connecting…");
-  tts.say(DISCLAIMER, SpeechPriority.Answer);
-  connection.connect();
-
-  setInterval(async () => {
-    if (!camera.isRunning || !connection.isOpen) return;
-    const frame = await camera.captureFast();
-    if (frame) connection.sendFrame(frame);
-  }, FRAME_INTERVAL_MS);
 }
 
 async function sendDetailedThen(intent: string): Promise<void> {

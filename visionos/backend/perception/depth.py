@@ -12,15 +12,14 @@ Output is normalized inverse depth: larger means nearer.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass
-from functools import partial
 
 import numpy as np
 
 from backend.config import Settings
 from backend.perception.geometry import BoundingBox, pixel_to_azimuth
+from backend.perception.runtime import run_inference
 
 log = logging.getLogger(__name__)
 
@@ -79,8 +78,9 @@ class DepthEstimator:
         return (depth - low) / (high - low)
 
     async def estimate(self, image) -> np.ndarray:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, partial(self.estimate_sync, image))
+        # Same single-thread pool as the detector: two threads encoding to one
+        # Metal command buffer is a hard crash. See perception/runtime.py.
+        return await run_inference(self.estimate_sync, image)
 
 
 def relative_depth_in_box(depth: np.ndarray, box: BoundingBox) -> float:
