@@ -19,12 +19,20 @@ const DISCLAIMER =
 // and starves the read that the user is actually waiting on, so the rate
 // drops once the backend says where it runs.
 const FRAME_INTERVAL_MS = 700;
-// Detection is ~30 ms on this CPU; the old 1500 ms was set when the depth
-// pass still ran behind every frame, and it left the boxes a second and a
-// half behind the picture. Four frames a second keeps the boxes on the
-// picture and costs about a fifth of one core.
+// On a CPU the interval is a floor, not a rate: the next live frame goes
+// only once the server has answered the last one (a "detections" event),
+// so the server is never saturated by live frames, nothing is dropped, and
+// a scan or a read that arrives finds the detector free. Measured here,
+// detection takes about 270 ms a frame, so this lands at three or four
+// frames a second on its own; sending every 150 ms just had every second
+// frame dropped and the detector always busy.
 const FRAME_INTERVAL_CPU_MS = 150;
+// A frame that never gets an answer (dropped behind a scan, say) stops
+// blocking the loop after this long.
+const FRAME_IN_FLIGHT_MAX_MS = 1200;
 let frameIntervalMs = FRAME_INTERVAL_MS;
+let frameInFlight = false;
+let frameSentAt = 0;
 // A detailed frame for the background reader every few seconds, so Read
 // answers from what is already known. Rarer on a CPU, where each costs
 // most of a second of the reader's time.
@@ -227,15 +235,26 @@ function onServerEvent(event: ServerEvent): void {
       break;
     }
 
-    case "detections":
-      // Live boxes, unless a scan's are still on show.
-      lastLiveBoxesAt = performance.now();
-      if (lastLiveBoxesAt >= scanBoxesUntil) drawBoxes(event.items);
+    case "detections": {
+      // Live boxes, unless a scan's are still on show. The gap between
+      // answers is how fast this server actually is, and a box is allowed
+      // to live a little longer than that, so boxes do not blink between
+      // frames on a slow machine and still vanish quickly on a fast one.
+      const now = performance.now();
+      if (lastLiveBoxesAt > 0) {
+        boxTtlMs = Math.min(BOX_TTL_MAX_MS, Math.max(BOX_TTL_MIN_MS, (now - lastLiveBoxesAt) * 2.5));
+      }
+      lastLiveBoxesAt = now;
+      frameInFlight = false;
+      if (now >= scanBoxesUntil) drawBoxes(event.items);
       break;
+    }
 
     case "trace":
-      // The read is done with the hi-res frame; let the fast loop resume.
+      // The read or scan is done with its hi-res frames; let the fast loop
+      // resume.
       if (event.label.startsWith("read")) readPending = false;
+      if (event.label.startsWith("scan")) scanPending = false;
       console.info(
         `[latency] ${event.label} first_word=${event.stages.first_sentence ?? "-"}ms total=${event.total_ms}ms`
       );
@@ -341,19 +360,25 @@ async function begin(): Promise<void> {
     let lastFrameAt = 0;
     let lastPeekAt = 0;
     setInterval(async () => {
-      if (!camera.isRunning || !connection.isOpen || readPending) return;
+      if (!camera.isRunning || !connection.isOpen || readPending || scanPending) return;
       const now = performance.now();
       if (now - lastPeekAt >= peekIntervalMs) {
         lastPeekAt = now;
         const peek = await camera.capturePeek();
-        if (peek && !readPending) connection.sendPeekFrame(peek);
+        if (peek && !readPending && !scanPending) connection.sendPeekFrame(peek);
         return;
       }
       if (now - lastFrameAt < frameIntervalMs) return;
+      if (frameInFlight && now - frameSentAt < FRAME_IN_FLIGHT_MAX_MS) return;
       lastFrameAt = now;
       const frame = await camera.captureFast();
-      // Re-checked after the await: a read may have started while capturing.
-      if (frame && !readPending) connection.sendFrame(frame);
+      // Re-checked after the await: a read or scan may have started while
+      // capturing.
+      if (frame && !readPending && !scanPending) {
+        frameInFlight = true;
+        frameSentAt = performance.now();
+        connection.sendFrame(frame);
+      }
     }, 100);
   } catch (err) {
     // Anything unexpected must still surface. A silent throw here is
@@ -366,6 +391,11 @@ async function begin(): Promise<void> {
 
 const SCAN_FRAMES = 2;
 const SCAN_GAP_MS = 150;
+// Live frames pause while a scan is in flight, as they do for a read: on a
+// CPU both would otherwise queue behind the detector's next live frame.
+// Cleared by the scan's trace event; this is the backstop.
+const SCAN_TIMEOUT_MS = 8000;
+let scanPending = false;
 // ?verbose=1 also speaks the full inventory with confidences after a scan.
 const verbose = new URLSearchParams(location.search).get("verbose") === "1";
 
@@ -396,6 +426,10 @@ async function scanScene(): Promise<void> {
     connection.sendIntent("scan");
     return;
   }
+  scanPending = true;
+  window.setTimeout(() => {
+    scanPending = false;
+  }, SCAN_TIMEOUT_MS);
   connection.sendScanFrames(captured);
 }
 
@@ -407,12 +441,16 @@ const SCAN_BOXES_MS = 1500;
 // A box lives only as long as the frame it came from is current. If no
 // fresh frame has been looked at within this long, whatever is drawn is
 // stale and goes, so a box never outlives the thing it was drawn around.
-const BOX_TTL_MS = 350;
+// The allowance follows the server's own pace (see the detections event):
+// 350 ms on a fast machine, up to two seconds on a slow one.
+const BOX_TTL_MIN_MS = 350;
+const BOX_TTL_MAX_MS = 2000;
+let boxTtlMs = BOX_TTL_MIN_MS;
 let lastLiveBoxesAt = 0;
 window.setInterval(() => {
   const now = performance.now();
   if (drawn.length === 0 || now < scanBoxesUntil) return;
-  if (now - lastLiveBoxesAt > BOX_TTL_MS) drawBoxes([]);
+  if (now - lastLiveBoxesAt > boxTtlMs) drawBoxes([]);
 }, 100);
 
 /**
