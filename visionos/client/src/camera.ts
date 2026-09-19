@@ -28,6 +28,19 @@ const HIRES_QUALITY = 0.85;
 // A background peek: enough pixels for a label, a fraction of a read's bytes.
 const PEEK_WIDTH = 1280;
 const PEEK_QUALITY = 0.75;
+
+/**
+ * The part of the frame a read looks at: the middle two thirds, drawn on
+ * screen as the read area so a sighted helper sees exactly what the reader
+ * sees. Scans and questions use the whole field of view; reading is aimed,
+ * and a label held up is in the middle of it, while text at the edges is
+ * someone else's sign. Fractions of the frame, origin top left.
+ */
+export const READ_WINDOW = { x: 1 / 6, y: 1 / 6, width: 2 / 3, height: 2 / 3 };
+type Window = typeof READ_WINDOW;
+
+/** Where a window sits on the page, in CSS pixels. */
+export type ScreenRect = { left: number; top: number; width: number; height: number };
 // Time for a single-shot autofocus to settle before the burst is captured.
 const REFOCUS_MS = 600;
 
@@ -240,27 +253,55 @@ export class Camera {
     return this.capture(FAST_WIDTH, FAST_QUALITY);
   }
 
-  /** Middling resolution for the background reader. */
+  /** Middling resolution of the read area, for the background reader. */
   capturePeek(): Promise<Blob | null> {
-    return this.capture(PEEK_WIDTH, PEEK_QUALITY);
+    return this.capture(PEEK_WIDTH, PEEK_QUALITY, READ_WINDOW);
   }
 
-  /** Full resolution, for reading text. Costs bytes and time; use on request. */
+  /** Full resolution of the read area, for reading text on request. */
   captureDetailed(): Promise<Blob | null> {
-    return this.capture(HIRES_WIDTH, HIRES_QUALITY);
+    return this.capture(HIRES_WIDTH, HIRES_QUALITY, READ_WINDOW);
   }
 
-  private capture(targetWidth: number, quality: number): Promise<Blob | null> {
+  /**
+   * Where the read area sits on the page, so it can be drawn over the
+   * preview. Accounts for the letterboxing of a preview that shows the
+   * whole frame. Null until the camera has a size.
+   */
+  readWindowOnScreen(): ScreenRect | null {
+    const { videoWidth, videoHeight } = this.video;
+    if (!videoWidth || !videoHeight) return null;
+    const rect = this.video.getBoundingClientRect();
+    const scale = Math.min(rect.width / videoWidth, rect.height / videoHeight);
+    const shownWidth = videoWidth * scale;
+    const shownHeight = videoHeight * scale;
+    const left = rect.left + (rect.width - shownWidth) / 2;
+    const top = rect.top + (rect.height - shownHeight) / 2;
+    return {
+      left: left + shownWidth * READ_WINDOW.x,
+      top: top + shownHeight * READ_WINDOW.y,
+      width: shownWidth * READ_WINDOW.width,
+      height: shownHeight * READ_WINDOW.height,
+    };
+  }
+
+  private capture(targetWidth: number, quality: number, window?: Window): Promise<Blob | null> {
     const { videoWidth, videoHeight } = this.video;
     if (!videoWidth || !videoHeight) return Promise.resolve(null);
 
-    const scale = Math.min(1, targetWidth / videoWidth);
-    this.canvas.width = Math.round(videoWidth * scale);
-    this.canvas.height = Math.round(videoHeight * scale);
+    // The source rectangle: the whole frame, or the read area of it.
+    const sx = window ? Math.round(videoWidth * window.x) : 0;
+    const sy = window ? Math.round(videoHeight * window.y) : 0;
+    const sw = window ? Math.round(videoWidth * window.width) : videoWidth;
+    const sh = window ? Math.round(videoHeight * window.height) : videoHeight;
+
+    const scale = Math.min(1, targetWidth / sw);
+    this.canvas.width = Math.round(sw * scale);
+    this.canvas.height = Math.round(sh * scale);
 
     const ctx = this.canvas.getContext("2d");
     if (!ctx) return Promise.resolve(null);
-    ctx.drawImage(this.video, 0, 0, this.canvas.width, this.canvas.height);
+    ctx.drawImage(this.video, sx, sy, sw, sh, 0, 0, this.canvas.width, this.canvas.height);
 
     return new Promise((resolve) =>
       this.canvas.toBlob((blob) => resolve(blob), "image/jpeg", quality)

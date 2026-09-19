@@ -41,6 +41,7 @@ const el = <T extends HTMLElement>(id: string): T =>
   document.getElementById(id) as T;
 
 const video = el<HTMLVideoElement>("camera");
+const readArea = el<HTMLDivElement>("read-area");
 const startButton = el<HTMLButtonElement>("start");
 const tapLayer = el<HTMLButtonElement>("tap-layer");
 const controls = el<HTMLDivElement>("controls");
@@ -301,6 +302,7 @@ async function begin(): Promise<void> {
 
     started = true;
     startButton.hidden = true;
+    placeReadArea();
     tapLayer.hidden = false;
     controls.hidden = false;
     setStatus("Connecting…");
@@ -337,6 +339,20 @@ async function begin(): Promise<void> {
     starting = false;
   }
 }
+
+/** Draw the read area over the preview, wherever the frame landed on screen. */
+function placeReadArea(): void {
+  const rect = camera.readWindowOnScreen();
+  readArea.hidden = rect === null;
+  if (!rect) return;
+  readArea.style.left = `${rect.left}px`;
+  readArea.style.top = `${rect.top}px`;
+  readArea.style.width = `${rect.width}px`;
+  readArea.style.height = `${rect.height}px`;
+}
+video.addEventListener("loadedmetadata", placeReadArea);
+video.addEventListener("resize", placeReadArea);
+window.addEventListener("resize", placeReadArea);
 
 /** The next camera, spoken by name, and remembered for next time. */
 async function switchCamera(): Promise<void> {

@@ -45,6 +45,18 @@
         color: transparent; font-size: 0;
       }
       #tap-layer:active { background: rgba(255, 212, 0, 0.16); }
+      /* What a read looks at, drawn over the preview for a sighted helper.
+         Never load-bearing: the blind user aims the same way with or
+         without it. Positioned by main.ts from the camera's geometry. */
+      #read-area {
+        position: fixed; pointer-events: none; z-index: 20;
+        border: 2px solid rgba(255, 212, 0, 0.75); border-radius: 8px;
+        box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+      }
+      #read-area::after {
+        content: "Read area"; position: absolute; left: 8px; top: -1.6em;
+        font-size: 12px; color: rgba(255, 212, 0, 0.9);
+      }
 
       #start {
         position: fixed; inset: 0;
@@ -126,6 +138,7 @@
     <h1 class="sr-only">VisionOS — your digital sense of sight</h1>
 
     <video id="camera" playsinline muted aria-hidden="true"></video>
+    <div id="read-area" hidden aria-hidden="true"></div>
 
     <!-- Full-screen tap target, so the primary action needs no aiming. -->
     <button id="tap-layer" hidden aria-label="Scan the room and describe it">
