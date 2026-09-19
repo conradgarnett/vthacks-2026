@@ -11,6 +11,7 @@ export type ServerEvent =
       provider: string;
       provider_active: string;
       ocr?: string;
+      device?: string;
       demo_mode: boolean;
     }
   | { type: "speech"; text: string }

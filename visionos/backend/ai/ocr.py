@@ -422,9 +422,10 @@ class AppleVisionOCR(TextReader):
 
 # RapidOCR's detector scales with pixel count and runs on the CPU. On a
 # 1920x1080 frame one pass took 3-4 s on a laptop; at this cap it is well
-# under a second, and text that needs more pixels than this reaches the
-# tiling path, where each tile is upscaled on its own.
-_RAPID_MAX_SIDE_PX = 1280
+# under a second. Detection only: recognition crops are cut from the
+# full-resolution frame, because recognizing downscaled crops lost the
+# spaces between words ("CarParkLevel3") and cost 8 points of exact match.
+_RAPID_DET_MAX_SIDE_PX = 1280
 
 
 class RapidOCR(TextReader):
@@ -453,6 +454,48 @@ class RapidOCR(TextReader):
     def available(self) -> bool:
         return self._engine is not None
 
+    def _detect_small_recognize_full(self, image) -> list[tuple]:
+        """(box, text, score) with boxes in full-frame pixel coordinates.
+
+        The detector sees a copy no larger than _RAPID_DET_MAX_SIDE_PX on its
+        longest side; its boxes are scaled back up and the recognizer reads
+        crops cut from the original. Falls back to the engine's own single
+        pass if its internals are not the ones this was written against.
+        """
+        import cv2
+        import numpy as np
+
+        engine = self._engine
+        longest = max(image.shape[:2])
+        scale = min(1.0, _RAPID_DET_MAX_SIDE_PX / longest)
+        small = (
+            cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+            if scale < 1.0
+            else image
+        )
+
+        try:
+            boxes_small, _ = engine(small, use_cls=False, use_rec=False)
+            if not boxes_small:
+                return []
+            boxes = [np.asarray(box, dtype=np.float32) / scale for box in boxes_small]
+            crops = engine.get_crop_img_list(image, boxes)
+            if getattr(engine, "use_cls", False):
+                crops, _, _ = engine.text_cls(crops)
+            recognized, _ = engine.text_rec(crops)
+            floor = float(getattr(engine, "text_score", 0.5))
+            return [
+                (box, result[0], float(result[1]))
+                for box, result in zip(boxes, recognized)
+                if float(result[1]) >= floor
+            ]
+        except (AttributeError, TypeError, ValueError):
+            log.debug("RapidOCR internals differ; using its single pass at reduced size")
+            return [
+                (np.asarray(box, dtype=np.float32) / scale, text, score)
+                for box, text, score in _rapid_results(engine(small))
+            ]
+
     def _recognize(self, frame_jpeg: bytes, minimum_height: float) -> list[TextLine]:
         import cv2
         import numpy as np
@@ -460,16 +503,10 @@ class RapidOCR(TextReader):
         image = cv2.imdecode(np.frombuffer(frame_jpeg, dtype=np.uint8), cv2.IMREAD_COLOR)
         if image is None:
             return []
-        longest = max(image.shape[:2])
-        if longest > _RAPID_MAX_SIDE_PX:
-            scale = _RAPID_MAX_SIDE_PX / longest
-            image = cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
-        # Coordinates are normalized by the image the engine saw, so the
-        # downscale leaves them frame-relative.
         height, width = image.shape[:2]
 
         lines: list[TextLine] = []
-        for box, text, score in _rapid_results(self._engine(image)):
+        for box, text, score in self._detect_small_recognize_full(image):
             text = _fix_digit_confusions(str(text).strip())
             if not _accept(text, score):
                 continue

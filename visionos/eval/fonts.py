@@ -14,10 +14,13 @@ reader trained on clean signage falls over.
 from __future__ import annotations
 
 import io
+import os
 import random
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
+
+from typefaces import FONT_DIR
 
 W, H = 1400, 500
 
@@ -69,6 +72,31 @@ FONT_FAMILIES: dict[str, list[str]] = {
     ],
 }
 
+# The display faces committed under eval/fonts/ exist on every machine, so
+# these rows compare across a Mac and a Windows laptop. The macOS families
+# above stay as they are and are skipped where their files do not exist.
+_BUNDLED = {
+    "bundled_script": [
+        "Pacifico-Regular.ttf", "KaushanScript-Regular.ttf", "Satisfy-Regular.ttf",
+        "RockSalt-Regular.ttf", "PermanentMarker-Regular.ttf", "Lobster-Regular.ttf",
+    ],
+    "bundled_decorative": [
+        "Creepster-Regular.ttf", "Monoton-Regular.ttf", "CinzelDecorative-Regular.ttf",
+        "BlackOpsOne-Regular.ttf", "SpecialElite-Regular.ttf",
+    ],
+    "bundled_display": [
+        "Bangers-Regular.ttf", "Righteous-Regular.ttf", "AmaticSC-Regular.ttf",
+        "BebasNeue-Regular.ttf",
+    ],
+}
+for _family, _names in _BUNDLED.items():
+    FONT_FAMILIES[_family] = [str(FONT_DIR / name) for name in _names]
+FONT_FAMILIES = {
+    family: [path for path in paths if os.path.exists(path)]
+    for family, paths in FONT_FAMILIES.items()
+}
+FONT_FAMILIES = {family: paths for family, paths in FONT_FAMILIES.items() if paths}
+
 PHRASES = ["Diet Cola", "Fire Exit", "Room 204B", "Ginger Ale", "Reception"]
 
 
@@ -117,17 +145,22 @@ def build_font_corpus(seed: int = 41, frames: int = 3, phrases_per_font: int = 2
     np.random.seed(seed)
 
     samples = []
+    position = 0
     for family, paths in FONT_FAMILIES.items():
         for path in paths:
+            position += 1
             for i in range(phrases_per_font):
-                text = PHRASES[(hash(path) + i) % len(PHRASES)]
+                # By position, not hash(path): str hashes are salted per
+                # process, so the phrase for a font changed between runs and
+                # the numbers did not reproduce.
+                text = PHRASES[(position + i) % len(PHRASES)]
                 base = render_phrase(text, path)
                 if base is None:
                     continue
                 samples.append({
                     "frames": [capture(base, rng) for _ in range(frames)],
                     "truth": text,
-                    "font": path.rsplit("/", 1)[-1].rsplit(".", 1)[0],
+                    "font": os.path.basename(path).rsplit(".", 1)[0],
                     "family": family,
                 })
     return samples

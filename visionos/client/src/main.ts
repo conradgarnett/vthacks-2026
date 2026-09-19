@@ -13,7 +13,13 @@ const DISCLAIMER =
   "VisionOS ready. Tap anywhere to scan. This is an assistive tool, not a " +
   "replacement for your cane or guide dog. Distances are estimates.";
 
+// Live frames go to the detector at this rate. On a GPU it is idle most of
+// the time; on a CPU-only backend a frame every 700 ms keeps the cores busy
+// and starves the read that the user is actually waiting on, so the rate
+// drops once the backend says where it runs.
 const FRAME_INTERVAL_MS = 700;
+const FRAME_INTERVAL_CPU_MS = 1500;
+let frameIntervalMs = FRAME_INTERVAL_MS;
 
 // "take me to the door" should start a beacon, not narrate. Checked before
 // the question is sent, because guidance is a different mode from an answer.
@@ -149,6 +155,7 @@ function onServerEvent(event: ServerEvent): void {
       };
       const mode = modes[event.provider_active];
       setStatus(mode?.label ?? "Connected");
+      frameIntervalMs = event.device === "cpu" ? FRAME_INTERVAL_CPU_MS : FRAME_INTERVAL_MS;
 
       // Spoken once per session, not per `ready`. The server sends `ready` on
       // every connect, so a reconnect loop repeated this announcement forever.
@@ -283,13 +290,15 @@ async function begin(): Promise<void> {
     tts.say(DISCLAIMER, SpeechPriority.Answer);
     connection.connect();
 
+    let lastFrameAt = 0;
     setInterval(async () => {
       if (!camera.isRunning || !connection.isOpen || readPending) return;
+      if (performance.now() - lastFrameAt < frameIntervalMs) return;
+      lastFrameAt = performance.now();
       const frame = await camera.captureFast();
-      // Re-checked after the await: a read may have started while capturing,
-      // and a 640px frame landing after the hi-res one is what made OCR miss.
+      // Re-checked after the await: a read may have started while capturing.
       if (frame && !readPending) connection.sendFrame(frame);
-    }, FRAME_INTERVAL_MS);
+    }, 100);
   } catch (err) {
     // Anything unexpected must still surface. A silent throw here is
     // indistinguishable from a frozen app to someone who cannot see it.

@@ -67,6 +67,11 @@ class PerceptionPipeline:
     def enabled(self) -> bool:
         return self._enabled
 
+    @property
+    def device(self) -> str:
+        """Where the detector runs: cpu, cuda or mps."""
+        return getattr(self.detector, "_device", "cpu")
+
     async def process(self, frame_jpeg: bytes) -> None:
         """Decode, detect, track, integrate. Safe to call at frame rate.
 

@@ -135,6 +135,7 @@ async def health() -> JSONResponse:
             # missing and the configured provider fell back.
             "provider_active": app.state.effective_provider,
             "ocr": app.state.ocr.name,
+            "device": app.state.perception.device,
             "model": settings.visionos_model,
             "prompt_version": PROMPT_VERSION,
             "demo_mode": settings.demo_mode,
@@ -346,6 +347,7 @@ async def websocket_endpoint(socket: WebSocket) -> None:
             "provider": settings.vision_provider,
             "provider_active": app.state.effective_provider,
             "ocr": app.state.ocr.name,
+            "device": app.state.perception.device,
             "demo_mode": settings.demo_mode,
         }
     )
