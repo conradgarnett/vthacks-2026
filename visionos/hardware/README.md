@@ -25,7 +25,7 @@ uses the internal pull-ups, so no resistors.
 | 2 | Scan | `1` | `SCAN` |
 | 3 | Read | `2` | `READ` |
 | 4 | Ask (press again to stop listening) | `3` | `ASK` |
-| 5 | Voice | `4` | `VOICE` |
+| 5 | spare (the app ignores it; it used to change the voice) | `4` | `VOICE` |
 | 6 | Stop speaking | `0` | `STOP` |
 
 Two ways for the presses to reach the app; the sketch does both at once.

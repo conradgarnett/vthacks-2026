@@ -205,8 +205,8 @@ tested.
   every 150 ms on CPU, overlay cleared 350 ms after the last processed
   frame); the medication guard speaks numbers that frames agreed on and
   withholds an unconfirmed dose; lexicon context pass and glued-word split;
-  the client picks a plugged-in webcam, keys 1-5 and 0 stand in for the
-  watch, a Web Serial button reads the Arduino. Numbers, RapidOCR, Windows,
+  the client picks a plugged-in webcam, keys 1, 2, 3 and 0 stand in for
+  the watch, a Web Serial button reads the Arduino. Numbers, RapidOCR, Windows,
   0.70 floor: signage n=60 CER 0.031, exact 92%, silent 1/60, no-text
   invented 0/8; bundled fonts n=76 sans 94%, serif 100%, cursive 75%,
   handwriting 83%, novelty 80%; packaging name 12/24, symbols invented
@@ -218,14 +218,26 @@ tested.
   (`scale_of`): hand-held things (cups, bottles, bowls, phones, remotes,
   books, keyboards) are never boxed and are spoken only when asked about
   ("are there any cups on the table"); laptops and bigger are always
-  spoken. Detector vocabulary 53 -> 118 classes (`vocabulary.py`, tiered;
-  class-agnostic NMS so near-synonyms box a thing once), measured with
-  the new `eval/run_detect_eval.py` on this CPU at idle priority: 640 px
-  median 257 -> 286 ms, 1280 px 1048 -> 924 ms (noise), invented objects
-  on 24 blank textures 0 -> 0; recall and precision on photographs need
-  the COCO slice from `eval/fetch_everyday.py`. Suite 486 passed,
-  3 skipped. `HAZARDS_ENABLED` is still false and the depth pass is gated
-  on it.
+  spoken. Detector vocabulary 53 -> 115 classes (`vocabulary.py`, tiered;
+  118 added, then apple, banana and handbag cut: apple found 0 of 17 and
+  invented 39; class-agnostic NMS so near-synonyms box a thing once),
+  measured with the new `eval/run_detect_eval.py`: detect time unchanged
+  within noise (640 px ~250 ms, 1280 px ~1 s on this CPU), invented
+  objects on 24 blank textures 0 -> 0, and on 300 COCO val2017 photos
+  (`eval/fetch_everyday.py`, gitignored) the classes both lists share
+  found 59% -> 58% with 10% fewer false claims. Detector floor
+  0.20 -> 0.35 (config.py and `.env`, which pins it and overrides the
+  code), dangerous classes 0.45, hazard floor 0.45: on the held-out half
+  of those photos, claims that were real 54% -> 71%, things found
+  57% -> 47%, invented objects 527 -> 200 (all 300 photos: 54% -> 68%,
+  56% -> 48%, invented 1083 -> 502, doubled boxes 86 -> 21), and the
+  tuning half agrees; a
+  per-class floor table fitted on one half did worse on the other, and a
+  minimum box height separated nothing. Client: the Voice and Camera
+  buttons are gone at the user's request; the glasses webcam is chosen
+  every time and the voice stays on Daniel (`?voice=` overrides). Suite
+  486 passed, 3 skipped. `HAZARDS_ENABLED` is still false and the depth
+  pass is gated on it.
 - **2026-09-19, evening, visionOS-2:** merged 81b0add (lexicon, 38 bundled
   fonts; their `eval/fonts.py` supersedes ours, helper renamed `typefaces.py`);
   RapidOCR detects at 1280 px and recognizes on full-res crops (657 ms/frame,

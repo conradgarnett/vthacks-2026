@@ -65,7 +65,6 @@ _ALIASES = {
     "hydrant": "fire hydrant",
     "extinguisher": "fire extinguisher",
     "fountain": "drinking fountain",
-    "purse": "handbag",
     "boots": "shoe",
     "sneakers": "shoe",
     "dish": "plate",

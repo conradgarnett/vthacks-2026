@@ -56,8 +56,13 @@ class Settings(BaseSettings):
     detector_weights: str = "yolo11m.pt"
     # Open-vocabulary scores run lower than closed-set ones; dangerous classes
     # get a stricter floor of their own in vocabulary.py. Raised from 0.12
-    # after real-world use produced a stream of flickering false detections.
-    detector_confidence: float = 0.20
+    # after real-world use produced a stream of flickering false detections,
+    # and from 0.20 after 300 COCO photographs (eval/run_detect_eval.py): at
+    # 0.20 only 54% of the detector's claims were real, at 0.35 it is 69%,
+    # for recall 57% -> 48%; the two halves of the photo set agree, and a
+    # table of per-class floors fitted on one half did worse on the other.
+    # 0.40 is the next notch (73% / 46%) if invented things persist.
+    detector_confidence: float = 0.35
     depth_model: str = "depth-anything/Depth-Anything-V2-Small-hf"
     # Horizontal FOV of a typical phone rear camera. Drives pixel->azimuth.
     camera_hfov_deg: float = 66.0
@@ -75,7 +80,7 @@ class Settings(BaseSettings):
     # evidence: several frames of persistence and a higher confidence floor.
     # Without these, open-vocabulary flicker produced constant false warnings.
     hazard_min_hits: int = 3
-    hazard_min_confidence: float = 0.35
+    hazard_min_confidence: float = 0.45  # a step above detector_confidence
 
     # --- Scene model ------------------------------------------------------
     # How long a departed object stays remembered ("it was there a moment ago").

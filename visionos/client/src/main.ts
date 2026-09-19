@@ -5,7 +5,7 @@
 import { Camera } from "./camera";
 import { SpatialAudio } from "./audio/spatial";
 import { SpeechPriority, TtsPlayer } from "./audio/tts-player";
-import { onVoicesReady, pickVoice, rankVoices, saveVoiceName } from "./audio/voices";
+import { onVoicesReady, pickVoice, rankVoices } from "./audio/voices";
 import { Voice } from "./voice";
 import { type Boxed, Connection, type ServerEvent } from "./ws";
 
@@ -77,9 +77,9 @@ const READ_TIMEOUT_MS = 20000;
 const READ_BURST_FRAMES = 3;
 const READ_BURST_GAP_MS = 120;
 
-let voiceIndex = 0;
-const VOICE_SAMPLE =
-  "This is how I'll sound. A doorway is about three meters ahead, at your two o'clock.";
+// The voice the user chose. There is no button to change it any more: a
+// changed voice is a surprise to someone who cannot see why.
+const VOICE_NAME = "daniel";
 
 const setStatus = (text: string): void => {
   status.textContent = text;
@@ -473,18 +473,6 @@ video.addEventListener("loadedmetadata", placeReadArea);
 video.addEventListener("resize", placeReadArea);
 window.addEventListener("resize", placeReadArea);
 
-/** The next camera, spoken by name, and remembered for next time. */
-async function switchCamera(): Promise<void> {
-  if (!started) return;
-  try {
-    const label = await camera.next();
-    setStatus(`Camera: ${label}, ${camera.focus}`);
-    tts.say(`Using ${label}, ${camera.focus}.`, SpeechPriority.Answer);
-  } catch (err) {
-    reportFailure((err as Error).message);
-  }
-}
-
 async function readText(): Promise<void> {
   if (!connection.isOpen) {
     reportFailure("Not connected yet.");
@@ -542,38 +530,19 @@ async function readText(): Promise<void> {
  * returns an empty list.
  */
 function applyBestVoice(): void {
+  // Daniel unless the page URL says otherwise (?voice=<part of a name>). A
+  // choice remembered by the old Voice button is ignored, so the app stays
+  // on it; without a Daniel, the best voice this browser has.
   const override = new URLSearchParams(location.search).get("voice");
-  const chosen = pickVoice(override);
+  const chosen = pickVoice(override ?? VOICE_NAME);
   if (!chosen) return;
 
   tts.setVoice(chosen);
-  voiceIndex = Math.max(
-    0,
-    rankVoices().findIndex((entry) => entry.voice.name === chosen.name)
-  );
   console.info(
     "[voices] using %s — available: %s",
     chosen.name,
     rankVoices().map((entry) => `${entry.voice.name} (${entry.score})`).join(", ")
   );
-}
-
-/** Cycle to the next-best voice and speak a sample so it can be judged. */
-function cycleVoice(): void {
-  const ranked = rankVoices();
-  if (ranked.length === 0) {
-    reportFailure("No speech voices are available in this browser.");
-    return;
-  }
-
-  voiceIndex = (voiceIndex + 1) % ranked.length;
-  const chosen = ranked[voiceIndex].voice;
-
-  tts.setVoice(chosen);
-  saveVoiceName(chosen.name);
-  tts.stopAll();
-  setStatus(`Voice: ${chosen.name}`);
-  tts.say(`${chosen.name}. ${VOICE_SAMPLE}`, SpeechPriority.Answer);
 }
 
 onVoicesReady(applyBestVoice);
@@ -589,8 +558,6 @@ const actions = {
   // long-press, so recognition stopped before the user had said a word.
   // Recognition ends itself after one utterance; a second tap ends it early.
   ask: () => (voice.isListening ? voice.stop() : voice.start()),
-  voice: () => cycleVoice(),
-  switch: () => void switchCamera(),
   stop: () => {
     tts.stopAll();
     spatial.stopBeacon();
@@ -617,8 +584,6 @@ const KEYS: Record<string, Action> = {
   "1": "scan", s: "scan", " ": "scan",
   "2": "read", r: "read",
   "3": "ask", a: "ask",
-  "4": "voice", v: "voice",
-  "5": "switch", c: "switch",
   "0": "stop", x: "stop", Escape: "stop",
 };
 window.addEventListener("keydown", (event) => {
@@ -638,7 +603,8 @@ window.addEventListener("keydown", (event) => {
 });
 
 // The watch's Arduino can instead talk over its USB serial port, one command
-// per line: SCAN, READ, ASK, VOICE or STOP. That needs no keyboard emulation,
+// per line: SCAN, READ, ASK or STOP (a VOICE line from an older sketch is
+// ignored). That needs no keyboard emulation,
 // so any board will do, but the browser only opens a port a person has
 // picked, hence the Watch button. Shown only where Web Serial exists.
 type SerialPortLike = {

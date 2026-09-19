@@ -12,12 +12,15 @@ argument:
   everyday   if eval/data/coco_everyday exists (fetch_everyday.py puts it
              there), recall and precision at IoU 0.5 against COCO's labels
              for the classes the vocabulary shares with COCO, per class and
-             overall, plus predictions that land on one object twice, which
-             is what near-duplicate labels ("table" and "desk" on the same
-             table) look like.
+             overall, at the detector's own floor and again at 0.5 and 0.8
+             (the app speaks nothing unasked below 0.8), plus predictions
+             that land on one object twice, which is what near-duplicate
+             labels ("table" and "desk" on the same table) look like.
 
 Save the report with --json, edit the vocabulary, run again, and compare the
-two files: that is the review a new class has to pass.
+two files: that is the review a new class has to pass. The JSON also keeps
+every scored prediction (class, label, confidence, outcome), so a question
+the report does not answer can be asked of it afterwards.
 """
 
 from __future__ import annotations
@@ -79,6 +82,8 @@ COCO_TO_OURS: dict[str, list[str]] = {
 
 IOU_MATCH = 0.5
 TIMING_RUNS = {640: 12, 1280: 8}
+# The detector's own floor is the first; 0.8 is what the app speaks unasked.
+TIERS = (0.5, 0.8)
 
 
 def decode(jpeg: bytes) -> np.ndarray:
@@ -161,7 +166,8 @@ def everyday(detector: Detector, limit: int | None) -> dict | None:
     scored = {coco: ours for coco, ours in scored.items() if ours}
     ours_to_coco = {label: coco for coco, labels in scored.items() for label in labels}
 
-    per: dict[str, dict[str, int]] = defaultdict(lambda: {"gt": 0, "found": 0, "tp": 0, "fp": 0, "dup": 0})
+    gt_count: dict[str, int] = defaultdict(int)
+    records: list[dict] = []  # every scored prediction and what became of it
     times = []
     for path, boxes in samples:
         frame = cv2.imread(str(path))
@@ -174,12 +180,14 @@ def everyday(detector: Detector, limit: int | None) -> dict | None:
                 continue
             gts.append([coco, (cx - bw / 2) * width, (cy - bh / 2) * height,
                         (cx + bw / 2) * width, (cy + bh / 2) * height, False])
-            per[coco]["gt"] += 1
+            gt_count[coco] += 1
 
         started = time.perf_counter()
         found = detector.detect_sync(frame)
         times.append((time.perf_counter() - started) * 1000)
 
+        # Highest confidence first, so the box that claims a thing is the
+        # surest one, and a threshold later on keeps the matching consistent.
         for d in sorted(found, key=lambda d: -d.confidence):
             coco = ours_to_coco.get(d.label)
             if coco is None:
@@ -193,28 +201,48 @@ def everyday(detector: Detector, limit: int | None) -> dict | None:
                 if value > best_iou:
                     best, best_iou = gt, value
             if best is None or best_iou < IOU_MATCH:
-                per[coco]["fp"] += 1
+                outcome = "fp"
             elif best[5]:
-                per[coco]["dup"] += 1
+                outcome = "dup"
             else:
                 best[5] = True
-                per[coco]["tp"] += 1
-                per[coco]["found"] += 1
+                outcome = "tp"
+            records.append({"class": coco, "label": d.label, "confidence": round(d.confidence, 3),
+                            "outcome": outcome, "image": path.stem,
+                            "height": round(d.box.height / height, 4),
+                            "aspect": round(d.box.width / d.box.height, 2) if d.box.height else None})
 
-    gt = sum(v["gt"] for v in per.values())
-    found = sum(v["found"] for v in per.values())
-    tp = sum(v["tp"] for v in per.values())
-    fp = sum(v["fp"] for v in per.values())
-    dup = sum(v["dup"] for v in per.values())
+    def tally(threshold: float, coco: str | None = None) -> dict:
+        chosen = [r for r in records if r["confidence"] >= threshold and (coco is None or r["class"] == coco)]
+        tp = sum(1 for r in chosen if r["outcome"] == "tp")
+        fp = sum(1 for r in chosen if r["outcome"] == "fp")
+        dup = sum(1 for r in chosen if r["outcome"] == "dup")
+        gt = gt_count[coco] if coco else sum(gt_count.values())
+        return {
+            "gt": gt, "tp": tp, "fp": fp, "dup": dup,
+            "recall": round(tp / gt, 3) if gt else None,
+            "precision": round(tp / (tp + fp), 3) if tp + fp else None,
+        }
+
+    floor = detector._settings.detector_confidence
+    classes = {}
+    for coco in sorted(gt_count, key=lambda c: -gt_count[c]):
+        classes[coco] = {"floor": tally(floor, coco)}
+        for tier in TIERS:
+            classes[coco][str(tier)] = tally(tier, coco)
+    # Classes COCO never showed but the detector claimed anyway.
+    for coco in {r["class"] for r in records} - set(gt_count):
+        classes[coco] = {"floor": tally(floor, coco)}
+        for tier in TIERS:
+            classes[coco][str(tier)] = tally(tier, coco)
+
     return {
         "images": len(samples),
         "detect_ms_median": round(statistics.median(times), 1) if times else None,
-        "recall": round(found / gt, 3) if gt else None,
-        "precision": round(tp / (tp + fp), 3) if tp + fp else None,
-        "gt": gt, "tp": tp, "fp": fp, "duplicates": dup,
-        "classes": {
-            coco: dict(v) for coco, v in sorted(per.items(), key=lambda kv: -kv[1]["gt"])
-        },
+        "floor": floor,
+        "overall": {"floor": tally(floor), **{str(t): tally(t) for t in TIERS}},
+        "classes": classes,
+        "records": records,
     }
 
 
@@ -223,6 +251,10 @@ def rule(title: str) -> None:
     print("=" * 72)
     print(title)
     print("=" * 72)
+
+
+def pct(value: float | None) -> str:
+    return f"{value:.0%}" if value is not None else "-"
 
 
 def main() -> int:
@@ -267,22 +299,26 @@ def main() -> int:
         print("  no photos yet: run eval/fetch_everyday.py to pull the COCO slice")
     else:
         rule(f"EVERYDAY OBJECTS  (n={every['images']} photos, COCO val2017 labels, IoU 0.5)")
-        print(f"  recall     {every['recall']:.0%}   of {every['gt']} labeled things found")
-        print(f"  precision  {every['precision']:.0%}   of {every['tp'] + every['fp']} claims were real")
-        print(f"  duplicates {every['duplicates']}   second boxes on one thing")
-        print(f"  detect     {every['detect_ms_median']} ms median per photo at 640 px")
+        overall = every["overall"]
+        print(f"  {'confidence at least':<22} {'recall':>8} {'precision':>10} {'claims':>8} {'invented':>9} {'doubled':>8}")
+        for name, key in (("detector floor %.2f" % every["floor"], "floor"), ("0.50", "0.5"), ("0.80, spoken unasked", "0.8")):
+            o = overall[key]
+            print(f"  {name:<22} {pct(o['recall']):>8} {pct(o['precision']):>10} {o['tp'] + o['fp']:>8} {o['fp']:>9} {o['dup']:>8}")
+        print(f"  {every['overall']['floor']['gt']} labeled things; detect {every['detect_ms_median']} ms median per photo at 640 px")
         print()
-        print(f"   {'class':<15} {'gt':>4} {'found':>6} {'fp':>4} {'dup':>4}   recall  precision")
-        for coco, v in every["classes"].items():
-            if v["gt"] == 0 and v["fp"] == 0:
+        print(f"   {'class':<15} {'gt':>4} {'found':>6} {'fp':>4} {'dup':>4}   recall  prec  prec@.5  prec@.8  fp@.8")
+        for coco, tiers in every["classes"].items():
+            f, mid, top = tiers["floor"], tiers["0.5"], tiers["0.8"]
+            if f["gt"] == 0 and f["fp"] == 0:
                 continue
-            recall = f"{v['found'] / v['gt']:.0%}" if v["gt"] else "   -"
-            precision = f"{v['tp'] / (v['tp'] + v['fp']):.0%}" if v["tp"] + v["fp"] else "   -"
-            print(f"   {coco:<15} {v['gt']:>4} {v['found']:>6} {v['fp']:>4} {v['dup']:>4}   {recall:>6}  {precision:>9}")
+            print(
+                f"   {coco:<15} {f['gt']:>4} {f['tp']:>6} {f['fp']:>4} {f['dup']:>4}   "
+                f"{pct(f['recall']):>6} {pct(f['precision']):>5} {pct(mid['precision']):>8} {pct(top['precision']):>8} {top['fp']:>6}"
+            )
 
     if args.json:
         args.json.parent.mkdir(parents=True, exist_ok=True)
-        args.json.write_text(json.dumps(report, indent=2))
+        args.json.write_text(json.dumps(report, indent=1))
         print(f"\nsaved {args.json}")
     return 0
 

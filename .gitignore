@@ -17,3 +17,6 @@ dist/
 .DS_Store
 *.log
 eval/data/
+
+# The downloaded COCO slice for eval/run_detect_eval.py (eval/fetch_everyday.py), 95 MB
+visionos/eval/data/coco_everyday/

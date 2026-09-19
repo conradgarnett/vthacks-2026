@@ -11,8 +11,8 @@ hallucinate an obstacle, and a false stair is worse than a missed lamp, so an
 addition is measured before it stays: eval/run_detect_eval.py reports detect
 time, objects invented on blank textures, and recall and precision on
 photographed everyday things (eval/fetch_everyday.py). The list grew from 53
-to 118 classes on 2026-09-19 at the user's request; the numbers are in the
-log in CLAUDE.md.
+to 115 classes on 2026-09-19 at the user's request (118 added, three cut by
+the photographs); the numbers are in the log in CLAUDE.md.
 """
 
 from __future__ import annotations
@@ -138,8 +138,6 @@ VOCABULARY: dict[str, ClassSpec] = {
     "fork": ClassSpec(0.02, False),
     "knife": ClassSpec(0.03, False),
     "spoon": ClassSpec(0.02, False),
-    "banana": ClassSpec(0.04, False),
-    "apple": ClassSpec(0.08, False),
     # -- Bathroom ---------------------------------------------------------
     "bathtub": ClassSpec(0.55, True),
     "towel": ClassSpec(0.40, False),
@@ -152,7 +150,6 @@ VOCABULARY: dict[str, ClassSpec] = {
     "scissors": ClassSpec(0.02, False),
     "clock": ClassSpec(0.30, False),
     "vase": ClassSpec(0.25, False),
-    "handbag": ClassSpec(0.30, False),
     "umbrella": ClassSpec(0.30, False),
     "shoe": ClassSpec(0.10, False),
     # The thing the user most wants read. Naming it lets a read say "On the
@@ -181,6 +178,11 @@ VOCABULARY: dict[str, ClassSpec] = {
     "vending machine": ClassSpec(1.80, False, True),
     "drinking fountain": ClassSpec(1.00, False, True),
     "fire extinguisher": ClassSpec(0.55, False, True),
+    # Cut after measuring on 300 COCO photographs (eval/run_detect_eval.py):
+    # apple found 0 of 17 and invented 39, banana and handbag had three
+    # invented for every one found. A scan speaks what two frames agree on
+    # at the detector floor, so a class that invents at the floor invents
+    # aloud.
     # Deliberately absent: keys, wallet, glasses and similar small personal
     # items. Open-vocabulary detection fires on them constantly -- a street
     # photo produced "glasses, 1.9 meters ahead" at 0.62 confidence -- and
@@ -235,7 +237,9 @@ HIGH_PRECISION_CLASSES = frozenset(
     {"stairs", "staircase", "door", "doorway", "elevator", "low ceiling",
      "escalator", "crosswalk"}
 )
-HIGH_PRECISION_THRESHOLD = 0.25
+# Kept a step above the general floor in config.py (0.35), for the same
+# reason it was a step above 0.20.
+HIGH_PRECISION_THRESHOLD = 0.45
 
 
 def height_for(label: str) -> float | None:

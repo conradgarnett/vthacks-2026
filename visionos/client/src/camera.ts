@@ -66,7 +66,6 @@ const BUILT_IN = /integrated|built-?in|facetime|internal|easycamera|true ?vision
 const EXTERNAL = /usb|logitech|brio|uvc|razer|elgato|obsbot|insta360|external|kiyo|c9\d\d/i;
 // USB vendor:product ids that browsers append to a webcam's name.
 const VENDOR_ID = /\s*\([0-9a-f]{4}:[0-9a-f]{4}\)/i;
-const REMEMBERED = "visionos.camera";
 
 // Focus and exposure controls are not in the TypeScript DOM typings yet;
 // browsers expose them on cameras whose driver offers them.
@@ -121,19 +120,6 @@ export class Camera {
       await this.switchTo(chosen);
     }
     await this.show();
-  }
-
-  /** Switch to the next camera and return its name. Throws if it fails. */
-  async next(): Promise<string> {
-    await this.refreshList();
-    if (this.cameras.length < 2) {
-      throw new Error("This is the only camera.");
-    }
-    const current = this.cameras.findIndex((camera) => camera.deviceId === this.currentDeviceId());
-    const following = this.cameras[(current + 1) % this.cameras.length];
-    await this.switchTo(following);
-    await this.show();
-    return this.label;
   }
 
   /** The camera in use, named for speech; empty before start. */
@@ -263,11 +249,6 @@ export class Camera {
     const fallback = this.stream;
     this.stream = await this.open({ deviceId: { exact: camera.deviceId } });
     fallback?.getTracks().forEach((track) => track.stop());
-    try {
-      localStorage.setItem(REMEMBERED, camera.deviceId);
-    } catch {
-      // Private browsing or blocked storage: the choice just is not kept.
-    }
   }
 
   private async show(): Promise<void> {
@@ -301,15 +282,6 @@ export class Camera {
       const match = cameras.find((camera) => camera.label.toLowerCase().includes(wanted));
       if (match) return match;
     }
-
-    let remembered: string | null = null;
-    try {
-      remembered = localStorage.getItem(REMEMBERED);
-    } catch {
-      remembered = null;
-    }
-    const kept = cameras.find((camera) => camera.deviceId === remembered);
-    if (kept) return kept;
 
     // A phone's rear camera already faces the world; leave it alone. A
     // computer's own camera faces the user, or reports nothing, and either
