@@ -91,8 +91,12 @@ def decode_barcodes(frame_jpeg: bytes) -> list[str]:
     except cv2.error:
         return []
     # OpenCV 4.5 to 4.7 return (ok, info, types, points); 4.8 and later
-    # (info, types, points).
+    # (info, types, points); and 5.0 hands back one string rather than a
+    # list of them when there is a single code (found 2026-09-20: the
+    # string was iterated as characters and every barcode came out empty).
     info = result[1] if len(result) == 4 else result[0]
+    if isinstance(info, (str, bytes)):
+        info = [info]
     codes: list[str] = []
     for text in info or ():
         text = str(text).strip()

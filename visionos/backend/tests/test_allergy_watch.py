@@ -222,6 +222,26 @@ class TestBarcodeEvidence:
         assert outcome.alerts and outcome.alerts[0].source == "label"
 
     @pytest.mark.asyncio
+    async def test_an_unknown_code_is_said_when_asked_and_the_label_still_counts(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(watch_module, "decode_barcodes", lambda jpeg: [CODE])
+        lookup = FakeLookup({CODE: ProductFacts(CODE, False)})
+        watch, _ = make_watch(tmp_path, lookup=lookup)
+        quiet = await watch.check([], None, b"jpeg", asked=False)
+        assert quiet.barcode == CODE and not quiet.spoke
+        outcome = await watch.check([line("CONTAINS: PEANUTS")], None, b"jpeg", asked=True)
+        assert outcome.notices and "does not know this product" in outcome.notices[0].text
+        assert outcome.alerts and outcome.alerts[0].source == "label"
+
+    @pytest.mark.asyncio
+    async def test_an_unreachable_database_is_said_when_asked(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(watch_module, "decode_barcodes", lambda jpeg: [CODE])
+        watch, _ = make_watch(tmp_path, lookup=FakeLookup({}))  # None: the network did not answer
+        assert not (await watch.check([], None, b"jpeg", asked=False)).spoke
+        outcome = await watch.check([], None, b"jpeg", asked=True)
+        assert outcome.barcode == CODE and outcome.product is None
+        assert outcome.notices[0].kind == "check" and "could not reach" in outcome.notices[0].text
+
+    @pytest.mark.asyncio
     async def test_no_lookup_means_no_barcode_step(self, tmp_path, monkeypatch):
         monkeypatch.setattr(watch_module, "decode_barcodes", lambda jpeg: [CODE])
         watch, _ = make_watch(tmp_path, lookup=None)
@@ -430,6 +450,24 @@ class TestSession:
         await asyncio.gather(*session._tasks)
         hazards = [p for p in socket.sent if p.get("type") == "hazard"]
         assert len(hazards) == 1 and hazards[0]["kind"] == "allergy"
+
+    @pytest.mark.asyncio
+    async def test_a_peek_with_no_text_still_tries_the_barcode(self, tmp_path, monkeypatch):
+        """On packaging the barcode is the evidence that works, so it is
+        tried on every peek, text or no text."""
+        monkeypatch.setattr(watch_module, "decode_barcodes", lambda jpeg: [CODE])
+        reader = FakeReader([])  # the quick pass reads nothing
+        socket = FakeSocket()
+        watch, _ = make_watch(
+            tmp_path, lookup=FakeLookup({CODE: ProductFacts(CODE, True, "Peanut Butter", "Skippy", ("peanut",), ())}),
+        )
+        session = Session(socket, FakeProvider(), FakePerception(), reader, None, watch)
+        await session.handle_peek([frame()])
+        await session.peek_task
+        await asyncio.gather(*session._tasks)
+        hazards = [p for p in socket.sent if p.get("type") == "hazard"]
+        assert len(hazards) == 1 and hazards[0]["source"] == "barcode"
+        assert "Skippy Peanut Butter" in hazards[0]["text"]
 
     @pytest.mark.asyncio
     async def test_a_plain_sign_is_just_read(self, tmp_path):

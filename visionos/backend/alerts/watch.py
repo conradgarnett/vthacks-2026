@@ -148,7 +148,8 @@ class Notice:
 class Outcome:
     alerts: list[Alert] = field(default_factory=list)
     notices: list[Notice] = field(default_factory=list)
-    product: ProductFacts | None = None
+    barcode: str | None = None  # the code read from the frame, if any
+    product: ProductFacts | None = None  # what the database said of it
     verdict: Verdict | None = None
 
     @property
@@ -268,19 +269,24 @@ class AllergyWatch:
 
     # -- text and barcode: evidence -----------------------------------------
 
-    async def _product(self, frame_jpeg: bytes | None) -> ProductFacts | None:
+    async def _product(self, frame_jpeg: bytes | None) -> tuple[str | None, ProductFacts | None]:
+        """The first barcode in the frame and what the database says of it:
+        (None, None) with no barcode, (code, None) when the database could
+        not be reached, (code, facts) otherwise, found or not."""
         if self.lookup is None or not frame_jpeg:
-            return None
+            return None, None
         try:
             codes = await asyncio.to_thread(decode_barcodes, frame_jpeg)
         except Exception:  # noqa: BLE001 - a decoder failure is no barcode
             log.exception("barcode decoding failed")
-            return None
+            return None, None
+        first: str | None = None
         for code in codes[:2]:
+            first = first or code
             facts = await self.lookup.facts(code)
             if facts is not None:
-                return facts
-        return None
+                return code, facts
+        return first, None
 
     async def _judge(self, lines: list, wanted: list[str], now: float,
                      frame_jpeg: bytes | None = None) -> Verdict:
@@ -319,8 +325,23 @@ class AllergyWatch:
         wanted = list(profile.allergens)
 
         # 1. The barcode.
-        facts = await self._product(frame_jpeg)
+        code, facts = await self._product(frame_jpeg)
+        outcome.barcode = code
         outcome.product = facts
+        if code is not None and facts is None and asked:
+            # A code was read but the database did not answer: say so
+            # rather than let silence read as "nothing found".
+            notice = self._notice(
+                "I read a barcode, but I could not reach the product database. "
+                "Check the label yourself.", "check", (), now, CHECK_COOLDOWN_S)
+            if notice is not None:
+                outcome.notices.append(notice)
+        elif facts is not None and not facts.found and asked:
+            notice = self._notice(
+                "I read a barcode, but the product database does not know this product. "
+                "Check the label yourself.", "check", (), now, CHECK_COOLDOWN_S)
+            if notice is not None:
+                outcome.notices.append(notice)
         if facts is not None and facts.found:
             hits = tuple(g for g in facts.allergens if g in wanted)
             traces = tuple(g for g in facts.traces if g in wanted and g not in hits)

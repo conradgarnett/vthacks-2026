@@ -811,10 +811,13 @@ class Session:
         self.forget_stale_peeks()
         if lines:
             self.peeks.append((time.monotonic(), lines))
-            # The allergy scanner in the background: what the last few
-            # peeks agree on, and the frame for a barcode. Only evidence
-            # speaks here; nobody asked.
-            await self._check_label(self.fresh_reading(), frame, asked=False)
+        # The allergy scanner in the background: what the last few peeks
+        # agree on, and the frame for a barcode. The barcode is tried on
+        # every peek whether or not any text was read, since on packaging
+        # it is the evidence that works (Conrad's corpus: the small print
+        # is legible in 9 labels of 40; a barcode is a lookup). Only
+        # evidence speaks here; nobody asked.
+        await self._check_label(self.fresh_reading(), frame, asked=False)
 
     def forget_stale_peeks(self, now: float | None = None) -> None:
         now = time.monotonic() if now is None else now
