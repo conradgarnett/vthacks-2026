@@ -81,9 +81,28 @@ type ImageCapabilities = {
   exposureCompensation?: Range;
   brightness?: Range;
   contrast?: Range;
+  saturation?: Range;
   sharpness?: Range;
+  exposureMode?: string[];
+  whiteBalanceMode?: string[];
 };
 type ImageSettings = Record<string, number | string | undefined>;
+// The picture controls a reset puts back to the middle of their range,
+// which is where webcams ship.
+const LEVEL_CONTROLS: ReadonlyArray<"exposureCompensation" | "brightness" | "contrast" | "saturation" | "sharpness"> = [
+  "exposureCompensation",
+  "brightness",
+  "contrast",
+  "saturation",
+  "sharpness",
+];
+
+/** The middle of a control's range, on its step grid. */
+function midpoint(range: Range): number {
+  const middle = (range.min + range.max) / 2;
+  if (!range.step || range.step <= 0) return middle;
+  return range.min + Math.round((middle - range.min) / range.step) * range.step;
+}
 const EXPOSURE_CONTROLS: Array<[keyof ImageCapabilities, number]> = [
   ["exposureCompensation", -READ_EXPOSURE_DROP],
   ["brightness", -READ_BRIGHTNESS_DROP],
@@ -125,38 +144,59 @@ export class Camera {
       await this.switchTo(chosen);
     }
     await this.show();
-    await this.repairExposure(exposure);
+    await this.resetImageControls(exposure);
     // Best effort on the way out: a reload during a read must not leave the
     // camera dim for the next session.
     window.addEventListener("pagehide", () => void this.restoreExposure());
   }
 
   /**
-   * Undo a dim that an earlier session never restored, or, with
-   * `?exposure=reset`, put every image control at the middle of its range,
-   * which is where webcams ship.
+   * Put every picture control the camera offers back where a webcam ships:
+   * automatic exposure and white balance, and the middle of the range for
+   * exposure compensation, brightness, contrast, saturation and sharpness.
+   *
+   * Done at every start. The read-time dim writes the camera's own
+   * controls, which outlive the page, so a reload mid-read, a crash, or
+   * another program's leftovers can leave the picture dark or off-colour,
+   * and the user cannot see that. Restoring only the values remembered
+   * from before a dim was not enough: a session that started on an
+   * already-dim camera remembered the dim as normal. `?exposure=reset` is
+   * still accepted and means the same thing.
    */
-  private async repairExposure(exposure: string | null): Promise<void> {
+  private async resetImageControls(_exposure: string | null): Promise<void> {
     const track = this.track();
     if (!track) return;
-    let values: Record<string, number> | null = null;
-    if (exposure === "reset") {
-      const capabilities = (track.getCapabilities?.() ?? {}) as ImageCapabilities;
-      values = {};
-      for (const [name] of EXPOSURE_CONTROLS) {
-        const range = capabilities[name];
-        if (range && range.max > range.min) values[name] = (range.min + range.max) / 2;
-      }
-    } else {
-      values = this.storedExposure();
+    const capabilities = (track.getCapabilities?.() ?? {}) as ImageCapabilities;
+    const values: Record<string, number | string> = {};
+    if (capabilities.exposureMode?.includes("continuous")) values.exposureMode = "continuous";
+    if (capabilities.whiteBalanceMode?.includes("continuous")) values.whiteBalanceMode = "continuous";
+    for (const name of LEVEL_CONTROLS) {
+      const range = capabilities[name];
+      if (range && range.max > range.min) values[name] = midpoint(range);
     }
-    if (!values || Object.keys(values).length === 0) return;
-    try {
-      await track.applyConstraints({ advanced: [values as unknown as MediaTrackConstraintSet] });
-    } catch {
-      // The camera refused; nothing else to try.
-    }
+    if (Object.keys(values).length === 0) return;
+    const applied = await this.applyEach(track, values);
+    console.info(`[camera] picture controls reset: ${applied} of ${Object.keys(values).length}`, values);
+    this.exposureBefore = null;
     this.forgetExposure();
+  }
+
+  /**
+   * Apply controls one at a time. In one `advanced` set the browser drops
+   * the whole set when any single control is refused, so a camera that
+   * lacked one of them silently kept every other one as it was.
+   */
+  private async applyEach(track: MediaStreamTrack, values: Record<string, number | string>): Promise<number> {
+    let applied = 0;
+    for (const [name, value] of Object.entries(values)) {
+      try {
+        await track.applyConstraints({ advanced: [{ [name]: value } as unknown as MediaTrackConstraintSet] });
+        applied += 1;
+      } catch {
+        // This camera does not take this control; the rest still go.
+      }
+    }
+    return applied;
   }
 
   private storedExposure(): Record<string, number> | null {
@@ -230,7 +270,7 @@ export class Camera {
     if (Object.keys(dimmed).length === 0) return;
 
     try {
-      await track.applyConstraints({ advanced: [dimmed as unknown as MediaTrackConstraintSet] });
+      if ((await this.applyEach(track, dimmed)) === 0) throw new Error("no control accepted");
       this.exposureBefore = before;
       try {
         localStorage.setItem(EXPOSURE_KEY, JSON.stringify(before));
@@ -250,13 +290,9 @@ export class Camera {
     const before = this.exposureBefore ?? this.storedExposure();
     this.exposureBefore = null;
     if (!track || !before) return;
-    try {
-      await track.applyConstraints({ advanced: [before as unknown as MediaTrackConstraintSet] });
-      this.forgetExposure();
-    } catch {
-      // Nothing more to do now; the stored values are kept, and the next
-      // start puts them back.
-    }
+    if ((await this.applyEach(track, before)) > 0) this.forgetExposure();
+    // Otherwise the stored values are kept; the next start resets the
+    // camera anyway.
   }
 
   private track(): MediaStreamTrack | undefined {
