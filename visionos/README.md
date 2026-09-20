@@ -38,6 +38,16 @@ keep the checkout at a short path (`C:\Users\<you>\vthacks-2026`), since long
 paths break Python imports; `run.py` finds Node even when the installer left
 it off PATH.
 
+On a Mac: a `.venv` with Python 3.12 and `pip install -r requirements.txt`;
+Apple Vision needs no install and RapidOCR pulls its own weights on the first
+read; perception runs on MPS, and the detector weights (26 MB) download on the
+first start, so it needs the network once and takes about 35 s, then about
+6 s. The watch is `/dev/cu.usbmodem*`; glob it, the name changes across
+resets, and the port is exclusive: the Arduino IDE's serial monitor keeps it
+after its window closes, and the app then reads nothing with no error. With
+`ELEVENLABS_API_KEY` set, run `eval/warm_voice.py` once after any change to
+a spoken phrase.
+
 Open the address `run.py` prints, press Start (or any key), and the app says
 it is ready.
 
@@ -116,9 +126,12 @@ PYTHONPATH=. .venv\Scripts\python eval\run_ocr_eval.py 60
 ones, packaging, prescription labels, allergen statements, receipts) and
 simulates a hand-held capture, so a change to reading is scored before and
 after; `eval/run_detect_eval.py` scores the detector on blank textures and
-on 300 COCO photos (`eval/fetch_everyday.py`). The current numbers and how
-they were reached are in the log at the end of `../CLAUDE.md`. Any change to
-reading is measured; "does the output contain the word" is not a test.
+on 300 COCO photos. Two evals need a download first: `run_detect_eval.py`
+wants `eval/fetch_everyday.py` (about 95 MB of COCO photos) and
+`run_sroie_eval.py` wants the SROIE receipts; the rest render their own
+corpora. The current numbers and how they were reached are in the log at
+the end of `../CLAUDE.md`. Any change to reading is measured; "does the
+output contain the word" is not a test.
 
 ## Layout
 
