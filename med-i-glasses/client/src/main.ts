@@ -824,18 +824,20 @@ window.addEventListener("keydown", (event) => {
 
 // The watch's board talks over its USB serial port, one command per line:
 // SCAN, READ, ASK or STOP (a VOICE line from an older sketch is ignored).
-// Conrad's LOLIN S2 Mini with three Grove buttons runs at 115200 baud,
-// prints one "Ready - SCAN(9) READ(1) ASK(37)" banner after a physical
-// reset only (opening the port does not reset a native-USB board) and an
-// "ignored (N pins high at once)" line when its guard drops a press; the
-// older AVR sketch and the repo's S2 sketch run at 9600. The port opens at
-// 115200 and, if the first bytes are not text, once more at 9600. The port
-// is exclusive (close the Arduino Serial Monitor) and it vanishes for a
-// second on a reset or a reflash, so a port the person already picked is
-// reopened by itself when it comes back, and at the next start of the
-// page. The browser only opens a port a person has picked once, hence the
-// Watch button; it shows only where Web Serial exists (Chrome, Edge).
-const WATCH_BAUDS = [115200, 9600];
+// The repo's sketch (hardware/watch_s2/watch_s2.ino, Conrad's LOLIN S2
+// Mini with three Grove buttons on pins 9, 1 and 16) runs at 9600 baud,
+// prints one "Ready" banner naming its pins after a physical reset only
+// (opening the port does not reset a native-USB board) and an "ignored"
+// line when its guard drops a press; an earlier firmware ran at 115200.
+// The port opens at 9600 and, if the first bytes are not text, once more
+// at 115200, so either firmware works and the wrong one costs one press.
+// The port is exclusive (close the Arduino Serial Monitor) and it vanishes
+// for a second on a reset or a reflash, so a port the person already
+// picked is reopened by itself when it comes back, and at the next start
+// of the page. The browser only opens a port a person has picked once,
+// hence the Watch button; it shows only where Web Serial exists (Chrome,
+// Edge).
+const WATCH_BAUDS = [9600, 115200];
 // A held port reads zero bytes with no error, and an idle board is silent
 // by design, so the only tell is a watch that says nothing after it was
 // connected. The app asks for a press on connect and, if nothing at all
