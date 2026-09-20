@@ -92,7 +92,7 @@ second, lower pass; tiling still applies.
 
 ```bash
 cd visionos
-.venv/bin/python -m pytest backend/tests -q          # 552 tests (3 Apple-only)
+.venv/bin/python -m pytest backend/tests -q          # 553 tests (3 Apple-only)
 PYTHONPATH=. .venv/bin/python eval/run_ocr_eval.py 60
 ```
 
@@ -187,6 +187,25 @@ tested.
 
 ## Log
 
+- **2026-09-19, later still, visionOS-2, the blueprint tab:** each scan is
+  drawn from above for the sighted helper (`client/src/blueprint.ts`, a
+  Blueprint pill beside Places, key B): the user at the bottom, the
+  camera's 66 degree wedge, rings every metre to 6 m, every thing the scan
+  saw at its direction and distance (red when it obstructs, faded when
+  seen in one frame only, hollow on the far ring when its distance is
+  unknown), and the floor as half-metre cells: unobstructed where the scan
+  looked and found nothing in the way up to a thing, obstructed where that
+  thing stands, unknown elsewhere; the walkway strip is labelled clear or
+  blocked by the rule the spoken scan uses (1 m wide, 3 m long). A scan
+  that saw nothing leaves the floor unknown. The scan's `inventory` items
+  carry `obstacle` (`main.py`, additive) and every remembered scene saves
+  its layout (`Scene.layout`), so the picker draws any remembered place
+  from its views, older views turned to line up on the things they share
+  (the median turn over two or more shared things within 25 degrees; a
+  view that shares too little stays out rather than being placed by
+  guesswork). Nothing here is spoken. `__visionos.event(...)` in the
+  browser console drives the screen without a camera or a socket. Suite
+  552 -> 553.
 - **2026-09-19, late night, visionOS-2, the places memory:** every scan is
   remembered as a scene (`backend/scene/places.py`): the things two frames
   agreed on (people and walls left out), the distinctive words read (room

@@ -33,7 +33,13 @@ const ARM_MS = 3000;
 
 const el = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
-export function initPlaces(options: { speak: (text: string) => void }) {
+export function initPlaces(options: {
+  speak: (text: string) => void;
+  /** Called with the memory whenever it is fetched or edited. */
+  onMemory?: (memory: Memory) => void;
+  /** Called when the sheet opens, so another sheet can close. */
+  onOpen?: () => void;
+}) {
   const handle = el<HTMLButtonElement>("places-handle");
   const panel = el<HTMLElement>("places-panel");
   const banner = el<HTMLDivElement>("places-banner");
@@ -72,7 +78,10 @@ export function initPlaces(options: { speak: (text: string) => void }) {
     open = next;
     panel.dataset.open = String(next);
     handle.setAttribute("aria-expanded", String(next));
-    if (next) void refresh();
+    if (next) {
+      options.onOpen?.();
+      void refresh();
+    }
   }
 
   /** The pill's text: where the user is, or how many places are known. */
@@ -346,6 +355,7 @@ export function initPlaces(options: { speak: (text: string) => void }) {
 
   function render(unreachable: boolean): void {
     renderHandle();
+    options.onMemory?.(memory);
     if (!open) return;
     renderBanner(unreachable);
     list.replaceChildren();

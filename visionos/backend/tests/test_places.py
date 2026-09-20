@@ -250,6 +250,25 @@ class TestSubstance:
         assert built.embedding == [0.6, 0.8] and built.thumbnail == "data:x"
         assert built.room is None
 
+    def test_a_scene_keeps_the_layout_the_blueprint_draws(self, tmp_path):
+        seen = [
+            Seen("chair", 0.9, -12.0, 1.5, 2, None),
+            Seen("sign", 0.8, 20.0, None, 2, None),
+            Seen("person", 0.9, 5.0, 3.0, 2, None),
+            Seen("wall", 0.7, 0.0, None, 2, None),
+        ]
+        built = scene_from_scan(seen)
+        assert built.layout == [
+            {"label": "chair", "azimuth_deg": -12.0, "distance_m": 1.5, "obstacle": True, "scale": "large"},
+            {"label": "sign", "azimuth_deg": 20.0, "distance_m": None, "obstacle": False, "scale": "medium"},
+            {"label": "person", "azimuth_deg": 5.0, "distance_m": 3.0, "obstacle": True, "scale": "large"},
+        ]
+        memory = PlaceMemory(str(tmp_path / "places.json"))
+        memory.remember_new(built)
+        reloaded = PlaceMemory(str(tmp_path / "places.json"))
+        assert reloaded.places[0].scenes[0].layout == built.layout
+        assert reloaded.to_dict()["places"][0]["scenes"][0]["layout"][0]["label"] == "chair"
+
     def test_a_place_keeps_only_its_newest_views(self):
         memory = PlaceMemory(max_scenes_per_place=3)
         for index in range(5):
@@ -400,6 +419,9 @@ async def test_a_scan_is_remembered_and_the_second_one_is_recognized():
     assert socket.spoken()[-1].endswith("I'll remember this place as Place 1.")
     events = [p for p in socket.sent if p.get("type") == "place"]
     assert events[-1]["kind"] == "new" and events[-1]["place"]["name"] == "Place 1"
+    # The scan's inventory says what obstructs, for the blueprint.
+    inventory = [p for p in socket.sent if p.get("type") == "inventory"][-1]
+    assert inventory["items"][0]["label"] == "chair" and inventory["items"][0]["obstacle"] is True
     assert detector.embedded == 1
     assert memory.places[0].scenes[0].thumbnail.startswith("data:image/jpeg;base64,")
 

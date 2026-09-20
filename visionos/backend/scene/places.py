@@ -38,7 +38,7 @@ from collections import Counter
 from dataclasses import dataclass, field, replace
 from typing import Iterable
 
-from backend.perception.vocabulary import scale_of
+from backend.perception.vocabulary import is_obstacle, scale_of
 from backend.scene.inference import room_scores
 
 log = logging.getLogger(__name__)
@@ -230,6 +230,10 @@ class Scene:
     room: str | None = None
     embedding: list[float] | None = None
     thumbnail: str | None = None
+    # Where each thing was, from the user's spot: direction and distance,
+    # whether it obstructs, and its size tier. The blueprint draws a place
+    # from its views' layouts.
+    layout: list[dict] = field(default_factory=list)
 
     @property
     def has_substance(self) -> bool:
@@ -248,6 +252,7 @@ class Scene:
             "words": list(self.words),
             "room": self.room,
             "thumbnail": self.thumbnail,
+            "layout": list(self.layout),
         }
         if with_embedding:
             out["embedding"] = None if self.embedding is None else [round(v, 4) for v in self.embedding]
@@ -263,6 +268,7 @@ class Scene:
             room=data.get("room"),
             embedding=[float(v) for v in data["embedding"]] if data.get("embedding") else None,
             thumbnail=data.get("thumbnail"),
+            layout=[dict(item) for item in (data.get("layout") or [])],
         )
 
 
@@ -286,6 +292,17 @@ def scene_from_scan(seen, text_lines=(), embedding=None, thumbnail=None, now=Non
     labels = Counter(
         s.label for s in seen if s.label not in _MOVING and s.label not in _NOT_EVIDENCE
     )
+    layout = [
+        {
+            "label": s.label,
+            "azimuth_deg": round(float(s.azimuth_deg), 1),
+            "distance_m": None if s.distance_m is None else round(float(s.distance_m), 1),
+            "obstacle": is_obstacle(s.label),
+            "scale": scale_of(s.label),
+        }
+        for s in seen
+        if s.label not in _NOT_EVIDENCE
+    ]
     return Scene(
         id=uuid.uuid4().hex[:8],
         at=time.time() if now is None else now,
@@ -294,6 +311,7 @@ def scene_from_scan(seen, text_lines=(), embedding=None, thumbnail=None, now=Non
         room=kind_of(labels.elements()),
         embedding=list(embedding) if embedding else None,
         thumbnail=thumbnail,
+        layout=layout,
     )
 
 

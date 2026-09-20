@@ -38,6 +38,8 @@ export type ServerEvent =
         azimuth_deg: number;
         distance_m: number | null;
         scale?: Scale;
+        /** Something to walk into, for the blueprint. */
+        obstacle?: boolean;
         box: [number, number, number, number] | null;
       }>;
     }

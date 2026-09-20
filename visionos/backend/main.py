@@ -51,7 +51,7 @@ from backend.ai.vision import VisionProvider, build_provider
 from backend.config import get_settings
 from backend.hazards.engine import HazardEngine
 from backend.perception.pipeline import PerceptionPipeline
-from backend.perception.vocabulary import scale_of
+from backend.perception.vocabulary import is_obstacle, scale_of
 from backend.scene.queries import find_object
 from backend.speech.chunker import SentenceChunker
 from backend.telemetry import LatencyTrace, metrics_snapshot
@@ -674,6 +674,8 @@ class Session:
             "items": [
                 {"label": s.label, "confidence": round(s.confidence, 2), "frames": s.frames,
                  "scale": scale_of(s.label),
+                 # Whether it is something to walk into, for the blueprint.
+                 "obstacle": is_obstacle(s.label),
                  "azimuth_deg": round(s.azimuth_deg, 1),
                  "distance_m": None if s.distance_m is None else round(s.distance_m, 1),
                  "box": [round(v, 4) for v in s.box] if s.box else None}

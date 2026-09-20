@@ -6,6 +6,7 @@ import { Camera } from "./camera";
 import { SpatialAudio } from "./audio/spatial";
 import { SpeechPriority, TtsPlayer } from "./audio/tts-player";
 import { onVoicesReady, pickVoice, rankVoices } from "./audio/voices";
+import { initBlueprint } from "./blueprint";
 import { initPlaces } from "./places";
 import { Voice } from "./voice";
 import { type Boxed, Connection, type ServerEvent } from "./ws";
@@ -142,12 +143,22 @@ function show(text: string, kind: "speech" | "hazard" = "speech"): void {
 // The places the app remembers, and the panel a sighted helper edits them
 // in. Every edit is spoken, since a changed memory is a state the user
 // cannot see.
+// The blueprint: each scan drawn from above, with the floor marked
+// unobstructed or obstructed, and a remembered place drawn from its views.
+// The two sheets share the bottom of the screen, so one closes the other.
+const blueprint = initBlueprint({ onOpen: () => places.close() });
 const places = initPlaces({
   speak: (text) => {
     tts.say(text, SpeechPriority.Answer);
     show(text);
   },
+  onMemory: (memory) => blueprint.onMemory(memory),
+  onOpen: () => blueprint.close(),
 });
+
+// A hook for driving the screen without a camera or a socket, from the
+// browser console: __visionos.event({type: "speech", text: "..."}).
+(window as unknown as { __visionos: unknown }).__visionos = { event: (event: ServerEvent) => onServerEvent(event) };
 
 // What this backend can do, in one sentence, before the user commits to
 // starting. The same facts are spoken once connected; showing them here too
@@ -269,6 +280,7 @@ function onServerEvent(event: ServerEvent): void {
       // only when asked for with ?verbose=1, since it is a list, not a picture.
       show(event.text);
       if (verbose) tts.say(event.text, SpeechPriority.Answer);
+      blueprint.onInventory(event.items);
       const boxed = event.items.filter((item) => item.box !== null) as Boxed[];
       if (boxed.length > 0) {
         scanBoxesUntil = performance.now() + SCAN_BOXES_MS;
@@ -296,6 +308,7 @@ function onServerEvent(event: ServerEvent): void {
       // What the memory made of the scan; the spoken part rode along in
       // the scan's own speech.
       places.onEvent(event);
+      blueprint.onPlaceEvent(event);
       break;
 
     case "trace":
@@ -403,6 +416,7 @@ async function begin(): Promise<void> {
     tapLayer.hidden = false;
     controls.hidden = false;
     places.reveal();
+    blueprint.reveal();
     setStatus("Connecting…", "busy");
     tts.say(DISCLAIMER, SpeechPriority.Answer);
     // Which camera is in use, and whether it can focus, are states the user
@@ -715,14 +729,22 @@ window.addEventListener("keydown", (event) => {
     }
     return;
   }
-  // P pulls the places panel up or puts it away; Escape puts it away too,
-  // on its way to stopping speech.
+  // P pulls the places panel up or puts it away, B the blueprint; Escape
+  // puts either away too, on its way to stopping speech.
   if (key === "p") {
     event.preventDefault();
     places.toggle();
     return;
   }
-  if (key === "Escape" && places.isOpen) places.close();
+  if (key === "b") {
+    event.preventDefault();
+    blueprint.toggle();
+    return;
+  }
+  if (key === "Escape") {
+    if (places.isOpen) places.close();
+    if (blueprint.isOpen) blueprint.close();
+  }
   const action = KEYS[key];
   if (!action) return;
   event.preventDefault();
