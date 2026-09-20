@@ -55,6 +55,11 @@ const char* COMMANDS[BUTTON_COUNT] = {"SCAN", "READ", "ASK"};
 // Grove modules bounce less than a bare switch, but a thumb on a wearable
 // still double-taps; 35 ms is below a deliberate second press.
 const unsigned long DEBOUNCE_MS = 35;
+// Measured on the rig on 2026-09-20: one tap chattered into four SCAN
+// lines within 250 ms (the release bounces far longer than 35 ms, likely a
+// connector). After a command is sent, the button is ignored for this
+// long, so one press is one command whatever the contact does.
+const unsigned long LOCKOUT_MS = 400;
 // Long enough that a deliberate press is never mistaken for a hold, short
 // enough that stopping speech still feels immediate.
 const unsigned long HOLD_MS = 900;
@@ -70,6 +75,7 @@ bool wasDown[BUTTON_COUNT];
 unsigned long pressedAt[BUTTON_COUNT];
 unsigned long lastChange[BUTTON_COUNT];
 bool holdSent[BUTTON_COUNT];
+unsigned long lockoutUntil[BUTTON_COUNT];
 unsigned long blinkUntil = 0;
 
 void blink() {
@@ -89,6 +95,7 @@ void setup() {
     pressedAt[i] = 0;
     lastChange[i] = 0;
     holdSent[i] = false;
+    lockoutUntil[i] = 0;
   }
 
   // The S2 has native USB and enumerates after setup() begins, so a banner
@@ -143,6 +150,14 @@ void loop() {
   for (uint8_t i = 0; i < BUTTON_COUNT; i++) {
     bool down = digitalRead(PINS[i]) == HIGH;  // Grove: pressed reads HIGH
 
+    // Just sent a command for this button: whatever the contact does for
+    // the next LOCKOUT_MS is the same press, not a new one.
+    if (now < lockoutUntil[i]) {
+      wasDown[i] = down;
+      lastChange[i] = now;
+      continue;
+    }
+
     if (down != wasDown[i] && now - lastChange[i] >= DEBOUNCE_MS) {
       lastChange[i] = now;
       wasDown[i] = down;
@@ -155,6 +170,7 @@ void loop() {
         // release rather than on press so a hold never also sends the tap.
         Serial.println(COMMANDS[i]);
         blink();
+        lockoutUntil[i] = now + LOCKOUT_MS;
       }
       continue;
     }
@@ -165,6 +181,7 @@ void loop() {
       holdSent[i] = true;
       Serial.println(F("STOP"));
       blink();
+      lockoutUntil[i] = now + LOCKOUT_MS;
     }
   }
 }
