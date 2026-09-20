@@ -839,6 +839,15 @@ window.addEventListener("keydown", (event) => {
 // hence the Watch button; it shows only where Web Serial exists (Chrome,
 // Edge).
 const WATCH_BAUDS = [115200, 9600];
+// The board on 2026-09-20 carried a diagnostic firmware that reports pin
+// levels ("HIGH on GPIO1") instead of commands. Those lines map onto the
+// same actions by pin, so the watch works with either firmware: GPIO9 is
+// Scan, GPIO1 Read, GPIO16 Ask (the rig's wiring). A pin fires once per
+// press; a repeat inside the window is the same press.
+const WATCH_PINS: Record<string, Action> = { "9": "scan", "1": "read", "16": "ask" };
+const WATCH_PIN_LINE = /^high on gpio\s*(\d+)/i;
+const WATCH_PIN_REPEAT_MS = 300;
+const watchPinFiredAt: Record<string, number> = {};
 // A held port reads zero bytes with no error, and an idle board is silent
 // by design, so the only tell is a watch that says nothing after it was
 // connected. The app asks for a press on connect and, if nothing at all
@@ -980,9 +989,21 @@ async function listenToWatch(port: SerialPortLike, baudIndex: number): Promise<v
         // Every line the watch sends is shown, so a sighted helper can see
         // a press arrive even when it is not a command.
         if (raw) show(`Watch: ${raw}`);
+        const pin = raw.match(WATCH_PIN_LINE);
         if (line in actions) {
           if (started) run(line as Action);
           else void begin();
+        } else if (pin) {
+          // A diagnostic firmware reports the pin instead of the command.
+          const action = WATCH_PINS[pin[1]];
+          const now = performance.now();
+          if (action && now - (watchPinFiredAt[pin[1]] ?? 0) > WATCH_PIN_REPEAT_MS) {
+            watchPinFiredAt[pin[1]] = now;
+            if (started) run(action);
+            else void begin();
+          } else if (!action) {
+            console.info("[watch] unmapped pin", raw);
+          }
         } else if (line.startsWith("ready")) {
           // The board's banner: it was just reset.
           setStatus("Watch ready", "ok");
