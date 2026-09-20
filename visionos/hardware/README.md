@@ -44,3 +44,39 @@ and run the same actions as the buttons on screen.
 The serial route is the one to use on an Uno, and the fallback if the
 keyboard route ever types into the wrong window: a serial line only ever
 reaches this page.
+
+## The three-button watch: LOLIN S2 Mini with Grove buttons
+
+The board that exists (Conrad's, 2026-09-20) is a LOLIN S2 Mini (ESP32-S2)
+with three Grove button modules, running `button_commands.ino` on his
+machine (`watch_s2/watch_s2.ino` here is the earlier sketch for the same
+board and differs in two ways: 9600 baud, and STOP on a long press). What
+the board on the bench actually does:
+
+- Native USB serial, **115200 baud**, VID `0x303A` PID `0x80C2`. The port
+  name changes across resets; the app asks you to pick it once and reopens
+  it by itself afterwards.
+- One line per press, on the press, nothing on release: `SCAN`, `READ`,
+  `ASK`. Pins: GPIO9 scan, GPIO1 read, GPIO37 ask. There is no Stop
+  button; Stop is key `0` or the button on screen.
+- After a physical reset it prints one banner, `Ready - SCAN(9) READ(1)
+  ASK(37)`. Opening the port does not reset the board, so the banner is
+  not a handshake. The app shows "Watch ready" when it sees one.
+- `ignored (N pins high at once)` is a diagnostic from the firmware's
+  guard, not a command; the app logs it to the console and moves on.
+- The port is exclusive: close the Arduino IDE's Serial Monitor (and the
+  `serial-monitor` daemon it leaves behind) or the app reads nothing.
+- The port vanishes for a second or two on a reset or a reflash and comes
+  back; the app says "The watch was unplugged" and then "Watch
+  reconnected."
+
+The app opens the port at 115200 and, if the first bytes are not text,
+once more at 9600 for the older sketches; that first press is lost, and it
+says "Press again."
+
+**The gotcha, in Conrad's words:** Grove buttons are powered modules that
+drive their signal pin high when pressed, not bare switches to ground. With
+`INPUT_PULLUP` they read backwards, and with a bare `INPUT` an unpowered
+module leaves the pin floating, so all three "buttons" fire together in
+clean periodic bursts that look exactly like a short. `INPUT_PULLDOWN`
+fixes it. Suspect floating or unpowered inputs before suspecting wiring.

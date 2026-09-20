@@ -445,6 +445,8 @@ async function begin(): Promise<void> {
     // focus up close changes how a label has to be held.
     tts.say(`Using ${camera.label}, ${camera.focus}.`, SpeechPriority.Answer);
     connection.connect();
+    // A watch picked in an earlier session reconnects without the picker.
+    void reconnectGrantedWatch();
 
     let lastFrameAt = 0;
     let lastPeekAt = 0;
@@ -771,43 +773,116 @@ window.addEventListener("keydown", (event) => {
   run(action);
 });
 
-// The watch's Arduino can instead talk over its USB serial port, one command
-// per line: SCAN, READ, ASK or STOP (a VOICE line from an older sketch is
-// ignored). That needs no keyboard emulation,
-// so any board will do, but the browser only opens a port a person has
-// picked, hence the Watch button. Shown only where Web Serial exists.
+// The watch's board talks over its USB serial port, one command per line:
+// SCAN, READ, ASK or STOP (a VOICE line from an older sketch is ignored).
+// Conrad's LOLIN S2 Mini with three Grove buttons runs at 115200 baud,
+// prints one "Ready - SCAN(9) READ(1) ASK(37)" banner after a physical
+// reset only (opening the port does not reset a native-USB board) and an
+// "ignored (N pins high at once)" line when its guard drops a press; the
+// older AVR sketch and the repo's S2 sketch run at 9600. The port opens at
+// 115200 and, if the first bytes are not text, once more at 9600. The port
+// is exclusive (close the Arduino Serial Monitor) and it vanishes for a
+// second on a reset or a reflash, so a port the person already picked is
+// reopened by itself when it comes back, and at the next start of the
+// page. The browser only opens a port a person has picked once, hence the
+// Watch button; it shows only where Web Serial exists (Chrome, Edge).
+const WATCH_BAUDS = [115200, 9600];
 type SerialPortLike = {
   open(options: { baudRate: number }): Promise<void>;
-  readable: ReadableStream<BufferSource> | null;
+  close(): Promise<void>;
+  readable: ReadableStream<Uint8Array> | null;
 };
-const serial = (navigator as unknown as { serial?: { requestPort(): Promise<SerialPortLike> } })
-  .serial;
+type SerialLike = {
+  requestPort(): Promise<SerialPortLike>;
+  getPorts(): Promise<SerialPortLike[]>;
+  addEventListener(type: "connect" | "disconnect", listener: (event: Event) => void): void;
+};
+const serial = (navigator as unknown as { serial?: SerialLike }).serial;
 const watchButton = document.getElementById("watch") as HTMLButtonElement | null;
+let watchPort: SerialPortLike | null = null;
+let watchWanted = false;
+
+/** Not text: a baud mismatch turns a line into bytes like 0xF8 and 0x00. */
+function looksLikeGarbage(bytes: Uint8Array): boolean {
+  let bad = 0;
+  for (const byte of bytes) {
+    if (byte >= 0x80 || (byte < 0x20 && byte !== 0x0a && byte !== 0x0d && byte !== 0x09)) bad += 1;
+  }
+  return bad > 0 && bad * 4 >= bytes.length;
+}
+
+async function connectWatch(port: SerialPortLike, spoken: string): Promise<void> {
+  watchPort = port;
+  watchWanted = true;
+  await port.open({ baudRate: WATCH_BAUDS[0] });
+  setStatus("Watch connected", "ok");
+  tts.say(spoken, SpeechPriority.Answer);
+  void listenToWatch(port, 0);
+}
+
+/** A port the person granted earlier, opened again without the picker. */
+async function reconnectGrantedWatch(): Promise<void> {
+  if (!serial || watchPort) return;
+  try {
+    const [port] = await serial.getPorts();
+    if (port) await connectWatch(port, "Watch connected.");
+  } catch (err) {
+    console.info("[watch] no granted port to reopen:", (err as Error).message);
+  }
+}
+
 if (watchButton && serial) {
   watchButton.hidden = false;
   watchButton.addEventListener("click", async (e) => {
     e.stopPropagation();
     try {
-      const port = await serial.requestPort();
-      await port.open({ baudRate: 9600 });
-      setStatus("Watch connected", "ok");
-      tts.say("Watch connected.", SpeechPriority.Answer);
-      void listenToWatch(port);
+      await connectWatch(await serial.requestPort(), "Watch connected. Press a button on it.");
     } catch (err) {
       reportFailure(`Couldn't connect the watch: ${(err as Error).message}`);
     }
   });
+  serial.addEventListener("connect", (event) => {
+    if (!watchWanted || watchPort) return;
+    void connectWatch(event.target as unknown as SerialPortLike, "Watch reconnected.").catch((err) =>
+      reportFailure(`Couldn't reopen the watch: ${(err as Error).message}`)
+    );
+  });
+  serial.addEventListener("disconnect", () => {
+    if (!watchWanted) return;
+    watchPort = null;
+    setStatus("Watch unplugged", "error");
+    tts.say("The watch was unplugged.", SpeechPriority.Answer);
+  });
 }
 
-async function listenToWatch(port: SerialPortLike): Promise<void> {
+async function listenToWatch(port: SerialPortLike, baudIndex: number): Promise<void> {
   if (!port.readable) return;
-  const reader = port.readable.pipeThrough(new TextDecoderStream()).getReader();
+  const reader = port.readable.getReader();
+  const decoder = new TextDecoder();
   let buffered = "";
+  let first = true;
   try {
     for (;;) {
       const { value, done } = await reader.read();
       if (done) break;
-      buffered += value;
+      if (!value || value.length === 0) continue;
+      if (first) {
+        first = false;
+        if (looksLikeGarbage(value) && baudIndex + 1 < WATCH_BAUDS.length) {
+          // The board runs at the other rate. Reopen at it and go on; the
+          // press that showed this is lost, so say so.
+          const baud = WATCH_BAUDS[baudIndex + 1];
+          await reader.cancel();
+          reader.releaseLock();
+          await port.close();
+          await port.open({ baudRate: baud });
+          setStatus(`Watch connected at ${baud} baud`, "ok");
+          tts.say("Watch found at the slower rate. Press again.", SpeechPriority.Answer);
+          void listenToWatch(port, baudIndex + 1);
+          return;
+        }
+      }
+      buffered += decoder.decode(value, { stream: true });
       let newline = buffered.indexOf("\n");
       while (newline >= 0) {
         const line = buffered.slice(0, newline).trim().toLowerCase();
@@ -815,12 +890,22 @@ async function listenToWatch(port: SerialPortLike): Promise<void> {
         if (line in actions) {
           if (started) run(line as Action);
           else void begin();
+        } else if (line.startsWith("ready")) {
+          // The board's banner: it was just reset.
+          setStatus("Watch ready", "ok");
+        } else if (line) {
+          // "ignored (N pins high at once)" and anything else diagnostic.
+          console.info("[watch]", line);
         }
         newline = buffered.indexOf("\n");
       }
     }
   } catch {
-    reportFailure("Lost the connection to the watch.");
+    // An unplugged board announces itself through the disconnect event;
+    // only a failure with the board still there is reported here.
+    window.setTimeout(() => {
+      if (watchPort === port) reportFailure("Lost the connection to the watch.");
+    }, 500);
   }
 }
 
