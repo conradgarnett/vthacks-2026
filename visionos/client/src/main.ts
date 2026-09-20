@@ -56,6 +56,10 @@ const transcript = el<HTMLDivElement>("transcript");
 const modeLine = el<HTMLElement>("mode");
 
 const tts = new TtsPlayer();
+// Same origin: the dev server proxies /speech, and in production the
+// backend serves the client. A 404 from it costs nothing -- the player
+// just uses the browser's own voice.
+tts.setBackend(location.origin);
 const spatial = new SpatialAudio();
 const camera = new Camera(video);
 

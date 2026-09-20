@@ -17,3 +17,7 @@ dist/
 .DS_Store
 *.log
 eval/data/
+
+# Rendered speech: derived from the phrase list, re-creatable with
+# eval/warm_voice.py, and large. Never committed.
+visionos/data/voice_cache/

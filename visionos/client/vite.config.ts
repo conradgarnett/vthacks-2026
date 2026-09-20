@@ -31,6 +31,7 @@ export default defineConfig({
       "/health": { target: "http://127.0.0.1:8000" },
       "/scene": { target: "http://127.0.0.1:8000" },
       "/metrics": { target: "http://127.0.0.1:8000" },
+      "/speech": { target: "http://127.0.0.1:8000" },
     },
   },
   build: {

@@ -31,7 +31,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from backend.ai.medication import UNREADABLE_DOSE
 from backend.ai.ocr import (
@@ -51,6 +51,7 @@ from backend.hazards.engine import HazardEngine
 from backend.perception.pipeline import PerceptionPipeline
 from backend.scene.queries import find_object
 from backend.speech.chunker import SentenceChunker
+from backend.speech.voice import Voice
 from backend.telemetry import LatencyTrace, metrics_snapshot
 
 log = logging.getLogger(__name__)
@@ -311,6 +312,7 @@ async def lifespan(app: FastAPI):
     app.state.effective_provider = type(app.state.provider).__name__
 
     app.state.ocr = build_reader(settings.ocr_engine)
+    app.state.voice = Voice(settings)
     app.state.ocr.warmup()
 
     log.info("VisionOS ready on %s:%s", settings.host, settings.port)
@@ -347,6 +349,30 @@ async def health() -> JSONResponse:
             "prompt_version": PROMPT_VERSION,
             "demo_mode": settings.demo_mode,
         }
+    )
+
+
+@app.get("/speech")
+async def speech(text: str) -> Response:
+    """Audio for a phrase, or 404 telling the client to speak it itself.
+
+    Cache-first, so a phrase the app says often costs one synthesis ever and
+    is then served from disk in milliseconds -- faster than the browser's own
+    voice, and it works with the network down.
+
+    404 is the normal, expected answer whenever the voice is unavailable: no
+    key, a timeout, quota gone. The client treats it as "use your own voice",
+    which is why nothing here raises. Hazard speech never calls this.
+    """
+    audio = await app.state.voice.synthesize(text)
+    if audio is None:
+        return Response(status_code=404)
+    return Response(
+        content=audio,
+        media_type="audio/mpeg",
+        # Same text always yields the same audio, so let the browser keep it
+        # too: a repeated phrase then costs no request at all.
+        headers={"Cache-Control": "public, max-age=604800"},
     )
 
 

@@ -83,6 +83,20 @@ class Settings(BaseSettings):
     track_iou_threshold: float = 0.3
 
     # --- Server -----------------------------------------------------------
+    # --- Voice ------------------------------------------------------------
+    # ElevenLabs speaks the unhurried things: answers, reads, and the fixed
+    # phrases, which are synthesized once and cached to disk. Hazards never
+    # come from here -- a warning that waits on the network is a warning that
+    # arrives after the stairs, so those stay on the browser's offline voice.
+    # Empty key disables the whole path and the client keeps its own voice.
+    elevenlabs_api_key: str = ""
+    elevenlabs_voice_id: str = "JBFqnCBsd6RMkjVDRZzb"
+    elevenlabs_model: str = "eleven_turbo_v2_5"
+    # Past this, the client gives up and speaks it itself. Chosen so a stall
+    # costs a beat of silence rather than a sentence that never comes.
+    elevenlabs_timeout_s: float = 4.0
+    elevenlabs_cache_dir: str = "data/voice_cache"
+
     host: str = "0.0.0.0"
     port: int = 8000
     # Seeds fixed behavior and enables replay. Set for every rehearsal.
