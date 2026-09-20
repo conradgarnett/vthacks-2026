@@ -11,12 +11,12 @@ from collections import Counter
 import pytest
 
 from backend.ai.ocr import TextLine
-from backend.main import (
+from backend.main import Session, app
+from backend.perception.detector import Detection
+from backend.places_api import (
     PlaceMerge,
     PlaceName,
     SceneLink,
-    Session,
-    app,
     places_delete,
     places_forget_all,
     places_index,
@@ -25,7 +25,6 @@ from backend.main import (
     scenes_delete,
     scenes_link,
 )
-from backend.perception.detector import Detection
 from backend.perception.geometry import BoundingBox
 from backend.scene.inference import Seen
 from backend.scene.places import (

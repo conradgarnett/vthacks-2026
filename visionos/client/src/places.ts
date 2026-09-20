@@ -9,6 +9,7 @@
  * spoken, because a memory that changed is a state the user cannot see.
  */
 
+import { attachSheet } from "./sheet";
 import type { PlaceEvent } from "./ws";
 
 type SceneInfo = {
@@ -49,7 +50,15 @@ export function initPlaces(options: {
 
   let memory: Memory = EMPTY;
   let lastEvent: PlaceEvent | null = null;
-  let open = false;
+  const sheet = attachSheet({
+    handle,
+    panel,
+    close: closeButton,
+    onOpen: () => options.onOpen?.(),
+    onChange: (open) => {
+      if (open) void refresh();
+    },
+  });
 
   const percent = (score: number): string => `${Math.round(score * 100)}%`;
 
@@ -72,16 +81,6 @@ export function initPlaces(options: {
     const fetched = await request("GET", "/places");
     if (fetched) memory = fetched;
     render(fetched === null);
-  }
-
-  function setOpen(next: boolean): void {
-    open = next;
-    panel.dataset.open = String(next);
-    handle.setAttribute("aria-expanded", String(next));
-    if (next) {
-      options.onOpen?.();
-      void refresh();
-    }
   }
 
   /** The pill's text: where the user is, or how many places are known. */
@@ -356,7 +355,7 @@ export function initPlaces(options: {
   function render(unreachable: boolean): void {
     renderHandle();
     options.onMemory?.(memory);
-    if (!open) return;
+    if (!sheet.isOpen) return;
     renderBanner(unreachable);
     list.replaceChildren();
     const unplaced = renderUnplaced();
@@ -371,15 +370,6 @@ export function initPlaces(options: {
     forgetButton.hidden = memory.places.length === 0 && memory.unplaced.length === 0;
   }
 
-  handle.addEventListener("click", (e) => {
-    e.stopPropagation();
-    setOpen(!open);
-  });
-  closeButton.addEventListener("click", (e) => {
-    e.stopPropagation();
-    setOpen(false);
-  });
-  panel.addEventListener("click", (e) => e.stopPropagation());
   forgetButton.replaceWith(
     (() => {
       const node = armedButton("Forget all", "small danger", async () => {
@@ -402,14 +392,10 @@ export function initPlaces(options: {
       renderHandle();
       void refresh();
     },
-    toggle(): void {
-      setOpen(!open);
-    },
-    close(): void {
-      setOpen(false);
-    },
+    toggle: sheet.toggle,
+    close: sheet.close,
     get isOpen(): boolean {
-      return open;
+      return sheet.isOpen;
     },
     /** What the memory made of the latest scan. */
     onEvent(event: PlaceEvent): void {

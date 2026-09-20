@@ -119,7 +119,7 @@ def main() -> int:
             f"{sample.font[:20]:<20} want={sample.truth!r:<22} got={prediction[:32]!r}"
         )
 
-    print(f"\n  reference (apple-vision, macOS fonts): CER 0.182, exact 70%, silent 2% as of 2026-09-19")
+    print("\n  reference (apple-vision, macOS fonts): CER 0.182, exact 70%, silent 2% as of 2026-09-19")
     return 0
 
 

@@ -187,6 +187,23 @@ tested.
 
 ## Log
 
+- **2026-09-19, 23:15, visionOS-2, Jarvis and a bloat pass:** the assistant
+  answers to Jarvis at the user's request: a question through Ask must
+  start with the name (`WAKE_WORD` in `main.ts`; Jarves, Jervis and
+  Travis count as mis-hearings), the name is stripped before the question
+  is sent, a question without it gets the spoken hint "Say Jarvis first,
+  then your question", and stop words never need it. The ready line says
+  so. Bloat: the panel's HTTP routes moved from `main.py` into
+  `backend/places_api.py` (an `APIRouter` bound to the memory with
+  `bind()`, so the routes work without the lifespan and the tests call
+  them directly); the memory file is no longer written on the event loop
+  (`PlaceMemory.save_async` takes the document on the loop and encodes
+  and swaps the file on a worker thread; fingerprints are rounded once,
+  when the scene is made, not on every save); the two pull-up sheets
+  share `client/src/sheet.ts`; ruff's safe fixes applied (unused imports
+  in `test_enhance.py` and `eval/corpus.py`, empty f-strings, quoted
+  annotations). `.claude/scripts/poll_github.py` and PR posts go through
+  the signed-in `gh` now (5000 requests an hour instead of 60).
 - **2026-09-19, later still, visionOS-2, the blueprint tab:** each scan is
   drawn from above for the sighted helper (`client/src/blueprint.ts`, a
   Blueprint pill beside Places, key B): the user at the bottom, the

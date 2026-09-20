@@ -12,9 +12,17 @@ import { Voice } from "./voice";
 import { type Boxed, Connection, type ServerEvent } from "./ws";
 
 const DISCLAIMER =
-  "VisionOS ready. Tap anywhere to scan, tap Ask to speak. This is an " +
-  "assistive tool, not a replacement for your cane or guide dog. Distances " +
-  "are estimates.";
+  "Jarvis ready. Tap anywhere to scan; tap Ask, then say Jarvis and your " +
+  "question. This is an assistive tool, not a replacement for your cane or " +
+  "guide dog. Distances are estimates.";
+
+// The assistant answers to Jarvis, at the user's request: a question through
+// Ask has to start with the name, which is stripped before it is sent. Close
+// mis-hearings count (Jarves, Jervis, Travis); a question without the name
+// gets a spoken hint rather than an answer. Stop words never need it, so
+// speech can always be cut off.
+const WAKE_WORD = /^(?:hey\s+|ok\s+|okay\s+|yo\s+)?(?:jarv\w*|jervis|garvis|travis)\b[\s,.:;!?-]*/i;
+const WAKE_HINT = "Say Jarvis first, then your question.";
 
 // Live frames go to the detector at this rate. On a GPU it is idle most of
 // the time; on a CPU-only backend a frame every 700 ms keeps the cores busy
@@ -157,8 +165,12 @@ const places = initPlaces({
 });
 
 // A hook for driving the screen without a camera or a socket, from the
-// browser console: __visionos.event({type: "speech", text: "..."}).
-(window as unknown as { __visionos: unknown }).__visionos = { event: (event: ServerEvent) => onServerEvent(event) };
+// browser console: __visionos.event({type: "speech", text: "..."}) plays a
+// server event, __visionos.spoken("Jarvis, where am I") a heard question.
+(window as unknown as { __visionos: unknown }).__visionos = {
+  event: (event: ServerEvent) => onServerEvent(event),
+  spoken: (text: string) => routeSpokenCommand(text),
+};
 
 // What this backend can do, in one sentence, before the user commits to
 // starting. The same facts are spoken once connected; showing them here too
@@ -375,15 +387,23 @@ function routeSpokenCommand(text: string): void {
     return;
   }
 
+  const wake = trimmed.match(WAKE_WORD);
+  const question = wake ? trimmed.slice(wake[0].length).trim() : "";
+  if (!wake || !question) {
+    show(WAKE_HINT);
+    tts.say(WAKE_HINT, SpeechPriority.Answer);
+    return;
+  }
+
   for (const pattern of BEACON_PHRASES) {
-    const match = trimmed.match(pattern);
+    const match = question.match(pattern);
     if (match?.[1]) {
       connection.sendIntent("locate", match[1].replace(/[?.!]$/, ""));
       return;
     }
   }
 
-  connection.sendIntent("ask", trimmed);
+  connection.sendIntent("ask", question);
 }
 
 async function begin(): Promise<void> {

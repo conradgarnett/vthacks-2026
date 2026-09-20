@@ -32,7 +32,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 
 from backend.ai.medication import UNREADABLE_DOSE
 from backend.ai.ocr import (
@@ -47,6 +46,7 @@ from backend.ai.prompts import PROMPT_VERSION, READ_PROMPT, SCAN_PROMPT, scene_c
 from backend.perception.pipeline import _decode_jpeg
 from backend.scene.inference import Seen, describe_scan, inventory_sentence, refine_labels
 from backend.scene.places import Observation, PlaceMemory, scene_from_scan, thumbnail_of
+from backend.places_api import bind as bind_places, router as places_router
 from backend.ai.vision import VisionProvider, build_provider
 from backend.config import get_settings
 from backend.hazards.engine import HazardEngine
@@ -362,6 +362,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# The place memory's panel routes live in their own module; they find the
+# memory through this getter, so they work before and without the lifespan.
+bind_places(lambda: getattr(app.state, "places", None))
+app.include_router(places_router)
+
 
 @app.get("/health")
 async def health() -> JSONResponse:
@@ -393,92 +398,6 @@ async def metrics() -> JSONResponse:
 async def scene() -> JSONResponse:
     """Live scene model, for debugging and the judge dashboard."""
     return JSONResponse(app.state.perception.snapshot())
-
-
-# --- The place memory, for the panel --------------------------------------
-# Plain HTTP beside the socket: the panel is a sighted helper's tool and
-# needs no session. Every edit answers with the whole memory so the panel
-# redraws from what the server now holds, and the client speaks the change.
-
-
-class PlaceName(BaseModel):
-    name: str
-
-
-class PlaceMerge(BaseModel):
-    into: str
-
-
-class SceneLink(BaseModel):
-    place_id: str | None = None
-    name: str | None = None
-
-
-def _places() -> PlaceMemory | None:
-    return getattr(app.state, "places", None)
-
-
-def _places_response() -> JSONResponse:
-    memory = _places()
-    if memory is None:
-        return JSONResponse({"enabled": False, "places": [], "unplaced": [], "current": None})
-    return JSONResponse(memory.to_dict())
-
-
-@app.get("/places")
-async def places_index() -> JSONResponse:
-    """Every remembered place with its views."""
-    return _places_response()
-
-
-@app.post("/places/{place_id}")
-async def places_rename(place_id: str, body: PlaceName) -> JSONResponse:
-    memory = _places()
-    if memory is None or memory.rename(place_id, body.name) is None:
-        return JSONResponse({"error": "no such place"}, status_code=404)
-    return _places_response()
-
-
-@app.delete("/places/{place_id}")
-async def places_delete(place_id: str) -> JSONResponse:
-    memory = _places()
-    if memory is None or memory.delete_place(place_id) is None:
-        return JSONResponse({"error": "no such place"}, status_code=404)
-    return _places_response()
-
-
-@app.delete("/places")
-async def places_forget_all() -> JSONResponse:
-    memory = _places()
-    if memory is not None:
-        memory.forget_all()
-    return _places_response()
-
-
-@app.post("/places/{place_id}/merge")
-async def places_merge(place_id: str, body: PlaceMerge) -> JSONResponse:
-    """Every view of one place joins another; the first is gone."""
-    memory = _places()
-    if memory is None or memory.merge(place_id, body.into) is None:
-        return JSONResponse({"error": "no such place"}, status_code=404)
-    return _places_response()
-
-
-@app.delete("/scenes/{scene_id}")
-async def scenes_delete(scene_id: str) -> JSONResponse:
-    memory = _places()
-    if memory is None or memory.delete_scene(scene_id) is None:
-        return JSONResponse({"error": "no such scene"}, status_code=404)
-    return _places_response()
-
-
-@app.post("/scenes/{scene_id}/place")
-async def scenes_link(scene_id: str, body: SceneLink) -> JSONResponse:
-    """Put a view into a place, or start a new place from it."""
-    memory = _places()
-    if memory is None or memory.link(scene_id, body.place_id, body.name) is None:
-        return JSONResponse({"error": "no such scene or place"}, status_code=404)
-    return _places_response()
 
 
 class Session:
@@ -702,7 +621,12 @@ class Session:
             thumbnail = await loop.run_in_executor(None, thumbnail_of, image)
             frame_size = (int(image.shape[1]), int(image.shape[0]))
             scene = scene_from_scan(seen, cues, embedding, thumbnail, frame_size=frame_size)
-            return self.places.observe(scene)
+            # The verdict on the loop, the file write off it: the memory
+            # runs to a megabyte or two of thumbnails and fingerprints, and
+            # writing that between a scan's two events stalled the socket.
+            observation = self.places.observe(scene, persist=False)
+            await self.places.save_async()
+            return observation
         except Exception:
             log.exception("place memory failed; the scan is spoken without it")
             return None

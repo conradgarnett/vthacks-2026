@@ -49,7 +49,7 @@ def ask(question: str, default: str, assume_yes: bool) -> str:
     return answer or default
 
 
-def fail(text: str) -> "NoReturn":  # noqa: F821 - typing only
+def fail(text: str) -> NoReturn:  # noqa: F821 - typing only
     print(f"\nERROR: {text}")
     raise SystemExit(1)
 

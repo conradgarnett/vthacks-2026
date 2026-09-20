@@ -259,11 +259,13 @@ class Scene:
             "aspect": self.aspect,
         }
         if with_embedding:
-            out["embedding"] = None if self.embedding is None else [round(v, 4) for v in self.embedding]
+            # Already rounded when the scene was made; rounding 512 floats
+            # per scene again on every save added up on the event loop.
+            out["embedding"] = None if self.embedding is None else list(self.embedding)
         return out
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Scene":
+    def from_dict(cls, data: dict) -> Scene:
         return cls(
             id=str(data.get("id") or uuid.uuid4().hex[:8]),
             at=float(data.get("at") or 0.0),
@@ -320,7 +322,7 @@ def scene_from_scan(
         labels=dict(labels),
         words=distinctive_words(text_lines),
         room=kind_of(labels.elements()),
-        embedding=list(embedding) if embedding else None,
+        embedding=[round(float(v), 4) for v in embedding] if embedding else None,
         thumbnail=thumbnail,
         layout=layout,
         aspect=aspect,
@@ -364,7 +366,7 @@ class Place:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Place":
+    def from_dict(cls, data: dict) -> Place:
         return cls(
             id=str(data.get("id") or uuid.uuid4().hex[:8]),
             name=str(data.get("name") or "Place"),
@@ -460,10 +462,12 @@ class PlaceMemory:
             log.exception("Places: could not read %s; starting with none", self.path)
             self.places, self.unplaced = [], []
 
-    def save(self) -> None:
-        if not self.path:
-            return
-        data = {
+    def _document(self) -> dict:
+        """Everything worth keeping, as one JSON-ready dict. Cheap: the
+        thumbnails and fingerprints are already strings and rounded floats,
+        so this only assembles; the encoding and the write are the slow
+        part and can happen off the event loop."""
+        return {
             "version": 1,
             "saved_at": time.time(),
             "places": [
@@ -472,6 +476,8 @@ class PlaceMemory:
             ],
             "unplaced": [s.to_dict(with_embedding=True) for s in self.unplaced],
         }
+
+    def _write(self, data: dict) -> None:
         folder = os.path.dirname(os.path.abspath(self.path))
         os.makedirs(folder, exist_ok=True)
         # Written whole, then swapped in: a crash mid-write must not eat the memory.
@@ -486,6 +492,20 @@ class PlaceMemory:
                 os.unlink(temp)
             except OSError:
                 pass
+
+    def save(self) -> None:
+        if self.path:
+            self._write(self._document())
+
+    async def save_async(self) -> None:
+        """The same write, off the event loop: the document is taken now,
+        the encoding and the file swap happen on a worker thread."""
+        if not self.path:
+            return
+        import asyncio
+
+        data = self._document()
+        await asyncio.to_thread(self._write, data)
 
     # --- Lookup -----------------------------------------------------------
 
@@ -534,8 +554,9 @@ class PlaceMemory:
 
     # --- Remembering ------------------------------------------------------
 
-    def observe(self, scene: Scene, now: float | None = None) -> Observation:
-        """File a scan's scene: recognized, new, unsure or skipped."""
+    def observe(self, scene: Scene, now: float | None = None, persist: bool = True) -> Observation:
+        """File a scan's scene: recognized, new, unsure or skipped. With
+        `persist` off the caller writes the file itself, e.g. off the loop."""
         now = time.time() if now is None else now
         if scene.is_empty:
             return Observation("skipped", None)
@@ -557,7 +578,8 @@ class PlaceMemory:
             )
             self._attach(place, scene)
             self.current = (place.id, evidence.score, now)
-            self.save()
+            if persist:
+                self.save()
             log.info("place: recognized %s (%.2f; %s)", place.name, evidence.score, evidence.describe())
             return Observation("recognized", scene, place=place, evidence=evidence, still=still)
 
@@ -565,7 +587,7 @@ class PlaceMemory:
             if not scene.has_substance:
                 # A blank view is not worth a place of its own.
                 return Observation("skipped", scene, evidence=evidence)
-            created = self.remember_new(scene, now=now)
+            created = self.remember_new(scene, now=now, persist=persist)
             self.current = (created.id, 1.0, now)
             log.info(
                 "place: new %s (best other %.2f)", created.name, evidence.score if evidence else 0.0
@@ -574,11 +596,14 @@ class PlaceMemory:
 
         self.unplaced.append(scene)
         del self.unplaced[: -self.max_unplaced]
-        self.save()
+        if persist:
+            self.save()
         log.info("place: unsure, might be %s (%.2f; %s)", place.name, evidence.score, evidence.describe())
         return Observation("unsure", scene, candidate=place, evidence=evidence)
 
-    def remember_new(self, scene: Scene, name: str | None = None, now: float | None = None) -> Place:
+    def remember_new(
+        self, scene: Scene, name: str | None = None, now: float | None = None, persist: bool = True
+    ) -> Place:
         now = time.time() if now is None else now
         place = Place(
             id=uuid.uuid4().hex[:8],
@@ -588,7 +613,8 @@ class PlaceMemory:
             scenes=[scene],
         )
         self.places.append(place)
-        self.save()
+        if persist:
+            self.save()
         return place
 
     def _attach(self, place: Place, scene: Scene) -> None:

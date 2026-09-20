@@ -22,6 +22,7 @@
  * same information for someone who can look.
  */
 
+import { attachSheet } from "./sheet";
 import type { PlaceEvent } from "./ws";
 
 export type MapItem = {
@@ -228,25 +229,23 @@ export function initBlueprint(options: { onOpen?: () => void } = {}) {
   const note = el<HTMLDivElement>("blueprint-note");
   const closeButton = el<HTMLButtonElement>("blueprint-close");
 
-  let open = false;
   let latest: MapItem[] | null = null;
   let latestAspect: number | null = null;
   let latestAt: Date | null = null;
   let latestPlace: PlaceEvent | null = null;
   let memory: Memory = { places: [], current: null };
+  const sheet = attachSheet({
+    handle,
+    panel,
+    close: closeButton,
+    onOpen: () => options.onOpen?.(),
+    onChange: (open) => {
+      if (open) render();
+    },
+  });
 
   const meters = (distance: number): string =>
     `${distance < 3 ? distance.toFixed(1) : distance.toFixed(0)} m`;
-
-  function setOpen(next: boolean): void {
-    open = next;
-    panel.dataset.open = String(next);
-    handle.setAttribute("aria-expanded", String(next));
-    if (next) {
-      options.onOpen?.();
-      render();
-    }
-  }
 
   function fillPick(): void {
     const chosen = pick.value;
@@ -447,7 +446,7 @@ export function initBlueprint(options: { onOpen?: () => void } = {}) {
 
   function render(): void {
     fillPick();
-    if (!open) return;
+    if (!sheet.isOpen) return;
     const placeId = pick.value;
     if (placeId) {
       const place = memory.places.find((p) => p.id === placeId);
@@ -485,18 +484,9 @@ export function initBlueprint(options: { onOpen?: () => void } = {}) {
     note.textContent = describeWalkway(items);
   }
 
-  handle.addEventListener("click", (e) => {
-    e.stopPropagation();
-    setOpen(!open);
-  });
-  closeButton.addEventListener("click", (e) => {
-    e.stopPropagation();
-    setOpen(false);
-  });
-  panel.addEventListener("click", (e) => e.stopPropagation());
   pick.addEventListener("change", () => render());
   window.addEventListener("resize", () => {
-    if (open) render();
+    if (sheet.isOpen) render();
   });
 
   return {
@@ -504,14 +494,10 @@ export function initBlueprint(options: { onOpen?: () => void } = {}) {
     reveal(): void {
       handle.hidden = false;
     },
-    toggle(): void {
-      setOpen(!open);
-    },
-    close(): void {
-      setOpen(false);
-    },
+    toggle: sheet.toggle,
+    close: sheet.close,
     get isOpen(): boolean {
-      return open;
+      return sheet.isOpen;
     },
     /** What the latest scan saw, with direction and distance, and the
      * frame's size so a wall's floor line can be turned into a distance. */

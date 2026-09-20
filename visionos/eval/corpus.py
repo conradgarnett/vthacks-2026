@@ -10,7 +10,6 @@ CER, not "does the output contain the word". The loose check hid failures --
 from __future__ import annotations
 
 import io
-import math
 import os
 import random
 from dataclasses import dataclass
