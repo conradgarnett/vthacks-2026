@@ -183,6 +183,46 @@ VOCABULARY: dict[str, ClassSpec] = {
     "vending machine": ClassSpec(1.80, False, True),
     "drinking fountain": ClassSpec(1.00, False, True),
     "fire extinguisher": ClassSpec(0.55, False, True),
+    # -- Food ---------------------------------------------------------------
+    # A trigger, never evidence. These answer "is the wearer eating" and
+    # "is there a label worth reading"; what is actually in the food comes
+    # from the label, because the allergen is not in the pixels -- a cookie
+    # may or may not have nuts. Distance is never spoken for a food, so
+    # height_m is a rough prior only.
+    # Measured on the same 300 COCO photographs as the cuts below
+    # (eval/run_detect_eval.py, yolov8s-world on MPS): 25 classes cost no
+    # detect time (32.3 -> 32.9 ms at 640 px, 86.6 -> 84.8 ms at 1280) and
+    # invented nothing on the 24 blank textures. Seven of the eight COCO
+    # scores were found more than invented -- cake 20/7, pizza 18/9,
+    # broccoli 16/15, donut 5/0, carrot 4/2, sandwich 2/1, hot dog 1/0.
+    # orange is cut: 5 found against 9 invented, the same shape as apple
+    # and banana. Of the seventeen COCO cannot score, ten never fired at
+    # all across those photos, including every allergen name that matters:
+    # peanuts, peanut butter, nuts, shrimp, cheese.
+    "sandwich": ClassSpec(0.06, False, scale="small"),
+    "pizza": ClassSpec(0.03, False, scale="small"),
+    "hot dog": ClassSpec(0.05, False, scale="small"),
+    "hamburger": ClassSpec(0.08, False, scale="small"),
+    "donut": ClassSpec(0.04, False, scale="small"),
+    "cake": ClassSpec(0.12, False, scale="small"),
+    "cookie": ClassSpec(0.01, False, scale="small"),
+    "bread": ClassSpec(0.10, False, scale="small"),
+    "bagel": ClassSpec(0.05, False, scale="small"),
+    "pasta": ClassSpec(0.05, False, scale="small"),
+    "cereal": ClassSpec(0.25, False, scale="small"),
+    "cheese": ClassSpec(0.05, False, scale="small"),
+    "ice cream": ClassSpec(0.10, False, scale="small"),
+    "yogurt": ClassSpec(0.10, False, scale="small"),
+    "milk carton": ClassSpec(0.25, False, scale="small"),
+    "egg": ClassSpec(0.05, False, scale="small"),
+    "peanut butter": ClassSpec(0.12, False, scale="small"),
+    "peanuts": ClassSpec(0.02, False, scale="small"),
+    "nuts": ClassSpec(0.02, False, scale="small"),
+    "chocolate": ClassSpec(0.02, False, scale="small"),
+    "shrimp": ClassSpec(0.03, False, scale="small"),
+    "sushi": ClassSpec(0.04, False, scale="small"),
+    "broccoli": ClassSpec(0.12, False, scale="small"),
+    "carrot": ClassSpec(0.03, False, scale="small"),
     # Cut after measuring on 300 COCO photographs (eval/run_detect_eval.py):
     # apple found 0 of 17 and invented 39, banana and handbag had three
     # invented for every one found. A scan speaks what two frames agree on
