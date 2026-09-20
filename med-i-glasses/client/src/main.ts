@@ -485,7 +485,26 @@ async function begin(): Promise<void> {
     // cannot see: a webcam on a pair of glasses and the one above the laptop
     // screen are indistinguishable from the inside, and a lens that cannot
     // focus up close changes how a label has to be held.
-    tts.say(`Using ${camera.label}, ${camera.focus}.`, SpeechPriority.Answer);
+    if (camera.waitingForGlasses) {
+      tts.say(
+        "No camera on the glasses was found, so the laptop's own camera is left alone. Check the cable; I will start it as soon as it appears.",
+        SpeechPriority.Answer
+      );
+    } else {
+      tts.say(`Using ${camera.label}, ${camera.focus}.`, SpeechPriority.Answer);
+    }
+    // A webcam that turns up late (plugged back in, or listed late by the
+    // system) is started without a reload, and every change is spoken.
+    camera.onSwitch = (label) => {
+      placeReadArea();
+      tts.say(`Using ${label}, ${camera.focus}.`, SpeechPriority.Answer);
+    };
+    camera.onLost = () => {
+      tts.say(
+        "The glasses camera was disconnected. Check the cable; I will start it again when it appears.",
+        SpeechPriority.Answer
+      );
+    };
     connection.connect();
     // A watch picked in an earlier session reconnects without the picker.
     void reconnectGrantedWatch();
