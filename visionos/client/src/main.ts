@@ -6,6 +6,7 @@ import { Camera } from "./camera";
 import { SpatialAudio } from "./audio/spatial";
 import { SpeechPriority, TtsPlayer } from "./audio/tts-player";
 import { onVoicesReady, pickVoice, rankVoices } from "./audio/voices";
+import { initPlaces } from "./places";
 import { Voice } from "./voice";
 import { type Boxed, Connection, type ServerEvent } from "./ws";
 
@@ -137,6 +138,16 @@ function show(text: string, kind: "speech" | "hazard" = "speech"): void {
   transcript.prepend(line);
   while (transcript.childElementCount > 8) transcript.lastElementChild?.remove();
 }
+
+// The places the app remembers, and the panel a sighted helper edits them
+// in. Every edit is spoken, since a changed memory is a state the user
+// cannot see.
+const places = initPlaces({
+  speak: (text) => {
+    tts.say(text, SpeechPriority.Answer);
+    show(text);
+  },
+});
 
 // What this backend can do, in one sentence, before the user commits to
 // starting. The same facts are spoken once connected; showing them here too
@@ -281,6 +292,12 @@ function onServerEvent(event: ServerEvent): void {
       break;
     }
 
+    case "place":
+      // What the memory made of the scan; the spoken part rode along in
+      // the scan's own speech.
+      places.onEvent(event);
+      break;
+
     case "trace":
       // The read or scan is done with its hi-res frames; let the fast loop
       // resume.
@@ -385,6 +402,7 @@ async function begin(): Promise<void> {
     placeReadArea();
     tapLayer.hidden = false;
     controls.hidden = false;
+    places.reveal();
     setStatus("Connecting…", "busy");
     tts.say(DISCLAIMER, SpeechPriority.Answer);
     // Which camera is in use, and whether it can focus, are states the user
@@ -697,6 +715,14 @@ window.addEventListener("keydown", (event) => {
     }
     return;
   }
+  // P pulls the places panel up or puts it away; Escape puts it away too,
+  // on its way to stopping speech.
+  if (key === "p") {
+    event.preventDefault();
+    places.toggle();
+    return;
+  }
+  if (key === "Escape" && places.isOpen) places.close();
   const action = KEYS[key];
   if (!action) return;
   event.preventDefault();

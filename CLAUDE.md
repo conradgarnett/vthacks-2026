@@ -92,7 +92,7 @@ second, lower pass; tiling still applies.
 
 ```bash
 cd visionos
-.venv/bin/python -m pytest backend/tests -q          # 516 tests (3 Apple-only)
+.venv/bin/python -m pytest backend/tests -q          # 552 tests (3 Apple-only)
 PYTHONPATH=. .venv/bin/python eval/run_ocr_eval.py 60
 ```
 
@@ -187,6 +187,45 @@ tested.
 
 ## Log
 
+- **2026-09-19, late night, visionOS-2, the places memory:** every scan is
+  remembered as a scene (`backend/scene/places.py`): the things two frames
+  agreed on (people and walls left out), the distinctive words read (room
+  numbers and names; wayfinding words like EXIT do not count), the kind of
+  room, a CLIP fingerprint of the frame and a 160 px thumbnail. The
+  fingerprint comes from the CLIP model YOLO-World already holds to embed
+  its class names (`Detector.embed` in `perception/detector.py`, flagged:
+  no extra memory, on the inference thread, 135 to 195 ms of a 2.8 s scan
+  on this CPU). Scenes that look alike are linked into one named place
+  ("Hallway 1", "Office 2", "Place 3" when the room is not decisive). The
+  score is picture (cosine ramped 0.72 to 0.92) x (0.75 + 0.25 x how much
+  of the smaller view's things the other holds) + words (+0.35 a shared
+  number, +0.15 a shared word, -0.10 when both show numbers and share
+  none) + 0.15 when the same place was recognized within the last 60 s.
+  At 0.80 or more (the user's bar) the scan opens with "It looks like you
+  are (still) in Hallway 1"; below 0.50 it ends with "I'll remember this
+  place as Hallway 2"; in between nothing is said and the scene waits
+  unplaced for the helper. A place keeps its 6 newest views, so it is
+  learned from more angles as it is used. Calibrated on 60 indoor COCO
+  photos (`.claude/bench/place_calib.log` on this laptop): the same photo
+  after a small camera move (80% crop) has picture cosine p5 0.853, p50
+  0.919; after a big move (55% crop, rotation, blur, exposure) p50 0.827;
+  two different photos that share two or more kinds of thing p95 0.786,
+  max 0.870 (n=336). At the ramp, 0 of 336 look-alike pairs are wrongly
+  recognized, 87% of small moves are, 13% of big moves on their own. The
+  memory lives in `visionos/data/places.json` (gitignored; `PLACES_FILE`,
+  `PLACES_ENABLED`, `PLACE_MATCH_CONFIDENCE`, `PLACE_NEW_BELOW`). For the
+  panel, plain HTTP beside the socket (`main.py`, shared, additive):
+  `GET /places`, `POST /places/{id}` rename, `DELETE /places/{id}`,
+  `DELETE /places`, `POST /places/{id}/merge`, `DELETE /scenes/{id}`,
+  `POST /scenes/{id}/place`; and a `place` event after every scan. Client:
+  a Places pill top right (green "In Hallway 1"), key P or the pill pulls
+  up a sheet with every place and its views (thumbnails, x to forget one),
+  rename in place, two-tap Delete, "Link into..." to merge places or file
+  an unplaced view, Forget all; every edit is spoken, since a changed
+  memory is a state the user cannot see. "Where am I" answers with the
+  place name first, and the online model gets a REMEMBERED PLACE line
+  (PROMPT_VERSION v6). In Claude mode the memory still runs on the scan
+  frame with the tracked objects. Suite 516 -> 552.
 - **2026-09-19, night, visionOS-2:** merged `main-project` at 4037f63
   (Conrad's per-engine gating: RapidOCR lines below 0.70 confidence are
   dropped and the acronym rules relax for a confident engine; his Mac

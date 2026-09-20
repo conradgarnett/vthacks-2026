@@ -117,6 +117,19 @@ class Settings(BaseSettings):
     object_memory_s: float = 20.0
     track_iou_threshold: float = 0.3
 
+    # --- Places -----------------------------------------------------------
+    # Every scan is remembered as a scene and scenes that look alike are
+    # linked into a named place ("Hallway 1"). A match at or above
+    # place_match_confidence is spoken ("It looks like you are in Hallway
+    # 1"), the user's 80% bar; below place_new_below the scene starts a new
+    # place; in between nothing is said and the panel offers the link to a
+    # sighted helper. The file is this machine's memory of places; delete
+    # it, or use the panel, to forget.
+    places_enabled: bool = True
+    places_file: str = "data/places.json"
+    place_match_confidence: float = 0.80
+    place_new_below: float = 0.50
+
     # --- Server -----------------------------------------------------------
     host: str = "0.0.0.0"
     port: int = 8000

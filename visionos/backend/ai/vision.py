@@ -206,7 +206,7 @@ def credentials_available() -> bool:
 
 
 def build_provider(
-    settings: Settings, scene_getter=None, detections_getter=None
+    settings: Settings, scene_getter=None, detections_getter=None, place_getter=None
 ) -> VisionProvider:
     if settings.vision_provider == "replay":
         log.warning(
@@ -219,12 +219,12 @@ def build_provider(
         from backend.ai.local_provider import LocalSceneProvider
 
         log.info("Vision provider: local scene model (no credentials required)")
-        return LocalSceneProvider(scene_getter, detections_getter)
+        return LocalSceneProvider(scene_getter, detections_getter, place_getter)
 
     if settings.vision_provider == "nvidia":
         from backend.ai.local_provider import LocalSceneProvider
 
-        local = LocalSceneProvider(scene_getter, detections_getter)
+        local = LocalSceneProvider(scene_getter, detections_getter, place_getter)
         if not settings.nvidia_api_key:
             log.warning(
                 "VISION_PROVIDER=nvidia but NVIDIA_API_KEY is not set; on-device "
@@ -247,7 +247,7 @@ def build_provider(
             "Run `ant auth login` for full vision. Descriptions will be limited "
             "to recognized objects and cannot include text."
         )
-        return LocalSceneProvider(scene_getter, detections_getter)
+        return LocalSceneProvider(scene_getter, detections_getter, place_getter)
 
     log.info("Vision provider: Claude (%s)", settings.visionos_model)
     return ClaudeVisionProvider(settings)

@@ -32,6 +32,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from backend.ai.medication import UNREADABLE_DOSE
 from backend.ai.ocr import (
@@ -45,6 +46,7 @@ from backend.ai.ocr import (
 from backend.ai.prompts import PROMPT_VERSION, READ_PROMPT, SCAN_PROMPT, scene_context
 from backend.perception.pipeline import _decode_jpeg
 from backend.scene.inference import Seen, describe_scan, inventory_sentence, refine_labels
+from backend.scene.places import Observation, PlaceMemory, scene_from_scan, thumbnail_of
 from backend.ai.vision import VisionProvider, build_provider
 from backend.config import get_settings
 from backend.hazards.engine import HazardEngine
@@ -322,10 +324,21 @@ async def lifespan(app: FastAPI):
     app.state.perception = PerceptionPipeline(settings)
     app.state.perception.warmup()
 
+    # The places this machine remembers, on disk between runs. Off, the
+    # scan path is exactly as it was.
+    app.state.places = None
+    if settings.places_enabled:
+        app.state.places = PlaceMemory(
+            settings.places_file,
+            match_confidence=settings.place_match_confidence,
+            new_below=settings.place_new_below,
+        )
+
     app.state.provider = build_provider(
         settings,
         scene_getter=lambda: app.state.perception.scene,
         detections_getter=lambda: app.state.perception.last_detections,
+        place_getter=lambda: app.state.places.current_name() if app.state.places else None,
     )
     app.state.effective_provider = type(app.state.provider).__name__
     await app.state.provider.verify()
@@ -382,6 +395,92 @@ async def scene() -> JSONResponse:
     return JSONResponse(app.state.perception.snapshot())
 
 
+# --- The place memory, for the panel --------------------------------------
+# Plain HTTP beside the socket: the panel is a sighted helper's tool and
+# needs no session. Every edit answers with the whole memory so the panel
+# redraws from what the server now holds, and the client speaks the change.
+
+
+class PlaceName(BaseModel):
+    name: str
+
+
+class PlaceMerge(BaseModel):
+    into: str
+
+
+class SceneLink(BaseModel):
+    place_id: str | None = None
+    name: str | None = None
+
+
+def _places() -> PlaceMemory | None:
+    return getattr(app.state, "places", None)
+
+
+def _places_response() -> JSONResponse:
+    memory = _places()
+    if memory is None:
+        return JSONResponse({"enabled": False, "places": [], "unplaced": [], "current": None})
+    return JSONResponse(memory.to_dict())
+
+
+@app.get("/places")
+async def places_index() -> JSONResponse:
+    """Every remembered place with its views."""
+    return _places_response()
+
+
+@app.post("/places/{place_id}")
+async def places_rename(place_id: str, body: PlaceName) -> JSONResponse:
+    memory = _places()
+    if memory is None or memory.rename(place_id, body.name) is None:
+        return JSONResponse({"error": "no such place"}, status_code=404)
+    return _places_response()
+
+
+@app.delete("/places/{place_id}")
+async def places_delete(place_id: str) -> JSONResponse:
+    memory = _places()
+    if memory is None or memory.delete_place(place_id) is None:
+        return JSONResponse({"error": "no such place"}, status_code=404)
+    return _places_response()
+
+
+@app.delete("/places")
+async def places_forget_all() -> JSONResponse:
+    memory = _places()
+    if memory is not None:
+        memory.forget_all()
+    return _places_response()
+
+
+@app.post("/places/{place_id}/merge")
+async def places_merge(place_id: str, body: PlaceMerge) -> JSONResponse:
+    """Every view of one place joins another; the first is gone."""
+    memory = _places()
+    if memory is None or memory.merge(place_id, body.into) is None:
+        return JSONResponse({"error": "no such place"}, status_code=404)
+    return _places_response()
+
+
+@app.delete("/scenes/{scene_id}")
+async def scenes_delete(scene_id: str) -> JSONResponse:
+    memory = _places()
+    if memory is None or memory.delete_scene(scene_id) is None:
+        return JSONResponse({"error": "no such scene"}, status_code=404)
+    return _places_response()
+
+
+@app.post("/scenes/{scene_id}/place")
+async def scenes_link(scene_id: str, body: SceneLink) -> JSONResponse:
+    """Put a view into a place, or start a new place from it."""
+    memory = _places()
+    if memory is None or memory.link(scene_id, body.place_id, body.name) is None:
+        return JSONResponse({"error": "no such scene or place"}, status_code=404)
+    return _places_response()
+
+
 class Session:
     """Per-connection state. One phone, one session."""
 
@@ -391,11 +490,13 @@ class Session:
         provider: VisionProvider,
         perception: PerceptionPipeline,
         ocr: TextReader,
+        places: PlaceMemory | None = None,
     ) -> None:
         self.socket = socket
         self.provider = provider
         self.perception = perception
         self.ocr = ocr
+        self.places = places
         self.latest_frame: bytes | None = None
 
         settings = get_settings()
@@ -512,22 +613,35 @@ class Session:
         if not frames:
             await self.handle_intent("scan", None)
             return
+        loop = asyncio.get_running_loop()
         if self.provider.reads_text:
             # A vision model describes the picture itself; the burst just
-            # gives it the sharper frame.
+            # gives it the sharper frame. The place memory still looks at
+            # the picture, with what the live loop has tracked as the things
+            # in view, and speaks its recognition before the description.
             self.latest_frame = frames[-1]
+            image = await loop.run_in_executor(None, _decode_jpeg, frames[-1])
+            tracked = [o for o in self.perception.scene.all_objects() if o.visible]
+            observation = await self._remember_place(image, tracked, [])
+            if observation is not None and observation.spoken_prefix:
+                await self._say(observation.spoken_prefix)
             await self.handle_intent("scan", None)
+            if observation is not None and observation.spoken_suffix:
+                await self._say(observation.spoken_suffix)
+            await self._send_place(observation)
             return
 
         trace = LatencyTrace(label="scan")
-        loop = asyncio.get_running_loop()
         per_frame = []
         size = None
+        first_image = None
         with trace.stage("detect"):
             for frame in frames:
                 image = await loop.run_in_executor(None, _decode_jpeg, frame)
                 if image is None:
                     continue
+                if first_image is None:
+                    first_image = image
                 size = (image.shape[1], image.shape[0])
                 per_frame.append(await self.perception.detector.detect(image, SCAN_IMGSZ))
         if size is None:
@@ -544,7 +658,16 @@ class Session:
                 cues = await self.ocr.read_quick(frames[0])
         seen = refine_labels(seen, cues)
         once = refine_labels(once, cues)
-        await self._say(describe_scan(self.perception.scene, seen, once, cues))
+        # Where this is, from what was seen, read and pictured: spoken
+        # first when the place is recognized, last when it is new.
+        observation = None
+        if self.places is not None:
+            with trace.stage("place"):
+                observation = await self._remember_place(first_image, seen, cues)
+        spoken = describe_scan(self.perception.scene, seen, once, cues)
+        if observation is not None:
+            spoken = observation.with_speech(spoken)
+        await self._say(spoken)
         await self.socket.send_json({
             "type": "inventory",
             "text": inventory_sentence(seen, once),
@@ -557,7 +680,31 @@ class Session:
                 for s in [*seen, *once]
             ],
         })
+        await self._send_place(observation)
         await self._finish(trace)
+
+    async def _remember_place(self, image, seen, cues) -> Observation | None:
+        """File this scan in the place memory: a fingerprint of the picture
+        from the inference thread, a thumbnail for the panel, and the
+        memory's verdict on whether this is somewhere known. Never lets a
+        failure reach the spoken scan."""
+        if self.places is None or image is None:
+            return None
+        try:
+            embed = getattr(self.perception.detector, "embed", None)
+            embedding = await embed(image) if embed is not None else None
+            loop = asyncio.get_running_loop()
+            thumbnail = await loop.run_in_executor(None, thumbnail_of, image)
+            scene = scene_from_scan(seen, cues, embedding, thumbnail)
+            return self.places.observe(scene)
+        except Exception:
+            log.exception("place memory failed; the scan is spoken without it")
+            return None
+
+    async def _send_place(self, observation: Observation | None) -> None:
+        """Tell the panel what the memory made of the scan."""
+        if observation is not None:
+            await self.socket.send_json(observation.to_event())
 
     # --- Background reading -----------------------------------------------
 
@@ -613,8 +760,14 @@ class Session:
             return
 
         prompt = SCAN_PROMPT if kind == "scan" else (text or SCAN_PROMPT)
-        # Ground the answer in tracked geometry rather than pixels alone.
-        context = scene_context(self.perception.snapshot())
+        # Ground the answer in tracked geometry rather than pixels alone,
+        # and in the place the memory last recognized, while that is fresh.
+        snapshot = self.perception.snapshot()
+        if self.places is not None:
+            place = self.places.current_place()
+            if place is not None and self.places.current is not None:
+                snapshot["place"] = {"name": place.name, "score": self.places.current[1]}
+        context = scene_context(snapshot)
         await self._stream_answer(
             self.latest_frame, prompt, context, kind, LatencyTrace(label=kind)
         )
@@ -711,7 +864,9 @@ class Session:
 @app.websocket("/ws")
 async def websocket_endpoint(socket: WebSocket) -> None:
     await socket.accept()
-    session = Session(socket, app.state.provider, app.state.perception, app.state.ocr)
+    session = Session(
+        socket, app.state.provider, app.state.perception, app.state.ocr, getattr(app.state, "places", None)
+    )
     settings = get_settings()
 
     await socket.send_json(

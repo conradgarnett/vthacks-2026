@@ -44,7 +44,21 @@ export type ServerEvent =
   | {
       type: "detections";
       items: Array<{ label: string; confidence: number; scale?: Scale; box: [number, number, number, number] }>;
-    };
+    }
+  | PlaceEvent;
+
+/** What the place memory made of a scan; the spoken part is already in the
+ * scan's own speech. */
+export type PlaceEvent = {
+  type: "place";
+  kind: "recognized" | "new" | "unsure" | "skipped";
+  score: number;
+  place: { id: string; name: string } | null;
+  candidate: { id: string; name: string } | null;
+  scene_id: string | null;
+  evidence?: string;
+  spoken?: string | null;
+};
 
 export type Boxed = { label: string; confidence: number; scale?: Scale; box: [number, number, number, number] };
 

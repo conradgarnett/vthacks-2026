@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from backend.perception.vocabulary import is_small
 
-PROMPT_VERSION = "v5"
+PROMPT_VERSION = "v6"
 
 SYSTEM_PROMPT = """You are VisionOS, the visual sense of a blind or low-vision \
 user. You perceive their surroundings through a camera and a tracked spatial \
@@ -58,7 +58,7 @@ def scene_context(snapshot: dict) -> str:
     tentative = snapshot.get("tentative") or []
     room = snapshot.get("room")
     if not objects and not tentative:
-        return "SCENE MODEL: no tracked objects yet."
+        return "SCENE MODEL: no tracked objects yet." + _place_line(snapshot)
 
     def sure(o: dict) -> str:
         # How sure the detector is, so the model can weigh it: the user's
@@ -91,4 +91,16 @@ def scene_context(snapshot: dict) -> str:
             + (f" ({t['confidence']:.0%})" if t.get("confidence") is not None else "")
             for t in tentative
         )
+    text += _place_line(snapshot)
     return text
+
+
+def _place_line(snapshot: dict) -> str:
+    """The place the memory last recognized, so "where am I" gets its name."""
+    place = snapshot.get("place")
+    if not place:
+        return ""
+    return (
+        f"\nREMEMBERED PLACE: the last scan recognized this as {place['name']} "
+        f"({place['score']:.0%} match). Use that name when asked where they are."
+    )

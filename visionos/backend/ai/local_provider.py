@@ -94,10 +94,14 @@ class LocalSceneProvider(VisionProvider):
         self,
         scene_getter: Callable[[], SceneModel],
         detections_getter: Callable[[], list] | None = None,
+        place_getter: Callable[[], str | None] | None = None,
     ) -> None:
         self._scene = scene_getter
         # The latest frame's raw detections, confirmed or not, for hedged hints.
         self._detections = detections_getter or (lambda: [])
+        # The name of the place the memory last recognized, while that is
+        # recent; None otherwise.
+        self._place = place_getter or (lambda: None)
 
     async def describe(
         self,
@@ -125,11 +129,15 @@ class LocalSceneProvider(VisionProvider):
 
         if _ROOM_QUESTION.search(lowered):
             visible = [o.label for o in scene.all_objects() if o.visible]
-            return room_sentence(visible) or (
+            room = room_sentence(visible) or (
                 "I can't tell what kind of place this is yet; I only recognize "
                 + (", ".join(sorted(set(visible))) if visible else "nothing specific")
                 + "."
             )
+            # A remembered place answers "where am I" by name; the kind of
+            # room follows as before.
+            place = self._place()
+            return f"You seem to be in {place}. {room}" if place else room
 
         if any(word in lowered for word in _CHANGE_WORDS):
             return self._describe_changes(scene)
