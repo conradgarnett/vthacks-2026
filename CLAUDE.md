@@ -92,7 +92,7 @@ second, lower pass; tiling still applies.
 
 ```bash
 cd visionos
-.venv/bin/python -m pytest backend/tests -q          # 493 tests (3 Apple-only)
+.venv/bin/python -m pytest backend/tests -q          # 516 tests (3 Apple-only)
 PYTHONPATH=. .venv/bin/python eval/run_ocr_eval.py 60
 ```
 
@@ -254,9 +254,15 @@ tested.
   default; the 90b timed out at 60 s and Gemma, Phi and NeVA are not
   enabled for this key. In the two-engine mesh the thorough engine now
   wins where both read a place (2751b63, for Conrad's receipts drop
-  66% -> 55%; his SROIE run decides). Suite 493 passed, 3 skipped before
-  the NVIDIA and mesh tests were added. `HAZARDS_ENABLED` is still false
-  and the depth pass is gated on it.
+  66% -> 55%; his SROIE run decides). The medium detector (`yolov8m-world.pt`) was
+  measured on this CPU at floor 0.30 and not adopted: found 43% vs the
+  small model's 51%, claims real 67% vs 65%, invented 471 vs 631, 6 of 24
+  blank textures got a "wall", 800 ms a 640 px frame vs ~250. Later the
+  same evening: detector floor back to 0.30, scan frames match a moved
+  camera, scans say the place (hedged "this may be" at 2.5 of the 3.0 bar),
+  then people, then things; `SEE_AS=refrigerator:trash can` on this laptop
+  only. Suite 516 passed, 3 skipped. `HAZARDS_ENABLED` is still false and
+  the depth pass is gated on it.
 - **2026-09-19, evening, visionOS-2:** merged 81b0add (lexicon, 38 bundled
   fonts; their `eval/fonts.py` supersedes ours, helper renamed `typefaces.py`);
   RapidOCR detects at 1280 px and recognizes on full-res crops (657 ms/frame,
