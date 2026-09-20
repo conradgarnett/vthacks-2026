@@ -34,6 +34,9 @@ export default defineConfig({
       // The place memory, read and edited by the panel.
       "/places": { target: "http://127.0.0.1:8000" },
       "/scenes": { target: "http://127.0.0.1:8000" },
+      // The wearer's profile and the mail check, for the allergies sheet.
+      "/profile": { target: "http://127.0.0.1:8000" },
+      "/alerts": { target: "http://127.0.0.1:8000" },
     },
   },
   build: {

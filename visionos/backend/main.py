@@ -11,6 +11,7 @@ Wire protocol, one phone per socket:
   text    {"type": "ask", "text": "..."}
   text    {"type": "locate", "text": "..."}   start an audio beacon
   text    {"type": "stop_beacon"}
+  text    {"type": "false_alarm"}          the last allergy alert was wrong; tell the doctor
 
 Read frames arrive in one tagged message so they never touch the perception
 pipeline: a full-resolution frame run through the tracker breaks every box
@@ -34,6 +35,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from backend.ai.medication import UNREADABLE_DOSE
+from backend.alerts.barcode import ProductLookup
+from backend.alerts.email_agent import EmailAgent
+from backend.alerts.profile import ProfileStore
+from backend.alerts.reasoner import LabelReasoner
+from backend.alerts.watch import AllergyWatch
 from backend.ai.ocr import (
     NO_TEXT_FOUND,
     TextReader,
@@ -47,6 +53,7 @@ from backend.perception.pipeline import _decode_jpeg
 from backend.scene.inference import Seen, describe_scan, inventory_sentence, refine_labels
 from backend.scene.places import Observation, PlaceMemory, scene_from_scan, thumbnail_of
 from backend.places_api import bind as bind_places, router as places_router
+from backend.profile_api import bind as bind_profile, router as profile_router
 from backend.ai.vision import VisionProvider, build_provider
 from backend.config import get_settings
 from backend.hazards.engine import HazardEngine
@@ -371,9 +378,35 @@ async def lifespan(app: FastAPI):
     app.state.ocr = build_reader(settings.ocr_engine)
     app.state.ocr.warmup()
 
+    # The food allergy scanner: the wearer's profile, the email to the
+    # doctor (or the outbox that stands in for it), the barcode lookup and
+    # the online second opinion on a label's text. Built once and shared by
+    # every session; the profile is re-read whenever its file changes.
+    app.state.profile = ProfileStore(settings.profile_file)
+    app.state.mailer = EmailAgent(
+        host=settings.alert_smtp_host,
+        port=settings.alert_smtp_port,
+        user=settings.alert_smtp_user,
+        password=settings.alert_smtp_password,
+        to=settings.alert_email_to,
+        outbox=settings.alert_outbox_dir,
+    )
+    app.state.lookup = ProductLookup(enabled=settings.barcode_lookup_enabled)
+    app.state.reasoner = LabelReasoner(settings)
+    log.info(app.state.mailer.note)
+    profile = app.state.profile.current
+    if settings.allergy_alerts_enabled and profile.has_allergens:
+        log.info(
+            "allergy scanner on for %s: %s", profile.name or "the wearer", ", ".join(profile.allergens)
+        )
+    else:
+        log.info("allergy scanner idle: no allergens listed in %s", settings.profile_file)
+
     log.info("VisionOS ready on %s:%s", settings.host, settings.port)
     yield
     await app.state.provider.aclose()
+    await app.state.lookup.aclose()
+    await app.state.reasoner.aclose()
 
 
 app = FastAPI(title="VisionOS", lifespan=lifespan)
@@ -391,6 +424,9 @@ app.add_middleware(
 # memory through this getter, so they work before and without the lifespan.
 bind_places(lambda: getattr(app.state, "places", None))
 app.include_router(places_router)
+# The wearer's profile and the mail check, for the Allergies sheet, the same way.
+bind_profile(lambda: getattr(app.state, "profile", None), lambda: getattr(app.state, "mailer", None))
+app.include_router(profile_router)
 
 
 @app.get("/health")
@@ -410,6 +446,11 @@ async def health() -> JSONResponse:
             "model": settings.visionos_model,
             "prompt_version": PROMPT_VERSION,
             "demo_mode": settings.demo_mode,
+            # The allergy scanner: whether an alert can leave the room, and
+            # what the wearer is allergic to, so the start screen can say so.
+            "mail": app.state.mailer.note if hasattr(app.state, "mailer") else "off",
+            "allergy_alerts": settings.allergy_alerts_enabled,
+            "allergens": list(app.state.profile.current.allergens) if hasattr(app.state, "profile") else [],
         }
     )
 
@@ -435,12 +476,18 @@ class Session:
         perception: PerceptionPipeline,
         ocr: TextReader,
         places: PlaceMemory | None = None,
+        allergy: AllergyWatch | None = None,
     ) -> None:
         self.socket = socket
         self.provider = provider
         self.perception = perception
         self.ocr = ocr
         self.places = places
+        # The food allergy scanner for this session; None when it is off.
+        self.allergy = allergy
+        # Emails leave on their own tasks, after the wearer has been told;
+        # held here so they are not collected mid-send.
+        self._tasks: set[asyncio.Task] = set()
         self.latest_frame: bytes | None = None
 
         settings = get_settings()
@@ -477,6 +524,8 @@ class Session:
                 "type": "detections",
                 "items": detection_items(self.perception.last_detections, self.perception.last_frame_size),
             })
+            # The allergy scanner's trigger: does the wearer look to be eating?
+            await self._watch_eating()
 
         # Deterministic and ahead of everything else: nothing on this path
         # can be delayed by an API call.
@@ -497,13 +546,14 @@ class Session:
             await self._say_demo_label(LatencyTrace(label="read"))
             return
         cached = self.fresh_reading()
-        if cached and not read_is_weak(cached):
+        if cached and not read_is_weak(cached) and not self._allergen_unsettled(cached):
             if self.demo_label_applies(cached):
                 await self._say_demo_label(LatencyTrace(label="read"))
                 return
             holder = text_holder(self.perception.scene.all_objects())
             await self._say(with_holder(format_for_speech(cached), holder))
             log.info("read: answered from %d peek(s) via %s", len(self.peeks), self.ocr.name)
+            await self._check_label(cached, frames[-1] if frames else self.latest_frame, asked=True)
             return
         self.reading = True
         try:
@@ -557,10 +607,14 @@ class Session:
         with trace.stage("quick"):
             first = await self.ocr.read_quick(sharpest)
         lines = self.ocr.combine_readings([*self.fresh_peek_readings(), first])
+        # As with a dose: a label that names one of the wearer's allergens
+        # always gets the burst, since only agreement across frames can
+        # release the email to the doctor.
         settled = (
             all_lines_sure(self.ocr, lines)
             and not read_is_weak(lines)
             and UNREADABLE_DOSE not in format_for_speech(lines)
+            and not self._allergen_unsettled(lines)
         )
         if not settled:
             with trace.stage("ocr"):
@@ -588,6 +642,9 @@ class Session:
         else:
             await self._say(no_text_response(frames, max(scores)))
         await self._finish(trace)
+        # The allergy scanner's evidence: the label just read, and the
+        # frame it was read from (for a barcode).
+        await self._check_label(lines, frames[-1], asked=True)
 
     # --- Scanning ---------------------------------------------------------
 
@@ -728,6 +785,10 @@ class Session:
         self.forget_stale_peeks()
         if lines:
             self.peeks.append((time.monotonic(), lines))
+            # The allergy scanner in the background: what the last few
+            # peeks agree on, and the frame for a barcode. Only evidence
+            # speaks here; nobody asked.
+            await self._check_label(self.fresh_reading(), frame, asked=False)
 
     def forget_stale_peeks(self, now: float | None = None) -> None:
         now = time.monotonic() if now is None else now
@@ -845,6 +906,73 @@ class Session:
         self.beacon_label = None
         await self.socket.send_json({"type": "beacon_stop"})
 
+    # --- The food allergy scanner -----------------------------------------
+
+    async def _watch_eating(self) -> None:
+        """Feed the live detections to the eating trigger and say what it
+        finds: a prompt to read the label, or a hedged warning for a food
+        that is the allergen itself. Never evidence, never an email."""
+        if self.allergy is None:
+            return
+        try:
+            notice = self.allergy.observe_frame(
+                self.perception.last_detections, self.perception.last_frame_size
+            )
+        except Exception:
+            log.exception("allergy watch failed on a frame")
+            return
+        if notice is not None:
+            await self.socket.send_json(notice.to_event())
+
+    def _allergen_unsettled(self, lines) -> bool:
+        """Does this reading name one of the wearer's allergens on a line
+        that fewer than two frames agree on? Then the burst has to run."""
+        if self.allergy is None or not self.allergy.active or not lines:
+            return False
+        try:
+            from backend.alerts.allergy import find_allergen_mentions
+
+            mentions = find_allergen_mentions(lines, self.allergy.profile.allergens)
+        except Exception:
+            log.exception("allergen check on a quick read failed")
+            return False
+        return any(m.agreement < self.allergy.min_agreement for m in mentions)
+
+    async def _check_label(self, lines, frame: bytes | None, asked: bool) -> None:
+        """Run the evidence ladder over a reading, tell the wearer, and
+        send the doctor's email on its own task, after the words."""
+        if self.allergy is None:
+            return
+        try:
+            outcome = await self.allergy.check(lines, self.ocr, frame, asked=asked)
+        except Exception:
+            log.exception("allergy check failed")
+            return
+        for notice in outcome.notices:
+            await self.socket.send_json(notice.to_event())
+        for alert in outcome.alerts:
+            await self.socket.send_json(alert.to_event(self.allergy.spoken(alert)))
+            task = asyncio.create_task(self._deliver_alert(alert, frame))
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
+
+    async def _deliver_alert(self, alert, frame: bytes | None) -> None:
+        try:
+            delivery = await self.allergy.deliver(alert, frame)
+        except Exception:
+            log.exception("the alert email failed")
+            await self._say("The email to your doctor could not be sent.")
+            return
+        if delivery is not None:
+            await self._say(delivery.spoken())
+
+    async def handle_false_alarm(self) -> None:
+        """'Jarvis, false alarm': the last alert was wrong; tell the doctor."""
+        if self.allergy is None:
+            await self._say("The allergy scanner is off on this machine.")
+            return
+        await self._say(await self.allergy.false_alarm())
+
     # --- Output -----------------------------------------------------------
 
     async def _say(self, text: str) -> None:
@@ -859,10 +987,24 @@ class Session:
 @app.websocket("/ws")
 async def websocket_endpoint(socket: WebSocket) -> None:
     await socket.accept()
-    session = Session(
-        socket, app.state.provider, app.state.perception, app.state.ocr, getattr(app.state, "places", None)
-    )
     settings = get_settings()
+    allergy = None
+    if settings.allergy_alerts_enabled and hasattr(app.state, "profile"):
+        allergy = AllergyWatch(
+            profile=lambda: app.state.profile.current,
+            mailer=app.state.mailer,
+            lookup=app.state.lookup,
+            reasoner=app.state.reasoner,
+            place=lambda: app.state.places.current_name() if getattr(app.state, "places", None) else None,
+            min_confidence=settings.allergy_min_confidence,
+            min_agreement=settings.allergy_min_agreement,
+            min_frames=settings.allergy_min_frames,
+            cooldown_s=settings.allergy_cooldown_s,
+        )
+    session = Session(
+        socket, app.state.provider, app.state.perception, app.state.ocr,
+        getattr(app.state, "places", None), allergy,
+    )
 
     await socket.send_json(
         {
@@ -872,6 +1014,9 @@ async def websocket_endpoint(socket: WebSocket) -> None:
             "ocr": app.state.ocr.name,
             "device": app.state.perception.device,
             "demo_mode": settings.demo_mode,
+            # What the allergy scanner is watching for, so the client can
+            # say so once; empty when it is idle.
+            "allergens": list(allergy.profile.allergens) if allergy is not None else [],
         }
     )
 
@@ -906,6 +1051,8 @@ async def websocket_endpoint(socket: WebSocket) -> None:
                 await session.handle_locate(event.get("text"))
             elif kind == "stop_beacon":
                 await session.stop_beacon()
+            elif kind == "false_alarm":
+                await session.handle_false_alarm()
 
     except WebSocketDisconnect:
         pass

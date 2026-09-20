@@ -187,6 +187,49 @@ tested.
 
 ## Log
 
+- **2026-09-20, 01:30 to 02:25, visionOS-2, the food allergy scanner and
+  the doctor's email:** the user's request; the shape was agreed with
+  Conrad's agent on PR #2 after his objection that the allergen is not in
+  the pixels (a cookie may or may not contain nuts). So a recognized food is
+  a trigger and never evidence, and the evidence ladder is, strongest
+  first: a barcode looked up in Open Food Facts (OpenCV's own
+  `cv2.barcode` decoder, EAN checksum, keyless API, cached); a CONTAINS /
+  ALLERGENS / INGREDIENTS line the reader was 80% sure of across two frames
+  with the allergen word matched whole and not negated ("dairy free", "no
+  nuts", "does not contain milk" are absences; almond milk and peanut
+  butter are not dairy); then the NVIDIA model over the label's text and
+  picture with a fixed JSON verdict (`confirm` / `deny` / `check`) that
+  must cite what it observed, `check` on any failure. The doctor is
+  emailed only on the first two; "may contain", traces, the model's
+  confirm, a bare product name ("PEANUT BUTTER CUPS") and a food in view
+  ("it looks like you are eating; hold the label up and press Read") speak
+  and never email. One email per allergen per 10 minutes; "Jarvis, false
+  alarm" sends a correction. Code: `backend/alerts/` (`profile.py`,
+  `allergy.py`, `eating.py`, `barcode.py`, `reasoner.py`,
+  `email_agent.py`, `watch.py`), `backend/profile_api.py` (`GET`/`POST
+  /profile`, `POST /alerts/test`), `client/src/allergies.ts` (an
+  Allergies pill and sheet, key L: chips, quick-add, name, doctor's
+  email, a test-email button, every edit spoken). The profile lives in
+  `data/profile.json` (gitignored); without `ALERT_SMTP_USER` and
+  `ALERT_SMTP_PASSWORD` (a Gmail app password) in `.env` every email is
+  written to `data/outbox/` and the wearer hears that mail is not set up;
+  `/health` reports `mail`. Wire protocol (shared, additive): `hazard`
+  gains `kind` (`allergy`, `allergy-warning`), `allergens`, `source`,
+  `evidence`, `emailed`; `ready` gains `allergens`; the client sends
+  `{"type": "false_alarm"}`. Two reader changes the live probe forced: a
+  read that names one of the wearer's allergens always takes the burst
+  (as a dose does) so two frames can agree; and RapidOCR's glued colon
+  ("CONTAINS:PEANUTS", scored 0.996 by the engine and thrown away whole by
+  the plausibility gate) gets its space back in `RapidOCR._recognize`
+  (`_split_colon_glue`; flagged to Conrad; the OCR eval before/after is
+  owed once the app is idle). Conrad measured the 25 proposed food
+  classes on his Mac: no extra time, 0/24 textures, 24 pass and `orange`
+  is cut; they land from `main-project`. Numbers: 83 new tests in five
+  files, 253 passed in every touched file (the full suite waits for a
+  window); the live probe on this CPU read a rendered peanut-butter label
+  in 6.2 s (quick 2.6 s, burst 3.5 s), sounded the alert, wrote the email
+  and, after "false alarm", the correction; the model's second opinion
+  answered within 8 s. `.claude/scripts/allergy_probe.py` drives it.
 - **2026-09-20, 00:00 to 01:10, visionOS-2, the watch, the camera and a
   rehearsal label:** Conrad's board is a LOLIN S2 Mini with three Grove
   buttons at 115200 baud (SCAN, READ, ASK lines; banner after a reset;

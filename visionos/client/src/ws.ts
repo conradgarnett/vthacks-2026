@@ -16,6 +16,8 @@ export type ServerEvent =
       ocr?: string;
       device?: string;
       demo_mode: boolean;
+      /** What the allergy scanner is watching for; empty when it is idle. */
+      allergens?: string[];
     }
   | { type: "speech"; text: string }
   | {
@@ -25,7 +27,20 @@ export type ServerEvent =
       stages: Record<string, number>;
       total_ms: number;
     }
-  | { type: "hazard"; text: string; severity: number; azimuth_deg: number; distance_m: number }
+  | {
+      type: "hazard";
+      text: string;
+      severity: number;
+      azimuth_deg: number;
+      distance_m: number;
+      /** Absent for an obstacle; "allergy" for an alert that emails the
+       * doctor, "allergy-warning" for one that only speaks. */
+      kind?: "allergy" | "allergy-warning";
+      allergens?: string[];
+      source?: string;
+      evidence?: string;
+      emailed?: boolean;
+    }
   | { type: "beacon"; label: string; azimuth_deg: number; distance_m: number; visible: boolean }
   | { type: "beacon_stop" }
   | {

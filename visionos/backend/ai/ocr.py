@@ -681,7 +681,7 @@ class RapidOCR(TextReader):
 
         lines: list[TextLine] = []
         for box, text, score in self._detect_small_recognize_full(image):
-            text = _fix_digit_confusions(_split_letter_digit_runs(str(text).strip()))
+            text = _fix_digit_confusions(_split_letter_digit_runs(_split_colon_glue(str(text).strip())))
             if not _accept(text, score, self.confidence_informative):
                 continue
             xs = [float(point[0]) for point in box]
@@ -710,6 +710,20 @@ _LETTER_DIGIT_BOUNDARY = re.compile(r"(?<=[A-Za-z]{3})(?=\d)|(?<=\d)(?=[A-Za-z]{
 
 def _split_letter_digit_runs(text: str) -> str:
     return _LETTER_DIGIT_BOUNDARY.sub(" ", text)
+
+
+# The same recognizer glues the space after a colon on bold labels:
+# "CONTAINS:PEANUTS", "ALLERGENS:MILK". Left as one token, the plausibility
+# gate throws the whole line away, and a CONTAINS line is the one line the
+# allergy scanner exists to read (found 2026-09-20 with a rendered label:
+# the engine scored the line 0.996 and nothing downstream ever saw it). A
+# colon between two letters gets its space back; "12:30" and "http://" keep
+# their shape.
+_COLON_GLUE = re.compile(r"(?<=[A-Za-z]):(?=[A-Za-z])")
+
+
+def _split_colon_glue(text: str) -> str:
+    return _COLON_GLUE.sub(": ", text)
 
 
 # The recognizer's classic confusions, seen on clean Arial and Candara:

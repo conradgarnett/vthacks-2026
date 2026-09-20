@@ -155,6 +155,36 @@ class Settings(BaseSettings):
         except OSError:
             return ""
 
+    # --- The food allergy scanner ----------------------------------------
+    # What the wearer is allergic to, their name and their doctor's address
+    # live in a small JSON file under the gitignored data folder, edited
+    # from the Allergies sheet. The scanner is on whenever the profile
+    # lists an allergen; with none listed it does nothing.
+    allergy_alerts_enabled: bool = True
+    profile_file: str = "data/profile.json"
+    # The user's 80% rule for the reader's confidence in a line that names
+    # an allergen, and how many frames must agree on it; one email per
+    # allergen per this many seconds.
+    allergy_min_confidence: float = 0.80
+    allergy_min_agreement: int = 2
+    allergy_min_frames: int = 3
+    allergy_cooldown_s: float = 600.0
+    # A barcode on the packet is looked up in Open Food Facts (keyless);
+    # off, the scanner reads the label only.
+    barcode_lookup_enabled: bool = True
+    # The email to the doctor: SMTP with STARTTLS. Gmail wants an app
+    # password (myaccount.google.com > Security > App passwords) in
+    # ALERT_SMTP_PASSWORD and the full address in ALERT_SMTP_USER. Without
+    # both, every alert is written to the outbox folder instead and the
+    # wearer is told so. The doctor's address in the profile wins over
+    # ALERT_EMAIL_TO.
+    alert_email_to: str = ""
+    alert_smtp_host: str = "smtp.gmail.com"
+    alert_smtp_port: int = 587
+    alert_smtp_user: str = ""
+    alert_smtp_password: str = ""
+    alert_outbox_dir: str = "data/outbox"
+
     # --- Server -----------------------------------------------------------
     host: str = "0.0.0.0"
     port: int = 8000

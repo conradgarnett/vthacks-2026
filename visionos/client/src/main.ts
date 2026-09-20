@@ -6,6 +6,7 @@ import { Camera } from "./camera";
 import { SpatialAudio } from "./audio/spatial";
 import { SpeechPriority, TtsPlayer } from "./audio/tts-player";
 import { onVoicesReady, pickVoice, rankVoices } from "./audio/voices";
+import { initAllergies } from "./allergies";
 import { initBlueprint } from "./blueprint";
 import { initPlaces } from "./places";
 import { Voice } from "./voice";
@@ -62,6 +63,8 @@ const BEACON_PHRASES = [
   /^(?:find|locate) (?:the |a |an )?(.+?)(?: for me)?$/i,
 ];
 const STOP_PHRASES = /^(?:stop|cancel|quiet|never mind|nevermind)\b/i;
+// After the wake word: the last allergy alert was wrong.
+const FALSE_ALARM = /^(?:that(?:'s| was| is)? (?:a )?)?false alarm\b|^cancel (?:the |that )?(?:allergy )?alert\b/i;
 
 const el = <T extends HTMLElement>(id: string): T =>
   document.getElementById(id) as T;
@@ -140,10 +143,10 @@ window.addEventListener("unhandledrejection", (event) => {
   setStatus(`Error: ${String(event.reason)}`, "error");
 });
 
-function show(text: string, kind: "speech" | "hazard" = "speech"): void {
+function show(text: string, kind: "speech" | "hazard" | "allergy" = "speech"): void {
   const line = document.createElement("p");
   line.textContent = text;
-  if (kind === "hazard") line.className = "hazard";
+  if (kind !== "speech") line.className = kind;
   transcript.prepend(line);
   while (transcript.childElementCount > 8) transcript.lastElementChild?.remove();
 }
@@ -153,15 +156,35 @@ function show(text: string, kind: "speech" | "hazard" = "speech"): void {
 // cannot see.
 // The blueprint: each scan drawn from above, with the floor marked
 // unobstructed or obstructed, and a remembered place drawn from its views.
-// The two sheets share the bottom of the screen, so one closes the other.
-const blueprint = initBlueprint({ onOpen: () => places.close() });
+// The allergies sheet: what the scanner watches for, the wearer's name and
+// the doctor's address, every edit spoken.
+// The three sheets share the bottom of the screen, so one closes the others.
+const blueprint = initBlueprint({
+  onOpen: () => {
+    places.close();
+    allergies.close();
+  },
+});
 const places = initPlaces({
   speak: (text) => {
     tts.say(text, SpeechPriority.Answer);
     show(text);
   },
   onMemory: (memory) => blueprint.onMemory(memory),
-  onOpen: () => blueprint.close(),
+  onOpen: () => {
+    blueprint.close();
+    allergies.close();
+  },
+});
+const allergies = initAllergies({
+  speak: (text) => {
+    tts.say(text, SpeechPriority.Answer);
+    show(text);
+  },
+  onOpen: () => {
+    places.close();
+    blueprint.close();
+  },
 });
 
 // A hook for driving the screen without a camera or a socket, from the
@@ -257,6 +280,9 @@ function onServerEvent(event: ServerEvent): void {
         announcedMode = true;
         tts.say(mode.spoken, SpeechPriority.Answer);
       }
+      // What the allergy scanner watches for, once: a state the user
+      // cannot see, and the one that decides whether a doctor gets email.
+      allergies.onReady(event.allergens ?? []);
       break;
     }
 
@@ -271,7 +297,11 @@ function onServerEvent(event: ServerEvent): void {
       spatial.play("hazard", event.azimuth_deg, event.distance_m || 1);
       navigator.vibrate?.(event.severity >= 2 ? [120, 50, 120] : [80]);
       tts.say(event.text, SpeechPriority.Hazard);
-      show(event.text, "hazard");
+      // An allergy alert is shown in its own colour, and the pill says
+      // what was found until the sheet is next opened.
+      const allergy = event.kind === "allergy" || event.kind === "allergy-warning";
+      show(event.text, allergy ? "allergy" : "hazard");
+      if (allergy) allergies.onAlert(event.allergens ?? [], event.kind === "allergy");
       break;
     }
 
@@ -395,6 +425,13 @@ function routeSpokenCommand(text: string): void {
     return;
   }
 
+  // "Jarvis, false alarm": the last allergy alert was wrong, and the
+  // doctor should hear so. A correction, not a question.
+  if (FALSE_ALARM.test(question)) {
+    connection.sendIntent("false_alarm");
+    return;
+  }
+
   for (const pattern of BEACON_PHRASES) {
     const match = question.match(pattern);
     if (match?.[1]) {
@@ -437,6 +474,7 @@ async function begin(): Promise<void> {
     controls.hidden = false;
     places.reveal();
     blueprint.reveal();
+    allergies.reveal();
     setStatus("Connecting…", "busy");
     tts.say(DISCLAIMER, SpeechPriority.Answer);
     // Which camera is in use, and whether it can focus, are states the user
@@ -763,9 +801,16 @@ window.addEventListener("keydown", (event) => {
     blueprint.toggle();
     return;
   }
+  // L pulls the allergies sheet up or puts it away.
+  if (key === "l") {
+    event.preventDefault();
+    allergies.toggle();
+    return;
+  }
   if (key === "Escape") {
     if (places.isOpen) places.close();
     if (blueprint.isOpen) blueprint.close();
+    if (allergies.isOpen) allergies.close();
   }
   const action = KEYS[key];
   if (!action) return;

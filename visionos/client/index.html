@@ -292,6 +292,28 @@
       #blueprint-canvas { display: block; width: 100%; border-radius: 12px; background: #0b0b0e; border: 1px solid var(--edge); margin-bottom: 10px; }
       .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--muted); margin: 0; padding: 0; list-style: none; }
       .legend .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 6px; }
+      /* The allergies sheet: chips for what is watched for, plain fields
+         for the name and the doctor's address. */
+      .sheet .chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; }
+      .sheet .chip {
+        display: inline-flex; align-items: center; gap: 6px;
+        padding: 4px 6px 4px 12px; border-radius: 999px;
+        border: 1px solid rgba(255, 75, 62, 0.7); background: rgba(255, 75, 62, 0.14);
+        color: var(--fg); font: 600 13px/1.2 system-ui, sans-serif;
+      }
+      .sheet .chip .x {
+        width: 20px; height: 20px; padding: 0; border-radius: 50%; border: 0;
+        background: var(--danger); color: #fff; font: 700 12px/20px system-ui, sans-serif; cursor: pointer;
+      }
+      .sheet .field {
+        flex: 1; min-width: 10rem; min-height: 32px; padding: 4px 10px; border-radius: 8px;
+        border: 1px solid var(--edge); background: rgba(255, 255, 255, 0.08);
+        color: var(--fg); font: 500 14px/1.2 system-ui, sans-serif;
+      }
+      .sheet .field:focus { outline: none; border-color: var(--accent); }
+      .sheet button.small.quick { border-style: dashed; }
+      .pill[data-tone="alert"] { color: var(--danger); border-color: rgba(255, 75, 62, 0.7); }
+      #transcript p.allergy { color: var(--danger); font-weight: 700; }
 
       @media (max-width: 640px) {
         #transcript { width: calc(100vw - 110px); }
@@ -347,6 +369,7 @@
     <div id="pills">
       <button id="places-handle" class="pill" hidden aria-label="Show the places the app remembers" aria-expanded="false" aria-controls="places-panel">Places</button>
       <button id="blueprint-handle" class="pill" hidden aria-label="Show the blueprint of the last scan" aria-expanded="false" aria-controls="blueprint-panel">Blueprint</button>
+      <button id="allergies-handle" class="pill" hidden aria-label="Show and edit the allergies the app watches for" aria-expanded="false" aria-controls="allergies-panel">Allergies</button>
     </div>
     <section id="places-panel" class="sheet" role="dialog" aria-label="Remembered places" data-open="false">
       <div class="grab" aria-hidden="true"></div>
@@ -381,6 +404,37 @@
       </ul>
     </section>
 
+    <!-- The allergies the app watches for, the wearer's name and the
+         doctor's address: edited here by a sighted helper, every change
+         spoken. Alerts go out as email; the test button proves the path. -->
+    <section id="allergies-panel" class="sheet" role="dialog" aria-label="Allergies" data-open="false">
+      <div class="grab" aria-hidden="true"></div>
+      <header>
+        <h2>Allergies</h2>
+        <button class="small" id="allergies-test" type="button">Send a test email</button>
+        <button class="small" id="allergies-close" type="button">Close</button>
+      </header>
+      <div class="banner" id="allergies-banner" aria-live="polite">Loading…</div>
+      <div class="row">
+        <span class="meta">Watching for:</span>
+        <div id="allergies-list" class="chips" aria-label="Allergies on file"></div>
+      </div>
+      <div class="row">
+        <input id="allergies-add" class="field" type="text" placeholder="Add an allergy (peanut, dairy, kiwi…)" aria-label="Add an allergy" autocomplete="off" />
+        <button class="small primary" id="allergies-add-button" type="button">Add</button>
+      </div>
+      <div class="row" id="allergies-quick" aria-label="Common allergies"></div>
+      <div class="row">
+        <label class="meta" for="allergies-name">Name</label>
+        <input id="allergies-name" class="field" type="text" placeholder="The wearer's name" aria-label="The wearer's name" autocomplete="off" />
+      </div>
+      <div class="row">
+        <label class="meta" for="allergies-doctor">Doctor's email</label>
+        <input id="allergies-doctor" class="field" type="email" placeholder="doctor@example.com" aria-label="The doctor's email address" autocomplete="off" />
+      </div>
+      <p class="meta" id="allergies-mail"></p>
+    </section>
+
     <button id="start" aria-describedby="start-help">
       <span class="brand">VisionOS</span>
       <span class="cta">Start</span>
@@ -393,8 +447,9 @@
         <span><kbd>0</kbd>Stop</span>
         <span><kbd>P</kbd>Places</span>
         <span><kbd>B</kbd>Blueprint</span>
+        <span><kbd>L</kbd>Allergies</span>
       </span>
-      <span class="fine">Tap anywhere to scan the room. Read reads a sign or a label. Ask listens: say "Jarvis" and then your question. Scans remember places and say when you are back in one. An assistive tool, not a replacement for a cane or guide dog.</span>
+      <span class="fine">Tap anywhere to scan the room. Read reads a sign or a label. Ask listens: say "Jarvis" and then your question. Scans remember places and say when you are back in one. Labels are checked against your allergies, and your doctor is emailed when one is found; say "Jarvis, false alarm" to correct it. An assistive tool, not a replacement for a cane or guide dog.</span>
     </button>
     <p id="start-help" class="sr-only">
       Starts the camera and speaks a description of your surroundings.
@@ -402,7 +457,8 @@
       read a sign or a label, or tap Ask and say Jarvis followed by your
       question. On a keyboard
       or the watch: 1 scans, 2 reads, 3 asks, 0 stops speaking. P opens the
-      list of places the app remembers, B the blueprint of the last scan. The camera on the glasses and the
+      list of places the app remembers, B the blueprint of the last scan, L the
+      allergies the app watches for. The camera on the glasses and the
       voice are chosen for you.
     </p>
 
