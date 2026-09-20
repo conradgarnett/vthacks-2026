@@ -26,3 +26,6 @@ med-i-glasses/data/
 # Rendered speech: derived from the phrase list, re-creatable with
 # eval/warm_voice.py, and large. Never committed.
 med-i-glasses/data/voice_cache/
+
+# Vite's dependency cache, never committed.
+med-i-glasses/client/.vite/

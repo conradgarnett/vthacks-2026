@@ -187,6 +187,52 @@ tested.
 
 ## Log
 
+- **2026-09-20, 03:00 to 03:55, visionOS-2, the idle window, the barcode
+  step, the merge and the rename:** the user granted the CPU ("im off"),
+  and `.claude/scripts/measure_window.py` ran everything owed at idle
+  priority (RapidOCR, Windows; `.claude/bench/window_0257.log`): the suite
+  671 passed, 3 skipped (677 at the merge commit); signage n=60 before
+  (864582b) and after (c895a99) the reader changes identical, CER 0.031,
+  exact 55/60, silent 1/60, hallucinated 0/8, every printed row the same;
+  packaging 12/24 name present and 0/12 symbols invented, identical;
+  Conrad's allergen corpus on this CPU 0 of 40 statement lines recovered
+  (his two-engine Mac reads 7 of 40), invented 0, negations 0 wrong; the
+  detector at 140 classes on 100 photos recall 43%, precision 68%, blank
+  textures 0/24, 179 ms a frame at 640 px, unchanged from 116 classes,
+  pizza 39%/70%, cake 46%/71%; the 24 `bread` fires on the 300 photos
+  eyeballed from a contact sheet (`find_label_frames.py bread`): 12
+  plainly bread, 2 borderline baked goods, 9 other food, 1 stone planter at
+  0.31, so 23 of 24 on food, which is the trigger's job. Three reader
+  experiments only this engine can be measured on, each 0 of 40 on the
+  corpus (`allergen_variants.py`): tiles forced, the RapidOCR detection
+  size cap lifted from 1280 to 1920 px, both; the small print is never
+  recognized here, not merely gated away, so on this laptop the barcode is
+  the whole allergen feature. Conrad's own ladder of experiments agreed
+  from the other side (a clean render reads 15 of 40; the print sits at
+  1.67% of frame height against Vision's 2% floor; consensus costs 2,
+  tiling costs 2, doubling the print buys 3); a `tile-additive` branch
+  (tile lines never replace a full-frame line) measured identical to
+  baseline on his Mac and was deleted. The barcode step (3f54eec): it runs
+  on every background peek whether or not any text was read; OpenCV 5's
+  `detectAndDecode` returns one string where 4.x gave a list, and the
+  decoder had iterated it as characters, so every code came out empty
+  (fixed; `test_barcode.py` renders a real product's EAN-13 with a pixel
+  of blur, since OpenCV's detector rejects a perfectly crisp strip); an
+  unknown or unreachable product is said aloud when the wearer asked.
+  Live: one peek of a jar with Skippy's real barcode (0037600106009)
+  decoded, was looked up and sounded the alert; a second product (Kraft)
+  took 1.7 s from the peek to the alert. PR #1 merged at 03:22 with
+  Conrad's go-ahead (19943b5, the default branch is the whole product).
+  Conrad's agent then renamed the project (af4a711): `visionos/` is
+  `med-i-glasses/`, `VISIONOS_*` env vars and settings fields are
+  `MEDIGLASSES_*`, `__visionos` is `__mediglasses`, all prose; merged as
+  c05278c with a stray Vite temp file the rename carried dropped in
+  822486a (`client/.vite/` is gitignored now); this laptop's untracked
+  pieces moved into the new folder and the servers restarted from it. A
+  fresh checkout of the merged default branch, with no `.env`, no `data/`
+  and no client packages, ran `run.py --check` clean (packages installed,
+  `.env` and `data/` created, the machine reported honestly) and passed
+  the full suite there: 677, 3 skipped.
 - **2026-09-20, 02:30 to 03:00, visionOS-2, finishing touches for running
   from GitHub:** the user's direction ("finishing touches so we can push
   everything to github and start running things from there"). Merged from

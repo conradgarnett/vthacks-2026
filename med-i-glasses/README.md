@@ -103,8 +103,11 @@ you are eating; hold the label up and press Read." The email carries the
 evidence, the place, the time and a photo of the moment; one per allergen
 per ten minutes; "Jarvis, false alarm" sends a correction. Measured on
 Conrad's 40-label corpus the matcher invented nothing and mishandled no
-negation; the reader is the limit on small print (7 statement lines
-recovered of 40), which is why the barcode step comes first.
+negation; the reader is the limit on small print: it recovered 7 statement
+lines of 40 with both engines on a Mac and 0 of 40 with RapidOCR alone on
+a Windows CPU. That is why the barcode step comes first and runs on every
+background frame, and why an unbarcoded packet gets "I couldn't find an
+allergen statement on this label" rather than a reassurance.
 
 ## Reading text
 
