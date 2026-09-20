@@ -798,7 +798,17 @@ type SerialPortLike = {
   open(options: { baudRate: number }): Promise<void>;
   close(): Promise<void>;
   readable: ReadableStream<Uint8Array> | null;
+  getInfo?(): { usbVendorId?: number; usbProductId?: number };
+  setSignals?(signals: { dataTerminalReady?: boolean; requestToSend?: boolean }): Promise<void>;
 };
+
+/** The board's USB id, for the status pill: 303a:80c2 is the S2 Mini. */
+function describePort(port: SerialPortLike): string {
+  const info = port.getInfo?.() ?? {};
+  if (info.usbVendorId === undefined) return "";
+  const hex = (n: number | undefined): string => (n ?? 0).toString(16).padStart(4, "0");
+  return ` (${hex(info.usbVendorId)}:${hex(info.usbProductId)})`;
+}
 type SerialLike = {
   requestPort(): Promise<SerialPortLike>;
   getPorts(): Promise<SerialPortLike[]>;
@@ -822,7 +832,15 @@ async function connectWatch(port: SerialPortLike, spoken: string): Promise<void>
   watchPort = port;
   watchWanted = true;
   await port.open({ baudRate: WATCH_BAUDS[0] });
-  setStatus("Watch connected", "ok");
+  // A native-USB board only sends once the host has raised DTR; Chrome
+  // usually does that on open, but saying so costs nothing.
+  try {
+    await port.setSignals?.({ dataTerminalReady: true, requestToSend: true });
+  } catch {
+    // Not every port takes signals.
+  }
+  setStatus(`Watch connected${describePort(port)}`, "ok");
+  show(`Watch connected${describePort(port)} at ${WATCH_BAUDS[0]} baud`);
   tts.say(spoken, SpeechPriority.Answer);
   watchHeard = false;
   window.clearTimeout(watchQuietTimer);
@@ -890,6 +908,7 @@ async function listenToWatch(port: SerialPortLike, baudIndex: number): Promise<v
           // The board runs at the other rate. Reopen at it and go on; the
           // press that showed this is lost, so say so.
           const baud = WATCH_BAUDS[baudIndex + 1];
+          show(`Watch: ${value.length} bytes that were not text at ${WATCH_BAUDS[baudIndex]} baud; trying ${baud}`);
           await reader.cancel();
           reader.releaseLock();
           await port.close();
@@ -903,8 +922,12 @@ async function listenToWatch(port: SerialPortLike, baudIndex: number): Promise<v
       buffered += decoder.decode(value, { stream: true });
       let newline = buffered.indexOf("\n");
       while (newline >= 0) {
-        const line = buffered.slice(0, newline).trim().toLowerCase();
+        const raw = buffered.slice(0, newline).trim();
+        const line = raw.toLowerCase();
         buffered = buffered.slice(newline + 1);
+        // Every line the watch sends is shown, so a sighted helper can see
+        // a press arrive even when it is not a command.
+        if (raw) show(`Watch: ${raw}`);
         if (line in actions) {
           if (started) run(line as Action);
           else void begin();
@@ -912,7 +935,7 @@ async function listenToWatch(port: SerialPortLike, baudIndex: number): Promise<v
           // The board's banner: it was just reset.
           setStatus("Watch ready", "ok");
         } else if (line) {
-          // "ignored (N pins high at once)" and anything else diagnostic.
+          // "ignored: ..." and anything else diagnostic.
           console.info("[watch]", line);
         }
         newline = buffered.indexOf("\n");
