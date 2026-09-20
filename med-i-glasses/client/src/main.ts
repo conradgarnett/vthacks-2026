@@ -846,8 +846,13 @@ const WATCH_BAUDS = [115200, 9600];
 // press; a repeat inside the window is the same press.
 const WATCH_PINS: Record<string, Action> = { "9": "scan", "1": "read", "16": "ask" };
 const WATCH_PIN_LINE = /^high on gpio\s*(\d+)/i;
-const WATCH_PIN_REPEAT_MS = 300;
-const watchPinFiredAt: Record<string, number> = {};
+// The pin that lights alongside whichever button is pressed; it only counts
+// when it arrives on its own. The lines of one press arrive within this
+// many milliseconds of each other.
+const WATCH_GHOST_PIN = "16";
+const WATCH_BURST_MS = 250;
+let watchBurst: string[] = [];
+let watchBurstTimer = 0;
 // A held port reads zero bytes with no error, and an idle board is silent
 // by design, so the only tell is a watch that says nothing after it was
 // connected. The app asks for a press on connect and, if nothing at all
@@ -994,15 +999,26 @@ async function listenToWatch(port: SerialPortLike, baudIndex: number): Promise<v
           if (started) run(line as Action);
           else void begin();
         } else if (pin) {
-          // A diagnostic firmware reports the pin instead of the command.
-          const action = WATCH_PINS[pin[1]];
-          const now = performance.now();
-          if (action && now - (watchPinFiredAt[pin[1]] ?? 0) > WATCH_PIN_REPEAT_MS) {
-            watchPinFiredAt[pin[1]] = now;
-            if (started) run(action);
-            else void begin();
-          } else if (!action) {
-            console.info("[watch] unmapped pin", raw);
+          // A diagnostic firmware reports the pin instead of the command,
+          // and one press can light a second pin (16 rode along with every
+          // button on 2026-09-20). The lines of one press arrive together,
+          // so they are gathered for a moment and acted on once, the real
+          // button preferred over the pin that rides along.
+          watchBurst.push(pin[1]);
+          if (!watchBurstTimer) {
+            watchBurstTimer = window.setTimeout(() => {
+              const pins = [...new Set(watchBurst)];
+              watchBurst = [];
+              watchBurstTimer = 0;
+              const real = pins.filter((p) => p !== WATCH_GHOST_PIN);
+              const action = WATCH_PINS[real[0] ?? pins[0]];
+              if (!action) {
+                console.info("[watch] unmapped pins", pins.join(","));
+                return;
+              }
+              if (started) run(action);
+              else void begin();
+            }, WATCH_BURST_MS);
           }
         } else if (line.startsWith("ready")) {
           // The board's banner: it was just reset.
