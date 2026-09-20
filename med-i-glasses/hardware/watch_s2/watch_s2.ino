@@ -53,16 +53,8 @@ const uint8_t PINS[BUTTON_COUNT] = {9, 1, 16};
 const char* COMMANDS[BUTTON_COUNT] = {"SCAN", "READ", "ASK"};
 
 // Grove modules bounce less than a bare switch, but a thumb on a wearable
-// still double-taps; 50 ms is below a deliberate second press.
-const unsigned long DEBOUNCE_MS = 50;
-// A press shorter than this is noise, not a thumb: a glitch on a line
-// picking up interference lasts tens of milliseconds, a tap lasts longer.
-const unsigned long MIN_PRESS_MS = 60;
-// Measured on the rig on 2026-09-20: one tap chattered into four SCAN
-// lines within 250 ms (the release bounces far longer than 35 ms, likely a
-// connector). After a command is sent, the button is ignored for this
-// long, so one press is one command whatever the contact does.
-const unsigned long LOCKOUT_MS = 400;
+// still double-taps; 35 ms is below a deliberate second press.
+const unsigned long DEBOUNCE_MS = 35;
 // Long enough that a deliberate press is never mistaken for a hold, short
 // enough that stopping speech still feels immediate.
 const unsigned long HOLD_MS = 900;
@@ -78,7 +70,6 @@ bool wasDown[BUTTON_COUNT];
 unsigned long pressedAt[BUTTON_COUNT];
 unsigned long lastChange[BUTTON_COUNT];
 bool holdSent[BUTTON_COUNT];
-unsigned long lockoutUntil[BUTTON_COUNT];
 unsigned long blinkUntil = 0;
 
 void blink() {
@@ -91,17 +82,13 @@ void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
 
   for (uint8_t i = 0; i < BUTTON_COUNT; i++) {
-    // The Grove module supplies its own pull-down; the chip's internal one
-    // sits in parallel so a pin whose cable has worked loose reads LOW
-    // instead of floating and firing on noise (SCAN fired on its own on
-    // 2026-09-20). An internal pull-UP would hold every pin high and report
-    // a permanent press.
-    pinMode(PINS[i], INPUT_PULLDOWN);
+    // Plain INPUT: the Grove module supplies its own pull-down. An internal
+    // pull-up here would hold every pin high and report a permanent press.
+    pinMode(PINS[i], INPUT);
     wasDown[i] = false;
     pressedAt[i] = 0;
     lastChange[i] = 0;
     holdSent[i] = false;
-    lockoutUntil[i] = 0;
   }
 
   // The S2 has native USB and enumerates after setup() begins, so a banner
@@ -156,14 +143,6 @@ void loop() {
   for (uint8_t i = 0; i < BUTTON_COUNT; i++) {
     bool down = digitalRead(PINS[i]) == HIGH;  // Grove: pressed reads HIGH
 
-    // Just sent a command for this button: whatever the contact does for
-    // the next LOCKOUT_MS is the same press, not a new one.
-    if (now < lockoutUntil[i]) {
-      wasDown[i] = down;
-      lastChange[i] = now;
-      continue;
-    }
-
     if (down != wasDown[i] && now - lastChange[i] >= DEBOUNCE_MS) {
       lastChange[i] = now;
       wasDown[i] = down;
@@ -171,13 +150,11 @@ void loop() {
       if (down) {
         pressedAt[i] = now;
         holdSent[i] = false;
-      } else if (!holdSent[i] && now - pressedAt[i] >= MIN_PRESS_MS) {
+      } else if (!holdSent[i]) {
         // Released before the hold threshold, so it was a tap. Sent on
-        // release rather than on press so a hold never also sends the tap;
-        // a "press" shorter than MIN_PRESS_MS was noise and sends nothing.
+        // release rather than on press so a hold never also sends the tap.
         Serial.println(COMMANDS[i]);
         blink();
-        lockoutUntil[i] = now + LOCKOUT_MS;
       }
       continue;
     }
@@ -188,7 +165,6 @@ void loop() {
       holdSent[i] = true;
       Serial.println(F("STOP"));
       blink();
-      lockoutUntil[i] = now + LOCKOUT_MS;
     }
   }
 }

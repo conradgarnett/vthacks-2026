@@ -839,25 +839,6 @@ window.addEventListener("keydown", (event) => {
 // hence the Watch button; it shows only where Web Serial exists (Chrome,
 // Edge).
 const WATCH_BAUDS = [115200, 9600];
-// The board on 2026-09-20 carried a diagnostic firmware that reports pin
-// levels ("HIGH on GPIO1") instead of commands. Those lines map onto the
-// same actions by pin, so the watch works with either firmware: GPIO9 is
-// Scan, GPIO1 Read, GPIO16 Ask (the rig's wiring). A pin fires once per
-// press; a repeat inside the window is the same press.
-const WATCH_PINS: Record<string, Action> = { "9": "scan", "1": "read", "16": "ask" };
-const WATCH_PIN_LINE = /^high on gpio\s*(\d+)/i;
-// The pin that lights alongside whichever button is pressed; it only counts
-// when it arrives on its own. The lines of one press arrive within this
-// many milliseconds of each other.
-const WATCH_GHOST_PIN = "16";
-const WATCH_BURST_MS = 250;
-let watchBurst: string[] = [];
-let watchBurstTimer = 0;
-// The same command again inside this window is the contact chattering,
-// not a second press.
-const WATCH_TOKEN_REPEAT_MS = 500;
-let lastWatchToken = "";
-let lastWatchTokenAt = 0;
 // A held port reads zero bytes with no error, and an idle board is silent
 // by design, so the only tell is a watch that says nothing after it was
 // connected. The app asks for a press on connect and, if nothing at all
@@ -904,13 +885,9 @@ async function connectWatch(port: SerialPortLike, spoken: string): Promise<void>
   watchWanted = true;
   await port.open({ baudRate: WATCH_BAUDS[0] });
   // A native-USB board only sends once the host has raised DTR; Chrome
-  // usually does that on open, but saying so costs nothing. RTS stays low:
-  // on the ESP32-S2 the DTR/RTS pair is the reset-and-bootloader handshake,
-  // and on 2026-09-20 the app heard nothing from the freshly flashed board
-  // with RTS high while a direct read of the same port with RTS low got
-  // every press.
+  // usually does that on open, but saying so costs nothing.
   try {
-    await port.setSignals?.({ dataTerminalReady: true, requestToSend: false });
+    await port.setSignals?.({ dataTerminalReady: true, requestToSend: true });
   } catch {
     // Not every port takes signals.
   }
@@ -1000,49 +977,12 @@ async function listenToWatch(port: SerialPortLike, baudIndex: number): Promise<v
         const raw = buffered.slice(0, newline).trim();
         const line = raw.toLowerCase();
         buffered = buffered.slice(newline + 1);
-        const pin = raw.match(WATCH_PIN_LINE);
-        // A press, the board's banner and its "ignored" diagnostics are
-        // shown, so a sighted helper can see a press arrive; the boot
-        // report's pin listing and level lines only go to the console.
-        const worthShowing =
-          line in actions || pin !== null || line.startsWith("ready") || line.startsWith("ignored");
-        if (raw && worthShowing) show(`Watch: ${raw}`);
-        else if (raw) console.info("[watch]", raw);
+        // Every line the watch sends is shown, so a sighted helper can see
+        // a press arrive even when it is not a command.
+        if (raw) show(`Watch: ${raw}`);
         if (line in actions) {
-          // A chattering contact sends the same command several times in
-          // a quarter second (measured: SCAN x4 in 250 ms). One press is
-          // one command; a deliberate second press comes later than this.
-          const now = performance.now();
-          if (line === lastWatchToken && now - lastWatchTokenAt < WATCH_TOKEN_REPEAT_MS) {
-            console.info("[watch] repeat ignored", raw);
-          } else {
-            lastWatchToken = line;
-            lastWatchTokenAt = now;
-            if (started) run(line as Action);
-            else void begin();
-          }
-        } else if (pin) {
-          // A diagnostic firmware reports the pin instead of the command,
-          // and one press can light a second pin (16 rode along with every
-          // button on 2026-09-20). The lines of one press arrive together,
-          // so they are gathered for a moment and acted on once, the real
-          // button preferred over the pin that rides along.
-          watchBurst.push(pin[1]);
-          if (!watchBurstTimer) {
-            watchBurstTimer = window.setTimeout(() => {
-              const pins = [...new Set(watchBurst)];
-              watchBurst = [];
-              watchBurstTimer = 0;
-              const real = pins.filter((p) => p !== WATCH_GHOST_PIN);
-              const action = WATCH_PINS[real[0] ?? pins[0]];
-              if (!action) {
-                console.info("[watch] unmapped pins", pins.join(","));
-                return;
-              }
-              if (started) run(action);
-              else void begin();
-            }, WATCH_BURST_MS);
-          }
+          if (started) run(line as Action);
+          else void begin();
         } else if (line.startsWith("ready")) {
           // The board's banner: it was just reset.
           setStatus("Watch ready", "ok");
