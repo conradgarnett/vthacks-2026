@@ -95,11 +95,22 @@ const VOICE_NAME = "daniel";
 
 type StatusState = "idle" | "ok" | "busy" | "listening" | "error";
 
-/** The status pill: its text, and the colour of the dot beside it. */
+/** The status pill: its text, and the dot or spinner beside it. */
 const setStatus = (text: string, state: StatusState = "idle"): void => {
   status.textContent = text;
   status.dataset.state = state;
+  if (state === "busy") lastServerMessageAt = performance.now();
 };
+
+// The spinner turns while the app works and stops when the server has gone
+// quiet for longer than any scan, read or question should take: stuck, not
+// slow, and a sighted helper can tell the two apart at a glance.
+const STALL_MS = 5000;
+let lastServerMessageAt = 0;
+window.setInterval(() => {
+  const busy = status.dataset.state === "busy";
+  status.dataset.stalled = String(busy && performance.now() - lastServerMessageAt > STALL_MS);
+}, 250);
 
 /** Surface a failure the user cannot see. Silence reads as a freeze. */
 function reportFailure(message: string): void {
@@ -186,6 +197,7 @@ const socketUrl = (): string => {
 };
 
 function onServerEvent(event: ServerEvent): void {
+  lastServerMessageAt = performance.now();
   switch (event.type) {
     case "ready": {
       const modes: Record<string, { label: string; spoken?: string }> = {
@@ -359,7 +371,10 @@ async function begin(): Promise<void> {
     try {
       // ?camera=<part of its name> pins a camera, for a webcam worn on
       // glasses beside a laptop's own.
-      await camera.start(new URLSearchParams(location.search).get("camera"));
+      // ?exposure=reset puts the webcam's image controls back to the middle
+      // of their ranges, for a camera left dim by an interrupted read.
+      const query = new URLSearchParams(location.search);
+      await camera.start(query.get("camera"), query.get("exposure"));
     } catch (err) {
       reportFailure((err as Error).message);
       return;

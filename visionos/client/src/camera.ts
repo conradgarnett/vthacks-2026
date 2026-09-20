@@ -49,6 +49,11 @@ export type ScreenRect = { left: number; top: number; width: number; height: num
 const REFOCUS_MS = 600;
 // Time for the sensor to settle after exposure is turned down for a read.
 const EXPOSURE_SETTLE_MS = 300;
+// The dim for a read changes the webcam's own controls, which outlive the
+// page. If the page is reloaded mid-read, or the restore fails, the camera
+// stays dim and the next session takes that as normal. The values from
+// before the dim are kept here until they have been put back.
+const EXPOSURE_KEY = "visionos.exposureBefore";
 // How far down the picture goes for a read, as a fraction of each control's
 // range. A webcam's automatic exposure blows a glossy label out to white,
 // and the ink is what the reader needs; a quarter of the range is a stop
@@ -104,7 +109,7 @@ export class Camera {
    * Throws with a human-readable reason; the caller speaks it aloud.
    * `preferred` is part of a camera's name, from the page URL.
    */
-  async start(preferred: string | null = null): Promise<void> {
+  async start(preferred: string | null = null, exposure: string | null = null): Promise<void> {
     if (!navigator.mediaDevices?.getUserMedia) {
       throw new Error(
         "This browser can't open the camera. Make sure you opened the page over https."
@@ -120,6 +125,55 @@ export class Camera {
       await this.switchTo(chosen);
     }
     await this.show();
+    await this.repairExposure(exposure);
+    // Best effort on the way out: a reload during a read must not leave the
+    // camera dim for the next session.
+    window.addEventListener("pagehide", () => void this.restoreExposure());
+  }
+
+  /**
+   * Undo a dim that an earlier session never restored, or, with
+   * `?exposure=reset`, put every image control at the middle of its range,
+   * which is where webcams ship.
+   */
+  private async repairExposure(exposure: string | null): Promise<void> {
+    const track = this.track();
+    if (!track) return;
+    let values: Record<string, number> | null = null;
+    if (exposure === "reset") {
+      const capabilities = (track.getCapabilities?.() ?? {}) as ImageCapabilities;
+      values = {};
+      for (const [name] of EXPOSURE_CONTROLS) {
+        const range = capabilities[name];
+        if (range && range.max > range.min) values[name] = (range.min + range.max) / 2;
+      }
+    } else {
+      values = this.storedExposure();
+    }
+    if (!values || Object.keys(values).length === 0) return;
+    try {
+      await track.applyConstraints({ advanced: [values as unknown as MediaTrackConstraintSet] });
+    } catch {
+      // The camera refused; nothing else to try.
+    }
+    this.forgetExposure();
+  }
+
+  private storedExposure(): Record<string, number> | null {
+    try {
+      const raw = localStorage.getItem(EXPOSURE_KEY);
+      return raw ? (JSON.parse(raw) as Record<string, number>) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private forgetExposure(): void {
+    try {
+      localStorage.removeItem(EXPOSURE_KEY);
+    } catch {
+      // Private browsing or blocked storage.
+    }
   }
 
   /** The camera in use, named for speech; empty before start. */
@@ -178,6 +232,11 @@ export class Camera {
     try {
       await track.applyConstraints({ advanced: [dimmed as unknown as MediaTrackConstraintSet] });
       this.exposureBefore = before;
+      try {
+        localStorage.setItem(EXPOSURE_KEY, JSON.stringify(before));
+      } catch {
+        // Private browsing or blocked storage: the in-memory copy still works.
+      }
       await new Promise((resolve) => setTimeout(resolve, EXPOSURE_SETTLE_MS));
     } catch {
       // The camera refused; the read goes ahead with the picture as it is.
@@ -188,13 +247,15 @@ export class Camera {
   /** Put the exposure back the way it was before `dimForRead`. */
   async restoreExposure(): Promise<void> {
     const track = this.track();
-    const before = this.exposureBefore;
+    const before = this.exposureBefore ?? this.storedExposure();
     this.exposureBefore = null;
     if (!track || !before) return;
     try {
       await track.applyConstraints({ advanced: [before as unknown as MediaTrackConstraintSet] });
+      this.forgetExposure();
     } catch {
-      // Nothing more to do; the next read will try again from wherever it is.
+      // Nothing more to do now; the stored values are kept, and the next
+      // start puts them back.
     }
   }
 
