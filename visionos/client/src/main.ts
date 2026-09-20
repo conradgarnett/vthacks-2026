@@ -787,6 +787,13 @@ window.addEventListener("keydown", (event) => {
 // page. The browser only opens a port a person has picked once, hence the
 // Watch button; it shows only where Web Serial exists (Chrome, Edge).
 const WATCH_BAUDS = [115200, 9600];
+// A held port reads zero bytes with no error, and an idle board is silent
+// by design, so the only tell is a watch that says nothing after it was
+// connected. The app asks for a press on connect and, if nothing at all
+// has arrived after this long, says so once.
+const WATCH_QUIET_MS = 20000;
+let watchHeard = false;
+let watchQuietTimer = 0;
 type SerialPortLike = {
   open(options: { baudRate: number }): Promise<void>;
   close(): Promise<void>;
@@ -817,6 +824,16 @@ async function connectWatch(port: SerialPortLike, spoken: string): Promise<void>
   await port.open({ baudRate: WATCH_BAUDS[0] });
   setStatus("Watch connected", "ok");
   tts.say(spoken, SpeechPriority.Answer);
+  watchHeard = false;
+  window.clearTimeout(watchQuietTimer);
+  watchQuietTimer = window.setTimeout(() => {
+    if (watchHeard || watchPort !== port) return;
+    const hint =
+      "The watch has said nothing since it was connected. If you pressed a button, " +
+      "another program may be holding its port, or the cable may be charge-only.";
+    show(hint);
+    tts.say(hint, SpeechPriority.Answer);
+  }, WATCH_QUIET_MS);
   void listenToWatch(port, 0);
 }
 
@@ -866,6 +883,7 @@ async function listenToWatch(port: SerialPortLike, baudIndex: number): Promise<v
       const { value, done } = await reader.read();
       if (done) break;
       if (!value || value.length === 0) continue;
+      watchHeard = true;
       if (first) {
         first = false;
         if (looksLikeGarbage(value) && baudIndex + 1 < WATCH_BAUDS.length) {

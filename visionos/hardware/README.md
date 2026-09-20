@@ -85,6 +85,23 @@ The app opens the port at 115200 and, if the first bytes are not text,
 once more at 9600 for the older sketches; that first press is lost, and it
 says "Press again."
 
+Plugging it in on this laptop (the firmware is already on the board; no
+Arduino IDE is needed):
+
+- Use a data USB cable, not a charge-only one, straight into the laptop
+  rather than a hub. Windows needs no driver; the port shows as `COM<n>`
+  and the number can change between plugs. The app's picker lists it, so
+  the name never matters.
+- Silence is the board's resting state: it prints nothing until a button
+  is pressed or its RST button is tapped (then "Ready - SCAN(9) READ(1)
+  ASK(16)", which the app shows as "Watch ready"). A quiet board is not a
+  dead one.
+- If another program holds the port (the Arduino Serial Monitor, a
+  terminal), the browser cannot open it and the app says "Couldn't
+  connect the watch". A port that opens and then stays silent after a
+  press is the other tell; the app says so once, twenty seconds after
+  connecting, if nothing at all has arrived.
+
 **The gotcha, in Conrad's words:** Grove buttons are powered modules that
 drive their signal pin high when pressed, not bare switches to ground. With
 `INPUT_PULLUP` they read backwards, and with a bare `INPUT` an unpowered
