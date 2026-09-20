@@ -671,6 +671,9 @@ class Session:
         await self.socket.send_json({
             "type": "inventory",
             "text": inventory_sentence(seen, once),
+            # The scan frame's width and height: the blueprint turns a wall's
+            # box back into the directions of its edges and its floor line.
+            "frame_size": [size[0], size[1]],
             "items": [
                 {"label": s.label, "confidence": round(s.confidence, 2), "frames": s.frames,
                  "scale": scale_of(s.label),
@@ -697,7 +700,8 @@ class Session:
             embedding = await embed(image) if embed is not None else None
             loop = asyncio.get_running_loop()
             thumbnail = await loop.run_in_executor(None, thumbnail_of, image)
-            scene = scene_from_scan(seen, cues, embedding, thumbnail)
+            frame_size = (int(image.shape[1]), int(image.shape[0]))
+            scene = scene_from_scan(seen, cues, embedding, thumbnail, frame_size=frame_size)
             return self.places.observe(scene)
         except Exception:
             log.exception("place memory failed; the scan is spoken without it")

@@ -231,9 +231,12 @@ class Scene:
     embedding: list[float] | None = None
     thumbnail: str | None = None
     # Where each thing was, from the user's spot: direction and distance,
-    # whether it obstructs, and its size tier. The blueprint draws a place
-    # from its views' layouts.
+    # whether it obstructs, its size tier and its box in the frame. The
+    # blueprint draws a place from its views' layouts; with the frame's
+    # aspect (height over width) a wall's box gives the directions of its
+    # edges and, from its floor line, a distance.
     layout: list[dict] = field(default_factory=list)
+    aspect: float | None = None
 
     @property
     def has_substance(self) -> bool:
@@ -253,6 +256,7 @@ class Scene:
             "room": self.room,
             "thumbnail": self.thumbnail,
             "layout": list(self.layout),
+            "aspect": self.aspect,
         }
         if with_embedding:
             out["embedding"] = None if self.embedding is None else [round(v, 4) for v in self.embedding]
@@ -269,6 +273,7 @@ class Scene:
             embedding=[float(v) for v in data["embedding"]] if data.get("embedding") else None,
             thumbnail=data.get("thumbnail"),
             layout=[dict(item) for item in (data.get("layout") or [])],
+            aspect=float(data["aspect"]) if data.get("aspect") else None,
         )
 
 
@@ -286,9 +291,12 @@ def compare(a: Scene, b: Scene) -> Evidence:
     return Evidence(max(0.0, min(1.0, score)), picture, things, words)
 
 
-def scene_from_scan(seen, text_lines=(), embedding=None, thumbnail=None, now=None) -> Scene:
+def scene_from_scan(
+    seen, text_lines=(), embedding=None, thumbnail=None, now=None, frame_size=None
+) -> Scene:
     """A scene from what a scan agreed on: `seen` carries `.label` (the scan's
-    Seen objects or the scene model's tracked ones)."""
+    Seen objects or the scene model's tracked ones). Walls are not evidence
+    of which place this is, but they are part of its layout."""
     labels = Counter(
         s.label for s in seen if s.label not in _MOVING and s.label not in _NOT_EVIDENCE
     )
@@ -299,10 +307,13 @@ def scene_from_scan(seen, text_lines=(), embedding=None, thumbnail=None, now=Non
             "distance_m": None if s.distance_m is None else round(float(s.distance_m), 1),
             "obstacle": is_obstacle(s.label),
             "scale": scale_of(s.label),
+            "box": [round(float(v), 4) for v in s.box] if getattr(s, "box", None) else None,
         }
         for s in seen
-        if s.label not in _NOT_EVIDENCE
     ]
+    aspect = None
+    if frame_size and frame_size[0] > 0 and frame_size[1] > 0:
+        aspect = round(frame_size[1] / frame_size[0], 4)
     return Scene(
         id=uuid.uuid4().hex[:8],
         at=time.time() if now is None else now,
@@ -312,6 +323,7 @@ def scene_from_scan(seen, text_lines=(), embedding=None, thumbnail=None, now=Non
         embedding=list(embedding) if embedding else None,
         thumbnail=thumbnail,
         layout=layout,
+        aspect=aspect,
     )
 
 

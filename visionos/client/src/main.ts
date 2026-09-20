@@ -280,7 +280,7 @@ function onServerEvent(event: ServerEvent): void {
       // only when asked for with ?verbose=1, since it is a list, not a picture.
       show(event.text);
       if (verbose) tts.say(event.text, SpeechPriority.Answer);
-      blueprint.onInventory(event.items);
+      blueprint.onInventory(event.items, event.frame_size);
       const boxed = event.items.filter((item) => item.box !== null) as Boxed[];
       if (boxed.length > 0) {
         scanBoxesUntil = performance.now() + SCAN_BOXES_MS;

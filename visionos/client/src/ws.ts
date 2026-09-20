@@ -31,6 +31,9 @@ export type ServerEvent =
   | {
       type: "inventory";
       text: string;
+      /** Width and height of the scan frame, so a normalized box can be
+       * turned back into angles. */
+      frame_size?: [number, number];
       items: Array<{
         label: string;
         confidence: number;

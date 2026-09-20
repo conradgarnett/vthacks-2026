@@ -205,7 +205,19 @@ tested.
   view that shares too little stays out rather than being placed by
   guesswork). Nothing here is spoken. `__visionos.event(...)` in the
   browser console drives the screen without a camera or a socket. Suite
-  552 -> 553.
+  552 -> 553. Walls, at the user's request: a wall is drawn as a line
+  across the directions its box edges were seen in (the pinhole formula
+  of `geometry.py`, on the client), at the distance its floor line gives
+  (camera height over tan of the angle below the horizon; 1.6 m for
+  glasses on a standing adult, `?eye=1.2` for someone seated), shown as
+  "~"; when the box bottom is the frame edge or within 3 degrees of the
+  horizon the wall sits dashed at the map's edge with "?". The floor
+  beyond a wall is unknown; a wall with a known distance across the
+  strip blocks the walkway, an unknown one is noted. For that the
+  `inventory` event carries `frame_size` and every layout entry its
+  normalized `box`, with the scene's `aspect`. Head tilt is not measured,
+  so the wall distance is an estimate of a different kind from the
+  height-prior ones, and it is never spoken.
 - **2026-09-19, late night, visionOS-2, the places memory:** every scan is
   remembered as a scene (`backend/scene/places.py`): the things two frames
   agreed on (people and walls left out), the distinctive words read (room

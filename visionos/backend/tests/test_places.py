@@ -255,19 +255,27 @@ class TestSubstance:
             Seen("chair", 0.9, -12.0, 1.5, 2, None),
             Seen("sign", 0.8, 20.0, None, 2, None),
             Seen("person", 0.9, 5.0, 3.0, 2, None),
-            Seen("wall", 0.7, 0.0, None, 2, None),
+            # A wall is no evidence of which place this is, but it is part
+            # of the layout, with its box so the blueprint can draw it as a
+            # wall and read its floor line.
+            Seen("wall", 0.7, 0.0, None, 2, (0.2, 0.1, 0.9, 0.95)),
         ]
-        built = scene_from_scan(seen)
+        built = scene_from_scan(seen, frame_size=(1280, 720))
+        assert built.labels == {"chair": 1, "sign": 1}
+        assert built.aspect == pytest.approx(0.5625)
         assert built.layout == [
-            {"label": "chair", "azimuth_deg": -12.0, "distance_m": 1.5, "obstacle": True, "scale": "large"},
-            {"label": "sign", "azimuth_deg": 20.0, "distance_m": None, "obstacle": False, "scale": "medium"},
-            {"label": "person", "azimuth_deg": 5.0, "distance_m": 3.0, "obstacle": True, "scale": "large"},
+            {"label": "chair", "azimuth_deg": -12.0, "distance_m": 1.5, "obstacle": True, "scale": "large", "box": None},
+            {"label": "sign", "azimuth_deg": 20.0, "distance_m": None, "obstacle": False, "scale": "medium", "box": None},
+            {"label": "person", "azimuth_deg": 5.0, "distance_m": 3.0, "obstacle": True, "scale": "large", "box": None},
+            {"label": "wall", "azimuth_deg": 0.0, "distance_m": None, "obstacle": True, "scale": "large", "box": [0.2, 0.1, 0.9, 0.95]},
         ]
         memory = PlaceMemory(str(tmp_path / "places.json"))
         memory.remember_new(built)
         reloaded = PlaceMemory(str(tmp_path / "places.json"))
         assert reloaded.places[0].scenes[0].layout == built.layout
-        assert reloaded.to_dict()["places"][0]["scenes"][0]["layout"][0]["label"] == "chair"
+        assert reloaded.places[0].scenes[0].aspect == pytest.approx(0.5625)
+        view = reloaded.to_dict()["places"][0]["scenes"][0]
+        assert view["layout"][3]["label"] == "wall" and view["aspect"] == pytest.approx(0.5625)
 
     def test_a_place_keeps_only_its_newest_views(self):
         memory = PlaceMemory(max_scenes_per_place=3)
