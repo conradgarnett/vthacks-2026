@@ -899,9 +899,13 @@ async function connectWatch(port: SerialPortLike, spoken: string): Promise<void>
   watchWanted = true;
   await port.open({ baudRate: WATCH_BAUDS[0] });
   // A native-USB board only sends once the host has raised DTR; Chrome
-  // usually does that on open, but saying so costs nothing.
+  // usually does that on open, but saying so costs nothing. RTS stays low:
+  // on the ESP32-S2 the DTR/RTS pair is the reset-and-bootloader handshake,
+  // and on 2026-09-20 the app heard nothing from the freshly flashed board
+  // with RTS high while a direct read of the same port with RTS low got
+  // every press.
   try {
-    await port.setSignals?.({ dataTerminalReady: true, requestToSend: true });
+    await port.setSignals?.({ dataTerminalReady: true, requestToSend: false });
   } catch {
     // Not every port takes signals.
   }
@@ -991,10 +995,14 @@ async function listenToWatch(port: SerialPortLike, baudIndex: number): Promise<v
         const raw = buffered.slice(0, newline).trim();
         const line = raw.toLowerCase();
         buffered = buffered.slice(newline + 1);
-        // Every line the watch sends is shown, so a sighted helper can see
-        // a press arrive even when it is not a command.
-        if (raw) show(`Watch: ${raw}`);
         const pin = raw.match(WATCH_PIN_LINE);
+        // A press, the board's banner and its "ignored" diagnostics are
+        // shown, so a sighted helper can see a press arrive; the boot
+        // report's pin listing and level lines only go to the console.
+        const worthShowing =
+          line in actions || pin !== null || line.startsWith("ready") || line.startsWith("ignored");
+        if (raw && worthShowing) show(`Watch: ${raw}`);
+        else if (raw) console.info("[watch]", raw);
         if (line in actions) {
           if (started) run(line as Action);
           else void begin();
