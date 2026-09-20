@@ -41,6 +41,12 @@ class VisionProvider(ABC):
     # Whether a "read" should escalate here when local OCR finds nothing.
     # The local scene provider cannot read at all, so it stays False there.
     reads_text: bool = False
+    # One line for the log and /health about whether the provider is usable.
+    note: str = ""
+
+    async def verify(self) -> None:
+        """Check credentials and reachability at startup; never raises."""
+        return None
 
     @abstractmethod
     def describe(
@@ -200,7 +206,7 @@ def credentials_available() -> bool:
 
 
 def build_provider(
-    settings: Settings, scene_getter=None, detections_getter=None
+    settings: Settings, scene_getter=None, detections_getter=None, place_getter=None
 ) -> VisionProvider:
     if settings.vision_provider == "replay":
         log.warning(
@@ -213,7 +219,25 @@ def build_provider(
         from backend.ai.local_provider import LocalSceneProvider
 
         log.info("Vision provider: local scene model (no credentials required)")
-        return LocalSceneProvider(scene_getter, detections_getter)
+        return LocalSceneProvider(scene_getter, detections_getter, place_getter)
+
+    if settings.vision_provider == "nvidia":
+        from backend.ai.local_provider import LocalSceneProvider
+
+        local = LocalSceneProvider(scene_getter, detections_getter, place_getter)
+        if not settings.nvidia_api_key:
+            log.warning(
+                "VISION_PROVIDER=nvidia but NVIDIA_API_KEY is not set; on-device "
+                "mode. Put the key in visionos/.env."
+            )
+            return local
+        from backend.ai.nvidia_provider import NvidiaVisionProvider
+
+        log.info(
+            "Vision provider: NVIDIA %s for questions; scans and reads on-device",
+            settings.nvidia_model,
+        )
+        return NvidiaVisionProvider(settings, local, scene_getter=scene_getter)
 
     if not credentials_available():
         from backend.ai.local_provider import LocalSceneProvider
@@ -223,7 +247,7 @@ def build_provider(
             "Run `ant auth login` for full vision. Descriptions will be limited "
             "to recognized objects and cannot include text."
         )
-        return LocalSceneProvider(scene_getter, detections_getter)
+        return LocalSceneProvider(scene_getter, detections_getter, place_getter)
 
     log.info("Vision provider: Claude (%s)", settings.visionos_model)
     return ClaudeVisionProvider(settings)

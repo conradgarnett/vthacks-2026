@@ -16,9 +16,9 @@ import re
 from typing import AsyncIterator, Callable
 
 from backend.ai.vision import VisionProvider
-from backend.perception.detector import CLASS_HEIGHTS_M
+from backend.perception.vocabulary import CLASS_NAMES
 from backend.perception.geometry import steps_away
-from backend.speech.phrasing import with_article
+from backend.speech.phrasing import pluralize, with_article
 from backend.scene.inference import describe_scene, room_sentence
 from backend.scene.model import SceneModel
 from backend.scene.queries import (
@@ -35,7 +35,7 @@ from backend.scene.queries import (
 # asked is its own kind of fabrication.
 _KNOWN_LABELS: tuple[str, ...] = tuple(
     sorted(
-        set(CLASS_HEIGHTS_M) | set(_ALIASES),
+        set(CLASS_NAMES) | set(_ALIASES),
         key=len,
         reverse=True,  # longest first: "dining table" before "table"
     )
@@ -57,6 +57,36 @@ _ROOM_QUESTION = re.compile(
 )
 
 
+def _words(text: str) -> list[str]:
+    return re.findall("[a-z]+", text.lower())
+
+
+def _same_word(spoken: str, label_word: str) -> bool:
+    """'cups' names a cup and 'benches' a bench; 'cupboard' names neither."""
+    return spoken in (label_word, label_word + "s", label_word + "es")
+
+
+def asked_about(question: str) -> str | None:
+    """The thing a question is about: the first known label in it, matched
+    whole-word, plural or not.
+
+    "Are there any cups on the table" is about the cups. A substring pass
+    that took the longest label anywhere in the sentence made it about the
+    table, and answered a different question than the one asked.
+    """
+    words = _words(question)
+    best: tuple[int, int, str] | None = None
+    for label in _KNOWN_LABELS:
+        parts = label.split()
+        for start in range(len(words) - len(parts) + 1):
+            if all(_same_word(words[start + i], part) for i, part in enumerate(parts)):
+                candidate = (start, -len(parts), label)
+                if best is None or candidate < best:
+                    best = candidate
+                break
+    return best[2] if best else None
+
+
 class LocalSceneProvider(VisionProvider):
     """Answers from the tracked scene model alone."""
 
@@ -64,10 +94,14 @@ class LocalSceneProvider(VisionProvider):
         self,
         scene_getter: Callable[[], SceneModel],
         detections_getter: Callable[[], list] | None = None,
+        place_getter: Callable[[], str | None] | None = None,
     ) -> None:
         self._scene = scene_getter
         # The latest frame's raw detections, confirmed or not, for hedged hints.
         self._detections = detections_getter or (lambda: [])
+        # The name of the place the memory last recognized, while that is
+        # recent; None otherwise.
+        self._place = place_getter or (lambda: None)
 
     async def describe(
         self,
@@ -95,11 +129,15 @@ class LocalSceneProvider(VisionProvider):
 
         if _ROOM_QUESTION.search(lowered):
             visible = [o.label for o in scene.all_objects() if o.visible]
-            return room_sentence(visible) or (
+            room = room_sentence(visible) or (
                 "I can't tell what kind of place this is yet; I only recognize "
                 + (", ".join(sorted(set(visible))) if visible else "nothing specific")
                 + "."
             )
+            # A remembered place answers "where am I" by name; the kind of
+            # room follows as before.
+            place = self._place()
+            return f"You seem to be in {place}. {room}" if place else room
 
         if any(word in lowered for word in _CHANGE_WORDS):
             return self._describe_changes(scene)
@@ -110,9 +148,9 @@ class LocalSceneProvider(VisionProvider):
         # Match against everything we could recognize, not only what is
         # currently visible, so an absent object gets "I can't see a person"
         # rather than a summary of whatever else happens to be in frame.
-        for label in _KNOWN_LABELS:
-            if label in lowered:
-                return self._describe_object(scene, label)
+        label = asked_about(lowered)
+        if label:
+            return self._describe_object(scene, label)
 
         return summarize(scene)
 
@@ -135,18 +173,22 @@ class LocalSceneProvider(VisionProvider):
         if not matches:
             return f"I can't see {with_article(label)} right now."
 
-        obj = matches[0]
-        if obj.distance_m is None:
-            return (
-                f"I can see {with_article(obj.label)} at your {obj.clock}, "
-                "but I can't judge the distance."
+        # What is in view now beats what is only remembered, and "are there
+        # any cups" wants the count, nearest first.
+        in_view = [o for o in matches if o.visible]
+        obj = (in_view or matches)[0]
+        where = f"at your {obj.clock}"
+        if obj.distance_m is not None:
+            where += (
+                f", about {obj.distance_m:.1f} meters, roughly "
+                f"{steps_away(obj.distance_m)} steps"
             )
-
+        if len(in_view) > 1:
+            return f"I can see {pluralize(len(in_view), obj.label)}, the nearest {where}."
+        if obj.distance_m is None:
+            return f"I can see {with_article(obj.label)} {where}, but I can't judge the distance."
         seen = "" if obj.visible else ", though I can't see it now"
-        return (
-            f"The {obj.label} is at your {obj.clock}, about {obj.distance_m:.1f} "
-            f"meters, roughly {steps_away(obj.distance_m)} steps{seen}."
-        )
+        return f"The {obj.label} is {where}{seen}."
 
     @staticmethod
     def _describe_changes(scene: SceneModel) -> str:

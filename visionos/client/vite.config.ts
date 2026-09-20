@@ -31,6 +31,12 @@ export default defineConfig({
       "/health": { target: "http://127.0.0.1:8000" },
       "/scene": { target: "http://127.0.0.1:8000" },
       "/metrics": { target: "http://127.0.0.1:8000" },
+      // The place memory, read and edited by the panel.
+      "/places": { target: "http://127.0.0.1:8000" },
+      "/scenes": { target: "http://127.0.0.1:8000" },
+      // The wearer's profile and the mail check, for the allergies sheet.
+      "/profile": { target: "http://127.0.0.1:8000" },
+      "/alerts": { target: "http://127.0.0.1:8000" },
       "/speech": { target: "http://127.0.0.1:8000" },
     },
   },

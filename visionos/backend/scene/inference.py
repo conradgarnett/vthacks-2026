@@ -24,8 +24,8 @@ from collections import Counter
 from dataclasses import dataclass, replace
 from typing import Iterable
 
-from backend.perception.geometry import clock_position, describe_direction
-from backend.perception.vocabulary import LANDMARK_CLASSES, is_obstacle
+from backend.perception.geometry import clock_position, describe_direction, lateral_offset_m
+from backend.perception.vocabulary import LANDMARK_CLASSES, is_obstacle, is_small
 from backend.scene.model import SceneModel, SceneObject
 from backend.scene.queries import summarize
 from backend.speech.phrasing import join_spoken, pluralize, with_article
@@ -34,17 +34,27 @@ from backend.speech.phrasing import join_spoken, pluralize, with_article
 # evidence, not probabilities: a bed alone settles "bedroom"; a chair alone
 # settles nothing, because chairs are everywhere.
 ROOMS: list[tuple[str, dict[str, float]]] = [
-    ("kitchen", {"refrigerator": 2.0, "microwave": 1.5, "sink": 1.0, "counter": 1.0,
-                 "bowl": 0.5, "cup": 0.3, "bottle": 0.3}),
-    ("bathroom", {"toilet": 3.0, "sink": 1.0}),
-    ("bedroom", {"bed": 3.0}),
-    ("office", {"desk": 1.5, "laptop": 1.5, "keyboard": 1.0, "chair": 0.5, "book": 0.3}),
-    ("dining area", {"dining table": 2.0, "table": 1.5, "chair": 0.5, "cup": 0.3, "bowl": 0.3}),
-    ("living room", {"couch": 2.0, "tv": 1.5, "potted plant": 0.5, "remote": 0.5, "chair": 0.3}),
+    ("kitchen", {"refrigerator": 2.0, "microwave": 1.5, "oven": 1.5, "stove": 1.5,
+                 "dishwasher": 1.5, "sink": 1.0, "counter": 1.0, "kettle": 0.5,
+                 "toaster": 0.5, "coffee maker": 0.5, "bowl": 0.5, "cup": 0.3,
+                 "bottle": 0.3, "pot": 0.3, "pan": 0.3}),
+    ("bathroom", {"toilet": 3.0, "bathtub": 3.0, "sink": 1.0, "toilet paper": 1.0,
+                  "toothbrush": 1.0, "towel": 0.5, "hair dryer": 0.5, "mirror": 0.3}),
+    ("bedroom", {"bed": 3.0, "wardrobe": 1.5, "nightstand": 1.5, "dresser": 1.0}),
+    ("office", {"desk": 1.5, "laptop": 1.5, "keyboard": 1.0, "printer": 1.0,
+                "computer mouse": 0.7, "bookshelf": 0.5, "chair": 0.5, "book": 0.3}),
+    ("dining area", {"dining table": 2.0, "table": 1.5, "chair": 0.5, "cup": 0.3, "bowl": 0.3,
+                     "plate": 0.3, "fork": 0.2, "spoon": 0.2}),
+    ("living room", {"couch": 2.0, "fireplace": 2.0, "tv": 1.5, "coffee table": 1.5,
+                     "armchair": 1.0, "potted plant": 0.5, "remote": 0.5, "lamp": 0.3,
+                     "chair": 0.3}),
     ("corridor", {"hallway": 2.0, "door": 1.0, "doorway": 1.0, "exit sign": 1.5, "elevator": 1.5,
-                  "handrail": 1.0, "stairs": 1.0, "staircase": 1.0}),
-    ("street", {"bus": 2.0, "car": 1.5, "truck": 1.5, "motorcycle": 1.0, "bicycle": 0.7,
-                "pole": 0.7}),
+                  "escalator": 1.5, "handrail": 1.0, "stairs": 1.0, "staircase": 1.0,
+                  "fire extinguisher": 1.0, "vending machine": 1.0, "drinking fountain": 1.0}),
+    ("street", {"bus": 2.0, "crosswalk": 2.0, "car": 1.5, "truck": 1.5, "traffic light": 1.5,
+                "stop sign": 1.5, "fire hydrant": 1.5, "motorcycle": 1.0, "curb": 1.0,
+                "bollard": 1.0, "parking meter": 1.0, "bicycle": 0.7, "pole": 0.7,
+                "traffic cone": 0.7, "mailbox": 0.7, "scooter": 0.5, "tree": 0.5}),
 ]
 # Evidence needed before a room is named. A fridge plus a sink, a bed
 # alone or a toilet alone reach it; a door plus a handrail do not. There
@@ -52,6 +62,13 @@ ROOMS: list[tuple[str, dict[str, float]]] = [
 # user heard guesses that were plainly wrong, and a wrong guess is not
 # made harmless by hedging it. Below this score the room is not named.
 _ROOM_MIN_SCORE = 3.0
+# Below that, a room is offered as "this may be" only when the evidence is
+# fairly strong and clearly ahead of any other room: the user asked for
+# every scan to start with what the place seems to be, and also, earlier,
+# never to hear a room that turns out wrong. A desk and a keyboard reach
+# this; a door and a handrail do not.
+_ROOM_HEDGE_SCORE = 2.5
+_ROOM_HEDGE_MARGIN = 1.0
 # A second copy of an object adds evidence; a fifth chair does not.
 _MAX_COUNT_PER_LABEL = 2
 
@@ -80,28 +97,39 @@ class Tentative:
         return clock_position(self.azimuth_deg)
 
 
-def room_guess(labels: Iterable[str]) -> tuple[str, float] | None:
-    """The kind of space these objects add up to, with its evidence score."""
+def room_scores(labels: Iterable[str]) -> list[tuple[str, float]]:
+    """Every room's evidence score for these objects, best first."""
     counts = Counter(labels)
-    best: tuple[str, float] | None = None
+    scored = []
     for room, weights in ROOMS:
         score = sum(
             weights.get(label, 0.0) * min(count, _MAX_COUNT_PER_LABEL)
             for label, count in counts.items()
         )
-        if score >= _ROOM_MIN_SCORE and (best is None or score > best[1]):
-            best = (room, score)
-    return best
+        scored.append((room, score))
+    scored.sort(key=lambda rs: -rs[1])
+    return scored
+
+
+def room_guess(labels: Iterable[str]) -> tuple[str, float] | None:
+    """The kind of space these objects add up to, with its evidence score,
+    when the evidence is decisive."""
+    best = room_scores(labels)[0]
+    return best if best[1] >= _ROOM_MIN_SCORE else None
 
 
 def room_sentence(labels: Iterable[str]) -> str | None:
-    """Named only on decisive evidence, and then plainly; there is no
-    hedged tier, because the evidence is either enough or it is not."""
-    guess = room_guess(labels)
-    if guess is None:
+    """"This looks like a kitchen." on decisive evidence, "This may be a
+    kitchen." on fairly strong evidence with no close rival, else nothing."""
+    scored = room_scores(labels)
+    if not scored:
         return None
-    room, _score = guess
-    return f"This looks like {with_article(room)}."
+    (room, score), runner_up = scored[0], (scored[1][1] if len(scored) > 1 else 0.0)
+    if score >= _ROOM_MIN_SCORE:
+        return f"This looks like {with_article(room)}."
+    if score >= _ROOM_HEDGE_SCORE and score - runner_up >= _ROOM_HEDGE_MARGIN:
+        return f"This may be {with_article(room)}."
+    return None
 
 
 def tentative_objects(detections, scene: SceneModel, limit: int = 2) -> list[Tentative]:
@@ -116,6 +144,10 @@ def tentative_objects(detections, scene: SceneModel, limit: int = 2) -> list[Ten
     out: list[Tentative] = []
     for detection in sorted(detections, key=lambda d: -d.confidence):
         if detection.confidence < _TENTATIVE_MIN_CONFIDENCE:
+            continue
+        # A possible cup is never worth a mention; a real one is spoken
+        # only when asked about. A wall is never a hint.
+        if is_small(detection.label) or detection.label in _STRUCTURE_LABELS:
             continue
         if detection.label in confirmed or detection.label in seen:
             continue
@@ -206,6 +238,9 @@ def describe_scene(scene: SceneModel, detections=()) -> str:
     if reminder:
         sentences.append(reminder)
 
+    sentences.append(walkway_sentence(
+        [Seen(o.label, o.confidence, o.azimuth_deg, o.distance_m) for o in scene.all_objects() if o.visible]
+    ))
     return " ".join(sentences)
 
 
@@ -255,9 +290,11 @@ class Seen:
 
 # Things that describe the place rather than sit in it.
 _SETTING_LABELS = {"hallway": "You're looking down a hallway."}
+# Structure: spoken only by the walkway sentence, never as a thing in view.
+_STRUCTURE_LABELS = {"wall"}
 # Furniture a person sits at or in.
-_TABLES = {"table", "dining table", "desk", "counter"}
-_SEATS = {"chair", "couch", "bench"}
+_TABLES = {"table", "dining table", "desk", "counter", "coffee table"}
+_SEATS = {"chair", "armchair", "stool", "couch", "bench"}
 # Two things within this angle and distance of each other belong to one group.
 _GROUP_AZIMUTH_DEG = 20.0
 _GROUP_DISTANCE_RATIO = 1.6
@@ -275,7 +312,11 @@ _ACTIVITIES = (
     ("cell phone", "on their phone"),
     ("book", "reading"),
     ("cup", "having a drink"),
+    ("drinking glass", "having a drink"),
     ("bowl", "eating"),
+    ("fork", "eating"),
+    ("spoon", "eating"),
+    ("toothbrush", "brushing their teeth"),
 )
 _IN_REACH = 0.25
 # What a person is doing, read from the furniture they are at rather than
@@ -286,6 +327,7 @@ _FURNITURE_ACTIVITIES = (
     ("couch", "sitting on a couch"),
     ("bed", "lying on a bed"),
     ("sink", "at a sink"),
+    ("stove", "cooking at a stove"),
 )
 # Words worth reading out from a scan even when nobody asked for text:
 # wayfinding and safety. Anything printed on a sign or a door counts too.
@@ -299,6 +341,13 @@ _NOTABLE_WORDS = {
 }
 _SIGN_LIKE = {"sign", "exit sign", "door", "doorway", "elevator"}
 _MAX_NOTABLE = 2
+# The walkway: a strip this wide and this long straight ahead, the same
+# corridor the path question checks. Something known to be walked into,
+# inside it, blocks it; the nearest thing of size within this angle of
+# straight ahead is what the way leads to.
+_WALK_WIDTH_M = 1.0
+_WALK_DISTANCE_M = 3.0
+_AHEAD_DEG = 15.0
 
 
 def _about(distance_m: float | None) -> str:
@@ -307,7 +356,8 @@ def _about(distance_m: float | None) -> str:
     if distance_m < 1.0:
         return "less than a meter"
     if distance_m < 3.0:
-        return f"about {round(distance_m * 2) / 2:g} meters"
+        value = round(distance_m * 2) / 2
+        return f"about {value:g} {'meter' if value == 1 else 'meters'}"
     return f"about {round(distance_m)} meters"
 
 
@@ -442,7 +492,10 @@ def describe_group(group: list[Seen]) -> str:
     rest = [s for s in group if s not in people and s not in seats and s not in tables]
 
     if not people:
-        return _counted(group)
+        # Hand-held things are left for a question: "are there any cups on
+        # the table" gets them, a scan does not.
+        shown = [s for s in group if not is_small(s.label)]
+        return _counted(shown) if shown else ""
 
     subject = "a person" if len(people) == 1 else pluralize(len(people), "person")
     sitting = any(_is_sitting(p, seats) for p in people)
@@ -451,6 +504,9 @@ def describe_group(group: list[Seen]) -> str:
 
     activity = _activity(people, rest)
     placed = None if activity else _furniture_activity(people, [*tables, *seats, *rest])
+    # A phone in someone's hand says what they are doing; a phone on the
+    # table is not mentioned unless asked about.
+    rest = [s for s in rest if not is_small(s.label)]
     if activity or placed:
         doing, item = activity or placed
         rest = [s for s in rest if s is not item]
@@ -499,6 +555,55 @@ def _where(group: list[Seen], hallway: bool, farthest: bool) -> str:
     return f"{where} {direction}".strip()
 
 
+def walkway_sentence(seen: list[Seen]) -> str:
+    """The last thing a scan says: whether the way straight ahead is clear,
+    and what it leads to.
+
+    Only obstacles the detector recognizes can block it, so a clear way is
+    always hedged: "as far as I can tell". A thing with no distance (stairs,
+    an escalator) straight ahead is named without one rather than dropped,
+    since those are the things a foot finds first.
+    """
+    if not seen:
+        return "I can't tell whether the way ahead is clear."
+    ahead = [s for s in seen if abs(s.azimuth_deg) <= _AHEAD_DEG]
+    blockers = [
+        s for s in seen
+        if is_obstacle(s.label) and s.distance_m is not None and s.distance_m <= _WALK_DISTANCE_M
+        and lateral_offset_m(s.azimuth_deg, s.distance_m) <= _WALK_WIDTH_M / 2
+    ]
+    if blockers:
+        nearest = min(blockers, key=lambda s: s.distance_m or 0.0)
+        where = f"{_about(nearest.distance_m)} {describe_direction(nearest.azimuth_deg)}".strip()
+        return f"The way ahead is blocked by {with_article(nearest.label)} {where}."
+
+    unplaced = [
+        s for s in ahead
+        if s.distance_m is None and is_obstacle(s.label) and s.label not in _STRUCTURE_LABELS
+    ]
+    if unplaced:
+        return (
+            f"Straight ahead there {'are' if unplaced[0].label.endswith('s') else 'is'} "
+            f"{with_article(unplaced[0].label)}; I can't tell how far."
+        )
+
+    targets = sorted(
+        (s for s in ahead if s.distance_m is not None and not is_small(s.label)),
+        key=lambda s: s.distance_m or 0.0,
+    )
+    if targets:
+        target = targets[0]
+        return (
+            f"The way ahead looks clear, as far as I can tell, and leads to "
+            f"{with_article(target.label)} {_about(target.distance_m)} ahead."
+        )
+    if any(s.label == "wall" for s in ahead):
+        return "The way ahead looks clear, as far as I can tell, and leads to a wall; I can't tell how far."
+    if any(s.label == "hallway" for s in seen):
+        return "The way ahead looks clear down the hallway, as far as I can tell."
+    return "The way ahead looks clear as far as I can tell, but I can't see what it leads to."
+
+
 def describe_scan(
     scene: SceneModel, seen: list[Seen], glimpsed: Iterable[Seen] = (), text_lines=()
 ) -> str:
@@ -519,8 +624,13 @@ def describe_scan(
         sentences.append(room)
 
     hallway = "hallway" in labels
-    things = [s for s in seen if s.label not in _SETTING_LABELS]
-    groups = group_seen(things)
+    things = [s for s in seen if s.label not in _SETTING_LABELS and s.label not in _STRUCTURE_LABELS]
+    # Small things still group, since a cup in reach says what a person is
+    # doing, but a group with nothing bigger in it is not spoken.
+    groups = [g for g in group_seen(things) if any(not is_small(s.label) for s in g)]
+    # The user's order: the place, then people and what they are doing,
+    # then everything else. Nearest first within each.
+    groups.sort(key=lambda g: not any(s.label == "person" for s in g))
     if groups:
         farthest = max(
             groups, key=lambda g: max((s.distance_m or 0.0) for s in g)
@@ -535,7 +645,11 @@ def describe_scan(
 
     sentences.extend(notable_text(text_lines, seen))
 
-    sure = [g for g in glimpsed if g.confidence >= _TENTATIVE_MIN_CONFIDENCE and g.label not in labels]
+    sure = [
+        g for g in glimpsed
+        if g.confidence >= _TENTATIVE_MIN_CONFIDENCE and g.label not in labels
+        and not is_small(g.label) and g.label not in _STRUCTURE_LABELS
+    ]
     if sure:
         parts = [f"{with_article(g.label)} {describe_direction(g.azimuth_deg)}" for g in sure[:2]]
         sentences.append(f"I think there may also be {join_spoken(parts)}.")
@@ -543,6 +657,8 @@ def describe_scan(
     reminder = reminder_sentence(scene)
     if reminder:
         sentences.append(reminder)
+    # Last, every time: the user's rule. Where the feet go next.
+    sentences.append(walkway_sentence(seen))
     return " ".join(sentences)
 
 
@@ -561,7 +677,10 @@ _TEXT_CUES = (
 )
 # A refrigerator with none of these around it, below the confidence bar,
 # is more likely a bin or a cabinet than a fridge in a hallway.
-_KITCHEN_COMPANY = {"sink", "microwave", "counter", "dining table", "bowl", "cup", "bottle"}
+_KITCHEN_COMPANY = {
+    "sink", "microwave", "counter", "dining table", "bowl", "cup", "bottle",
+    "stove", "oven", "dishwasher", "kettle", "toaster", "coffee maker",
+}
 UNSURE_TALL_BOX = "large cabinet or bin"
 
 

@@ -53,10 +53,18 @@ def join_spoken(items: list[str]) -> str:
 # them. These are the ones it gets wrong.
 _IRREGULAR_PLURALS = {
     "person": "people",
-    "shelf": "shelf",
+    "shelf": "shelves",
+    "bookshelf": "bookshelves",
+    "knife": "knives",
     "box": "boxes",
+    "mailbox": "mailboxes",
     "bus": "buses",
     "couch": "couches",
+    "bench": "benches",
+    "toothbrush": "toothbrushes",
+    "drinking glass": "drinking glasses",
+    "wine glass": "wine glasses",
+    "dish": "dishes",
 }
 
 

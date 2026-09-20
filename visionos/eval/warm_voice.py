@@ -28,28 +28,28 @@ from backend.speech.voice import Voice
 # Kept here rather than imported from the client so a phrase change is a
 # deliberate act with a visible diff, not a silent cache miss at the demo.
 PHRASES = [
-    # Connection and status
+    # Connection and status. Verified against the source by
+    # backend/tests/test_warm_voice.py -- a phrase that is not said verbatim
+    # somewhere is a cache entry nothing will ever hit, and the real wording
+    # then falls back to the browser voice without anyone noticing.
     "Watch connected.",
+    "Watch connected. Press a button on it.",
     "I lost connection. Reconnecting.",
     "Lost the connection to the watch.",
     "Not connected yet.",
     "Backend not reachable yet. It will keep trying once you start.",
     "Couldn't capture the image to read.",
     "No on-device text reader.",
-    "Watch connected. Press a button on it.",
-    "Watch ready.",
-    "Couldn't connect the watch.",
-    # The voice sample, which is the first thing anyone hears
-    "This is how I'll sound. A doorway is about three meters ahead, at your two o'clock.",
-    # Reading
+    # Reading. Spoken at Answer priority, so it takes the network path and
+    # is worth having rendered.
     "I couldn't find an allergen statement on this label.",
-    "I can't tell what is in this; check the label before eating.",
-    "I can't read that from here. Hold it a little closer.",
-    # Allergy prompts: the hedged ones, said often and never urgent
-    "It looks like you are eating something; hold the label up and press Read and I'll check it against your allergies.",
-    "I have emailed your doctor.",
-    "Noted, I've marked that as a false alarm.",
 ]
+
+# Deliberately NOT here: every "Careful, ..." allergy line. Those ride the
+# hazard channel at Hazard priority, which never calls /speech -- a warning
+# must not wait on a request. Rendering them would spend characters on audio
+# that is never played. They are also interpolated ("{alert.names}"), so
+# there is no fixed string to render in the first place.
 
 
 async def main() -> int:

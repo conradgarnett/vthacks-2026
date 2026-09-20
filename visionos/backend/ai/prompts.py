@@ -6,7 +6,9 @@ regression in answer quality can be traced to a specific prompt revision.
 
 from __future__ import annotations
 
-PROMPT_VERSION = "v2"
+from backend.perception.vocabulary import is_small
+
+PROMPT_VERSION = "v6"
 
 SYSTEM_PROMPT = """You are VisionOS, the visual sense of a blind or low-vision \
 user. You perceive their surroundings through a camera and a tracked spatial \
@@ -36,7 +38,9 @@ RULES
 SCAN_PROMPT = """Describe this room for someone who cannot see it. Sweep \
 left to right. Name the major objects and where each one is, using clock \
 positions and approximate distances. Mention anything in the walking path \
-first. Two or three sentences."""
+first. Leave out small hand-held things such as cups, bottles and phones
+unless asked about them. End with whether the walking path straight ahead is
+clear and what it leads to. Two or three sentences."""
 
 READ_PROMPT = """Read all the text visible in this image aloud, exactly as \
 written and in natural reading order: top to bottom, left to right. Include \
@@ -54,25 +58,49 @@ def scene_context(snapshot: dict) -> str:
     tentative = snapshot.get("tentative") or []
     room = snapshot.get("room")
     if not objects and not tentative:
-        return "SCENE MODEL: no tracked objects yet."
+        return "SCENE MODEL: no tracked objects yet." + _place_line(snapshot)
+
+    def sure(o: dict) -> str:
+        # How sure the detector is, so the model can weigh it: the user's
+        # rule is that nothing under 80% is stated as a fact.
+        return f", {o['confidence']:.0%} sure" if o.get("confidence") is not None else ""
 
     lines = [
-        f"- {o['label']} at {o['clock']}, about {o['distance_m']:.1f} m"
+        f"- {o['label']} at {o['clock']}, about {o['distance_m']:.1f} m{sure(o)}"
         f"{'' if o.get('visible', True) else ' (remembered, no longer in view)'}"
+        f"{' (small; mention only if asked)' if is_small(o['label']) else ''}"
         for o in objects
         if o.get("distance_m") is not None
     ] + [
-        f"- {o['label']} at {o['clock']}, distance unknown"
+        f"- {o['label']} at {o['clock']}, distance unknown{sure(o)}"
+        f"{' (small; mention only if asked)' if is_small(o['label']) else ''}"
         for o in objects
         if o.get("distance_m") is None
     ]
-    text = "SCENE MODEL (tracked geometry, trust over pixels):\n" + "\n".join(lines)
+    text = (
+        "SCENE MODEL (what the object detector tracked, with how sure it is; "
+        "trust it over pixels, and treat anything under 80% as a possibility):\n"
+        + "\n".join(lines)
+    )
     if room:
         text += f"\nLikely a {room}, inferred from the objects above."
     if tentative:
         text += "\nUNCONFIRMED, seen once and possibly wrong: " + "; ".join(
             f"{t['label']} at {t['clock']}"
             + (f", about {t['distance_m']:.0f} m" if t.get("distance_m") is not None else "")
+            + (f" ({t['confidence']:.0%})" if t.get("confidence") is not None else "")
             for t in tentative
         )
+    text += _place_line(snapshot)
     return text
+
+
+def _place_line(snapshot: dict) -> str:
+    """The place the memory last recognized, so "where am I" gets its name."""
+    place = snapshot.get("place")
+    if not place:
+        return ""
+    return (
+        f"\nREMEMBERED PLACE: the last scan recognized this as {place['name']} "
+        f"({place['score']:.0%} match). Use that name when asked where they are."
+    )

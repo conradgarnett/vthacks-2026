@@ -11,6 +11,7 @@ Wire protocol, one phone per socket:
   text    {"type": "ask", "text": "..."}
   text    {"type": "locate", "text": "..."}   start an audio beacon
   text    {"type": "stop_beacon"}
+  text    {"type": "false_alarm"}          the last allergy alert was wrong; tell the doctor
 
 Read frames arrive in one tagged message so they never touch the perception
 pipeline: a full-resolution frame run through the tracker breaks every box
@@ -34,6 +35,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
 from backend.ai.medication import UNREADABLE_DOSE
+from backend.alerts.barcode import ProductLookup
+from backend.alerts.email_agent import EmailAgent
+from backend.alerts.profile import ProfileStore
+from backend.alerts.reasoner import LabelReasoner
+from backend.alerts.watch import AllergyWatch
 from backend.ai.ocr import (
     NO_TEXT_FOUND,
     TextReader,
@@ -45,10 +51,14 @@ from backend.ai.ocr import (
 from backend.ai.prompts import PROMPT_VERSION, READ_PROMPT, SCAN_PROMPT, scene_context
 from backend.perception.pipeline import _decode_jpeg
 from backend.scene.inference import Seen, describe_scan, inventory_sentence, refine_labels
+from backend.scene.places import Observation, PlaceMemory, scene_from_scan, thumbnail_of
+from backend.places_api import bind as bind_places, router as places_router
+from backend.profile_api import bind as bind_profile, router as profile_router
 from backend.ai.vision import VisionProvider, build_provider
 from backend.config import get_settings
 from backend.hazards.engine import HazardEngine
 from backend.perception.pipeline import PerceptionPipeline
+from backend.perception.vocabulary import is_obstacle, scale_of
 from backend.scene.queries import find_object
 from backend.speech.chunker import SentenceChunker
 from backend.speech.voice import Voice
@@ -68,6 +78,10 @@ SCAN_FRAMES = 2
 SCAN_IMGSZ = 1280
 SCAN_MATCH_IOU = 0.2
 SCAN_MATCH_AZIMUTH_DEG = 15.0
+# When the boxes no longer overlap because the camera moved between the two
+# frames, the same thing in the same direction at the same size still counts.
+SCAN_MATCH_MOVED_DEG = 8.0
+SCAN_MATCH_SIZE_RATIO = 1.5
 
 # Background reading. The client peeks at what is in view every few seconds
 # and the reader keeps the last few results, so a Read can answer from what
@@ -169,12 +183,39 @@ def with_holder(spoken: str, holder: str | None) -> str:
     return f"On the {holder}, it reads: {spoken[len(prefix):]}"
 
 
+# Words of a rehearsal label that identify it: the name and the drug, not
+# the directions every pharmacy prints ("take", "capsule", "by mouth",
+# "every day"), which would match a different bottle.
+_LABEL_COMMON_WORDS = frozenset({
+    "take", "takes", "taken", "tablet", "tablets", "capsule", "capsules", "mouth",
+    "every", "daily", "twice", "three", "times", "hours", "days", "with", "food",
+    "water", "before", "after", "morning", "night", "refill", "refills", "discard",
+    "pharmacy", "prescription", "generic", "brand", "store", "keep", "reach",
+    "children", "warning", "caution", "may", "cause", "drowsiness",
+})
+
+
+def demo_label_words(label: str) -> list[str]:
+    """The distinctive words of a label, lowercased, hyphens closed up as
+    well as split: "lis-dex-amphetamine" yields both spellings."""
+    words: list[str] = []
+    for raw in label.lower().split():
+        cleaned = "".join(ch for ch in raw if ch.isalpha() or ch == "-")
+        candidates = [cleaned.replace("-", "")] + cleaned.split("-")
+        for word in candidates:
+            if len(word) >= 5 and word not in _LABEL_COMMON_WORDS and word not in words:
+                words.append(word)
+    return words
+
+
 def match_scan_frames(per_frame: list[list], frame_size: tuple[int, int]) -> tuple[list[Seen], list[Seen]]:
     """Sightings seen in both scan frames, and those seen in only one.
 
-    Matched by label and box overlap; the frames are a fraction of a second
-    apart, so a real thing barely moves. Confidence is the better of the
-    two, position the average.
+    Matched by label and box overlap, or, when a hand-held camera moved
+    enough between the two frames that the boxes no longer overlap, by
+    direction and size: the same thing within a few degrees at about the
+    same height is the same thing. Confidence is the better of the two,
+    position the average.
     """
     width, height = frame_size
 
@@ -190,12 +231,21 @@ def match_scan_frames(per_frame: list[list], frame_size: tuple[int, int]) -> tup
     claimed: set[int] = set()
     both: list[Seen] = []
     once: list[Seen] = []
+    def same_thing_moved(a, b) -> bool:
+        heights = sorted((a.box.height, b.box.height))
+        return (
+            abs(a.azimuth_deg - b.azimuth_deg) <= SCAN_MATCH_MOVED_DEG
+            and heights[0] > 0 and heights[1] / heights[0] <= SCAN_MATCH_SIZE_RATIO
+        )
+
     for a in first:
         best, best_iou = None, 0.0
         for index, b in enumerate(second):
             if index in claimed or b.label != a.label:
                 continue
             iou = a.box.iou(b.box)
+            if iou < SCAN_MATCH_IOU and same_thing_moved(a, b):
+                iou = SCAN_MATCH_IOU
             if iou > best_iou:
                 best, best_iou = index, iou
         if best is not None and best_iou >= SCAN_MATCH_IOU:
@@ -229,9 +279,11 @@ def add_tracked(seen: list[Seen], objects) -> list[Seen]:
 
 
 def detection_items(detections, frame_size) -> list[dict]:
-    """Detections as the client draws them: label, confidence and a box
-    normalized to the frame, origin top-left. A sighted helper checking
-    the glasses sees what the detector believes; nothing here is spoken."""
+    """Detections as the client draws them: label, confidence, size tier
+    and a box normalized to the frame, origin top-left. A sighted helper
+    checking the glasses sees what the detector believes; nothing here is
+    spoken, and the client leaves hand-held things (scale "small")
+    unboxed."""
     if not frame_size:
         return []
     width, height = frame_size
@@ -239,6 +291,7 @@ def detection_items(detections, frame_size) -> list[dict]:
         {
             "label": d.label,
             "confidence": round(d.confidence, 2),
+            "scale": scale_of(d.label),
             "box": [
                 round(d.box.x1 / width, 4), round(d.box.y1 / height, 4),
                 round(d.box.x2 / width, 4), round(d.box.y2 / height, 4),
@@ -304,20 +357,58 @@ async def lifespan(app: FastAPI):
     app.state.perception = PerceptionPipeline(settings)
     app.state.perception.warmup()
 
+    # The places this machine remembers, on disk between runs. Off, the
+    # scan path is exactly as it was.
+    app.state.places = None
+    if settings.places_enabled:
+        app.state.places = PlaceMemory(
+            settings.places_file,
+            match_confidence=settings.place_match_confidence,
+            new_below=settings.place_new_below,
+        )
+
     app.state.provider = build_provider(
         settings,
         scene_getter=lambda: app.state.perception.scene,
         detections_getter=lambda: app.state.perception.last_detections,
+        place_getter=lambda: app.state.places.current_name() if app.state.places else None,
     )
     app.state.effective_provider = type(app.state.provider).__name__
+    await app.state.provider.verify()
 
     app.state.ocr = build_reader(settings.ocr_engine)
     app.state.voice = Voice(settings)
     app.state.ocr.warmup()
 
+    # The food allergy scanner: the wearer's profile, the email to the
+    # doctor (or the outbox that stands in for it), the barcode lookup and
+    # the online second opinion on a label's text. Built once and shared by
+    # every session; the profile is re-read whenever its file changes.
+    app.state.profile = ProfileStore(settings.profile_file)
+    app.state.mailer = EmailAgent(
+        host=settings.alert_smtp_host,
+        port=settings.alert_smtp_port,
+        user=settings.alert_smtp_user,
+        password=settings.alert_smtp_password,
+        to=settings.alert_email_to,
+        outbox=settings.alert_outbox_dir,
+    )
+    app.state.lookup = ProductLookup(enabled=settings.barcode_lookup_enabled)
+    app.state.reasoner = LabelReasoner(settings)
+    log.info(app.state.mailer.note)
+    profile = app.state.profile.current
+    if settings.allergy_alerts_enabled and profile.has_allergens:
+        log.info(
+            "allergy scanner on for %s: %s", profile.name or "the wearer", ", ".join(profile.allergens)
+        )
+    else:
+        log.info("allergy scanner idle: no allergens listed in %s", settings.profile_file)
+
     log.info("VisionOS ready on %s:%s", settings.host, settings.port)
     yield
     await app.state.provider.aclose()
+    await app.state.lookup.aclose()
+    await app.state.reasoner.aclose()
 
 
 app = FastAPI(title="VisionOS", lifespan=lifespan)
@@ -331,6 +422,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# The place memory's panel routes live in their own module; they find the
+# memory through this getter, so they work before and without the lifespan.
+bind_places(lambda: getattr(app.state, "places", None))
+app.include_router(places_router)
+# The wearer's profile and the mail check, for the Allergies sheet, the same way.
+bind_profile(lambda: getattr(app.state, "profile", None), lambda: getattr(app.state, "mailer", None))
+app.include_router(profile_router)
+
 
 @app.get("/health")
 async def health() -> JSONResponse:
@@ -342,12 +441,18 @@ async def health() -> JSONResponse:
             # What is actually serving, which differs when credentials are
             # missing and the configured provider fell back.
             "provider_active": app.state.effective_provider,
+            "provider_note": app.state.provider.note,
             "ocr": app.state.ocr.name,
             "device": app.state.perception.device,
             "lan_address": lan_address(),
             "model": settings.visionos_model,
             "prompt_version": PROMPT_VERSION,
             "demo_mode": settings.demo_mode,
+            # The allergy scanner: whether an alert can leave the room, and
+            # what the wearer is allergic to, so the start screen can say so.
+            "mail": app.state.mailer.note if hasattr(app.state, "mailer") else "off",
+            "allergy_alerts": settings.allergy_alerts_enabled,
+            "allergens": list(app.state.profile.current.allergens) if hasattr(app.state, "profile") else [],
         }
     )
 
@@ -396,11 +501,19 @@ class Session:
         provider: VisionProvider,
         perception: PerceptionPipeline,
         ocr: TextReader,
+        places: PlaceMemory | None = None,
+        allergy: AllergyWatch | None = None,
     ) -> None:
         self.socket = socket
         self.provider = provider
         self.perception = perception
         self.ocr = ocr
+        self.places = places
+        # The food allergy scanner for this session; None when it is off.
+        self.allergy = allergy
+        # Emails leave on their own tasks, after the wearer has been told;
+        # held here so they are not collected mid-send.
+        self._tasks: set[asyncio.Task] = set()
         self.latest_frame: bytes | None = None
 
         settings = get_settings()
@@ -413,6 +526,12 @@ class Session:
             min_confidence=settings.hazard_min_confidence,
         )
         self.beacon_label: str | None = None
+        # A rehearsal label that stands in for the OCR on a pill bottle;
+        # empty unless DEMO_LABEL is set on this machine.
+        self.demo_label = settings.effective_demo_label
+        self.demo_holders = {
+            h.strip().lower() for h in settings.demo_label_holders.split(",") if h.strip()
+        }
         # Background reading: (monotonic time, lines) of the last few peeks.
         self.peeks: deque[tuple[float, list]] = deque(maxlen=PEEK_KEEP_MAX)
         self.peek_task: asyncio.Task | None = None
@@ -431,6 +550,8 @@ class Session:
                 "type": "detections",
                 "items": detection_items(self.perception.last_detections, self.perception.last_frame_size),
             })
+            # The allergy scanner's trigger: does the wearer look to be eating?
+            await self._watch_eating()
 
         # Deterministic and ahead of everything else: nothing on this path
         # can be delayed by an API call.
@@ -447,17 +568,47 @@ class Session:
     async def handle_read(self, frames: list[bytes]) -> None:
         """Answer from the background peeks when they are fresh and solid;
         the burst is the slow path for when they are not."""
+        if self.demo_label_applies():
+            await self._say_demo_label(LatencyTrace(label="read"))
+            return
         cached = self.fresh_reading()
-        if cached and not read_is_weak(cached):
+        if cached and not read_is_weak(cached) and not self._allergen_unsettled(cached):
+            if self.demo_label_applies(cached):
+                await self._say_demo_label(LatencyTrace(label="read"))
+                return
             holder = text_holder(self.perception.scene.all_objects())
             await self._say(with_holder(format_for_speech(cached), holder))
             log.info("read: answered from %d peek(s) via %s", len(self.peeks), self.ocr.name)
+            await self._check_label(cached, frames[-1] if frames else self.latest_frame, asked=True)
             return
         self.reading = True
         try:
             await self._read_burst(frames)
         finally:
             self.reading = False
+
+    # --- A rehearsal label ------------------------------------------------
+
+    def demo_label_applies(self, lines=None) -> bool:
+        """Does the rehearsal label stand in for this read? Yes when one of
+        the demo holders (a pill bottle) is in view, or when what was read
+        contains one of the label's own distinctive words."""
+        if not self.demo_label:
+            return False
+        objects = self.perception.scene.all_objects()
+        if any(o.visible and o.label in self.demo_holders for o in objects):
+            return True
+        if lines:
+            read = " ".join(line.text for line in lines).lower().replace("-", "")
+            return any(word in read for word in demo_label_words(self.demo_label))
+        return False
+
+    async def _say_demo_label(self, trace: LatencyTrace) -> None:
+        holder = next(iter(sorted(self.demo_holders, key=len, reverse=True)), None)
+        log.warning("read: DEMO_LABEL spoken in place of the OCR")
+        trace.mark("first_sentence")
+        await self._say(f"On the {holder}, it reads: {self.demo_label}" if holder else f"It reads: {self.demo_label}")
+        await self._finish(trace)
 
     async def _read_burst(self, frames: list[bytes]) -> None:
         """Local OCR over the burst first; the vision provider only if that
@@ -482,14 +633,23 @@ class Session:
         with trace.stage("quick"):
             first = await self.ocr.read_quick(sharpest)
         lines = self.ocr.combine_readings([*self.fresh_peek_readings(), first])
+        # As with a dose: a label that names one of the wearer's allergens
+        # always gets the burst, since only agreement across frames can
+        # release the email to the doctor.
         settled = (
             all_lines_sure(self.ocr, lines)
             and not read_is_weak(lines)
             and UNREADABLE_DOSE not in format_for_speech(lines)
+            and not self._allergen_unsettled(lines)
         )
         if not settled:
             with trace.stage("ocr"):
                 lines = await self.ocr.read_consensus(frames)
+
+        # The rehearsal label, once the read has had its chance to match it.
+        if self.demo_label_applies(lines):
+            await self._say_demo_label(trace)
+            return
 
         # Escalate on a poor read, not only an empty one. Connected script and
         # decorative faces are where OCR fails hardest, and it fails in two
@@ -508,6 +668,9 @@ class Session:
         else:
             await self._say(no_text_response(frames, max(scores)))
         await self._finish(trace)
+        # The allergy scanner's evidence: the label just read, and the
+        # frame it was read from (for a barcode).
+        await self._check_label(lines, frames[-1], asked=True)
 
     # --- Scanning ---------------------------------------------------------
 
@@ -517,22 +680,35 @@ class Session:
         if not frames:
             await self.handle_intent("scan", None)
             return
+        loop = asyncio.get_running_loop()
         if self.provider.reads_text:
             # A vision model describes the picture itself; the burst just
-            # gives it the sharper frame.
+            # gives it the sharper frame. The place memory still looks at
+            # the picture, with what the live loop has tracked as the things
+            # in view, and speaks its recognition before the description.
             self.latest_frame = frames[-1]
+            image = await loop.run_in_executor(None, _decode_jpeg, frames[-1])
+            tracked = [o for o in self.perception.scene.all_objects() if o.visible]
+            observation = await self._remember_place(image, tracked, [])
+            if observation is not None and observation.spoken_prefix:
+                await self._say(observation.spoken_prefix)
             await self.handle_intent("scan", None)
+            if observation is not None and observation.spoken_suffix:
+                await self._say(observation.spoken_suffix)
+            await self._send_place(observation)
             return
 
         trace = LatencyTrace(label="scan")
-        loop = asyncio.get_running_loop()
         per_frame = []
         size = None
+        first_image = None
         with trace.stage("detect"):
             for frame in frames:
                 image = await loop.run_in_executor(None, _decode_jpeg, frame)
                 if image is None:
                     continue
+                if first_image is None:
+                    first_image = image
                 size = (image.shape[1], image.shape[0])
                 per_frame.append(await self.perception.detector.detect(image, SCAN_IMGSZ))
         if size is None:
@@ -549,19 +725,64 @@ class Session:
                 cues = await self.ocr.read_quick(frames[0])
         seen = refine_labels(seen, cues)
         once = refine_labels(once, cues)
-        await self._say(describe_scan(self.perception.scene, seen, once, cues))
+        # Where this is, from what was seen, read and pictured: spoken
+        # first when the place is recognized, last when it is new.
+        observation = None
+        if self.places is not None:
+            with trace.stage("place"):
+                observation = await self._remember_place(first_image, seen, cues)
+        spoken = describe_scan(self.perception.scene, seen, once, cues)
+        if observation is not None:
+            spoken = observation.with_speech(spoken)
+        await self._say(spoken)
         await self.socket.send_json({
             "type": "inventory",
             "text": inventory_sentence(seen, once),
+            # The scan frame's width and height: the blueprint turns a wall's
+            # box back into the directions of its edges and its floor line.
+            "frame_size": [size[0], size[1]],
             "items": [
                 {"label": s.label, "confidence": round(s.confidence, 2), "frames": s.frames,
+                 "scale": scale_of(s.label),
+                 # Whether it is something to walk into, for the blueprint.
+                 "obstacle": is_obstacle(s.label),
                  "azimuth_deg": round(s.azimuth_deg, 1),
                  "distance_m": None if s.distance_m is None else round(s.distance_m, 1),
                  "box": [round(v, 4) for v in s.box] if s.box else None}
                 for s in [*seen, *once]
             ],
         })
+        await self._send_place(observation)
         await self._finish(trace)
+
+    async def _remember_place(self, image, seen, cues) -> Observation | None:
+        """File this scan in the place memory: a fingerprint of the picture
+        from the inference thread, a thumbnail for the panel, and the
+        memory's verdict on whether this is somewhere known. Never lets a
+        failure reach the spoken scan."""
+        if self.places is None or image is None:
+            return None
+        try:
+            embed = getattr(self.perception.detector, "embed", None)
+            embedding = await embed(image) if embed is not None else None
+            loop = asyncio.get_running_loop()
+            thumbnail = await loop.run_in_executor(None, thumbnail_of, image)
+            frame_size = (int(image.shape[1]), int(image.shape[0]))
+            scene = scene_from_scan(seen, cues, embedding, thumbnail, frame_size=frame_size)
+            # The verdict on the loop, the file write off it: the memory
+            # runs to a megabyte or two of thumbnails and fingerprints, and
+            # writing that between a scan's two events stalled the socket.
+            observation = self.places.observe(scene, persist=False)
+            await self.places.save_async()
+            return observation
+        except Exception:
+            log.exception("place memory failed; the scan is spoken without it")
+            return None
+
+    async def _send_place(self, observation: Observation | None) -> None:
+        """Tell the panel what the memory made of the scan."""
+        if observation is not None:
+            await self.socket.send_json(observation.to_event())
 
     # --- Background reading -----------------------------------------------
 
@@ -590,6 +811,13 @@ class Session:
         self.forget_stale_peeks()
         if lines:
             self.peeks.append((time.monotonic(), lines))
+        # The allergy scanner in the background: what the last few peeks
+        # agree on, and the frame for a barcode. The barcode is tried on
+        # every peek whether or not any text was read, since on packaging
+        # it is the evidence that works (Conrad's corpus: the small print
+        # is legible in 9 labels of 40; a barcode is a lookup). Only
+        # evidence speaks here; nobody asked.
+        await self._check_label(self.fresh_reading(), frame, asked=False)
 
     def forget_stale_peeks(self, now: float | None = None) -> None:
         now = time.monotonic() if now is None else now
@@ -617,8 +845,14 @@ class Session:
             return
 
         prompt = SCAN_PROMPT if kind == "scan" else (text or SCAN_PROMPT)
-        # Ground the answer in tracked geometry rather than pixels alone.
-        context = scene_context(self.perception.snapshot())
+        # Ground the answer in tracked geometry rather than pixels alone,
+        # and in the place the memory last recognized, while that is fresh.
+        snapshot = self.perception.snapshot()
+        if self.places is not None:
+            place = self.places.current_place()
+            if place is not None and self.places.current is not None:
+                snapshot["place"] = {"name": place.name, "score": self.places.current[1]}
+        context = scene_context(snapshot)
         await self._stream_answer(
             self.latest_frame, prompt, context, kind, LatencyTrace(label=kind)
         )
@@ -701,6 +935,73 @@ class Session:
         self.beacon_label = None
         await self.socket.send_json({"type": "beacon_stop"})
 
+    # --- The food allergy scanner -----------------------------------------
+
+    async def _watch_eating(self) -> None:
+        """Feed the live detections to the eating trigger and say what it
+        finds: a prompt to read the label, or a hedged warning for a food
+        that is the allergen itself. Never evidence, never an email."""
+        if self.allergy is None:
+            return
+        try:
+            notice = self.allergy.observe_frame(
+                self.perception.last_detections, self.perception.last_frame_size
+            )
+        except Exception:
+            log.exception("allergy watch failed on a frame")
+            return
+        if notice is not None:
+            await self.socket.send_json(notice.to_event())
+
+    def _allergen_unsettled(self, lines) -> bool:
+        """Does this reading name one of the wearer's allergens on a line
+        that fewer than two frames agree on? Then the burst has to run."""
+        if self.allergy is None or not self.allergy.active or not lines:
+            return False
+        try:
+            from backend.alerts.allergy import find_allergen_mentions
+
+            mentions = find_allergen_mentions(lines, self.allergy.profile.allergens)
+        except Exception:
+            log.exception("allergen check on a quick read failed")
+            return False
+        return any(m.agreement < self.allergy.min_agreement for m in mentions)
+
+    async def _check_label(self, lines, frame: bytes | None, asked: bool) -> None:
+        """Run the evidence ladder over a reading, tell the wearer, and
+        send the doctor's email on its own task, after the words."""
+        if self.allergy is None:
+            return
+        try:
+            outcome = await self.allergy.check(lines, self.ocr, frame, asked=asked)
+        except Exception:
+            log.exception("allergy check failed")
+            return
+        for notice in outcome.notices:
+            await self.socket.send_json(notice.to_event())
+        for alert in outcome.alerts:
+            await self.socket.send_json(alert.to_event(self.allergy.spoken(alert)))
+            task = asyncio.create_task(self._deliver_alert(alert, frame))
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
+
+    async def _deliver_alert(self, alert, frame: bytes | None) -> None:
+        try:
+            delivery = await self.allergy.deliver(alert, frame)
+        except Exception:
+            log.exception("the alert email failed")
+            await self._say("The email to your doctor could not be sent.")
+            return
+        if delivery is not None:
+            await self._say(delivery.spoken())
+
+    async def handle_false_alarm(self) -> None:
+        """'Jarvis, false alarm': the last alert was wrong; tell the doctor."""
+        if self.allergy is None:
+            await self._say("The allergy scanner is off on this machine.")
+            return
+        await self._say(await self.allergy.false_alarm())
+
     # --- Output -----------------------------------------------------------
 
     async def _say(self, text: str) -> None:
@@ -715,8 +1016,24 @@ class Session:
 @app.websocket("/ws")
 async def websocket_endpoint(socket: WebSocket) -> None:
     await socket.accept()
-    session = Session(socket, app.state.provider, app.state.perception, app.state.ocr)
     settings = get_settings()
+    allergy = None
+    if settings.allergy_alerts_enabled and hasattr(app.state, "profile"):
+        allergy = AllergyWatch(
+            profile=lambda: app.state.profile.current,
+            mailer=app.state.mailer,
+            lookup=app.state.lookup,
+            reasoner=app.state.reasoner,
+            place=lambda: app.state.places.current_name() if getattr(app.state, "places", None) else None,
+            min_confidence=settings.allergy_min_confidence,
+            min_agreement=settings.allergy_min_agreement,
+            min_frames=settings.allergy_min_frames,
+            cooldown_s=settings.allergy_cooldown_s,
+        )
+    session = Session(
+        socket, app.state.provider, app.state.perception, app.state.ocr,
+        getattr(app.state, "places", None), allergy,
+    )
 
     await socket.send_json(
         {
@@ -726,6 +1043,9 @@ async def websocket_endpoint(socket: WebSocket) -> None:
             "ocr": app.state.ocr.name,
             "device": app.state.perception.device,
             "demo_mode": settings.demo_mode,
+            # What the allergy scanner is watching for, so the client can
+            # say so once; empty when it is idle.
+            "allergens": list(allergy.profile.allergens) if allergy is not None else [],
         }
     )
 
@@ -760,6 +1080,8 @@ async def websocket_endpoint(socket: WebSocket) -> None:
                 await session.handle_locate(event.get("text"))
             elif kind == "stop_beacon":
                 await session.stop_beacon()
+            elif kind == "false_alarm":
+                await session.handle_false_alarm()
 
     except WebSocketDisconnect:
         pass

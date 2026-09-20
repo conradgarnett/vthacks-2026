@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from backend.perception.geometry import in_forward_cone, lateral_offset_m, steps_away
+from backend.perception.vocabulary import is_small
 from backend.speech.phrasing import join_spoken, pluralize, with_article
 from backend.scene.model import SceneModel, SceneObject
 
@@ -17,7 +18,6 @@ from backend.scene.model import SceneModel, SceneObject
 _ALIASES = {
     "sofa": "couch",
     "settee": "couch",
-    "table": "dining table",
     "seat": "chair",
     "television": "tv",
     "screen": "tv",
@@ -27,6 +27,50 @@ _ALIASES = {
     "people": "person",
     "man": "person",
     "woman": "person",
+    "phone": "cell phone",
+    "mobile": "cell phone",
+    "cellphone": "cell phone",
+    "smartphone": "cell phone",
+    "mug": "cup",
+    "computer": "laptop",
+    "pc": "laptop",
+    "monitor": "tv",
+    "cooker": "stove",
+    "hob": "stove",
+    "freezer": "refrigerator",
+    "trash": "trash can",
+    "garbage": "trash can",
+    "rubbish": "trash can",
+    "bin": "trash can",
+    "wastebasket": "trash can",
+    "plant": "potted plant",
+    "mouse": "computer mouse",
+    "pill": "pill bottle",
+    "medicine": "pill bottle",
+    "medication": "pill bottle",
+    "meds": "pill bottle",
+    "prescription": "pill bottle",
+    "tap": "sink",
+    "faucet": "sink",
+    "tub": "bathtub",
+    "bath": "bathtub",
+    "stairway": "stairs",
+    "lift": "elevator",
+    "exit": "exit sign",
+    "cart": "shopping cart",
+    "trolley": "shopping cart",
+    "pram": "stroller",
+    "buggy": "stroller",
+    "cone": "traffic cone",
+    "hydrant": "fire hydrant",
+    "extinguisher": "fire extinguisher",
+    "fountain": "drinking fountain",
+    "boots": "shoe",
+    "sneakers": "shoe",
+    "dish": "plate",
+    "closet": "wardrobe",
+    "cupboard": "cabinet",
+    "shelves": "shelf",
 }
 
 
@@ -115,13 +159,18 @@ def what_changed(scene: SceneModel, seconds: float = 10.0) -> list[dict[str, Any
     ]
 
 
-def summarize(scene: SceneModel, limit: int = 5) -> str:
+def summarize(scene: SceneModel, limit: int = 5, include_small: bool = False) -> str:
     """One spoken sentence covering the nearest objects.
 
     Duplicates are collapsed: "three people" is easier to act on than three
     separate clauses each naming a person at a slightly different angle.
+    Hand-held things (cups, phones, remotes) are left out unless asked for:
+    they are clutter in a picture of a room and the answer to a question.
     """
-    objects = [o for o in nearest_objects(scene, limit * 2) if o.distance_m is not None]
+    objects = [
+        o for o in scene.all_objects()
+        if o.distance_m is not None and (include_small or not is_small(o.label))
+    ][: limit * 2]
     if not objects:
         return "I can't make out anything specific right now."
 

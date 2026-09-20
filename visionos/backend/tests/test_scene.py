@@ -148,7 +148,7 @@ class TestSceneModel:
 
     def test_snapshot_is_capped_to_bound_prompt_cost(self):
         detections = [
-            make_detection(label=f"chair", x=i * 60, distance=float(i + 1))
+            make_detection(label="chair", x=i * 60, distance=float(i + 1))
             for i in range(20)
         ]
         scene = build_scene(detections)

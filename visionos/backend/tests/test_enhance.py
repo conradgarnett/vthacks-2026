@@ -14,7 +14,7 @@ from __future__ import annotations
 import io
 
 import pytest
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 
 from backend.ai.enhance import variants
 from backend.ai.ocr import TextLine, _contains_a_word, _reading_strength

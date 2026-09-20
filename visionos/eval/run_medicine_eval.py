@@ -82,7 +82,7 @@ def score(ocr, samples, label: str) -> dict:
     print(f"  drug name found          {pct('drug'):>5.0f}%")
     print(f"  strength found           {pct('strength'):>5.0f}%")
     print(f"  full directions exact    {pct('dir_full'):>5.0f}%")
-    print(f"  --- dosage number (safety critical) ---")
+    print("  --- dosage number (safety critical) ---")
     print(f"  correct                  {pct('dose_right'):>5.0f}%")
     print(f"  WRONG                    {pct('dose_wrong'):>5.0f}%   <- must be 0")
     print(f"  not read (safe)          {pct('dose_silent'):>5.0f}%")

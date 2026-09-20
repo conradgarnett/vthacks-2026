@@ -49,6 +49,11 @@ export type ScreenRect = { left: number; top: number; width: number; height: num
 const REFOCUS_MS = 600;
 // Time for the sensor to settle after exposure is turned down for a read.
 const EXPOSURE_SETTLE_MS = 300;
+// The dim for a read changes the webcam's own controls, which outlive the
+// page. If the page is reloaded mid-read, or the restore fails, the camera
+// stays dim and the next session takes that as normal. The values from
+// before the dim are kept here until they have been put back.
+const EXPOSURE_KEY = "visionos.exposureBefore";
 // How far down the picture goes for a read, as a fraction of each control's
 // range. A webcam's automatic exposure blows a glossy label out to white,
 // and the ink is what the reader needs; a quarter of the range is a stop
@@ -66,7 +71,6 @@ const BUILT_IN = /integrated|built-?in|facetime|internal|easycamera|true ?vision
 const EXTERNAL = /usb|logitech|brio|uvc|razer|elgato|obsbot|insta360|external|kiyo|c9\d\d/i;
 // USB vendor:product ids that browsers append to a webcam's name.
 const VENDOR_ID = /\s*\([0-9a-f]{4}:[0-9a-f]{4}\)/i;
-const REMEMBERED = "visionos.camera";
 
 // Focus and exposure controls are not in the TypeScript DOM typings yet;
 // browsers expose them on cameras whose driver offers them.
@@ -77,10 +81,29 @@ type ImageCapabilities = {
   exposureCompensation?: Range;
   brightness?: Range;
   contrast?: Range;
+  saturation?: Range;
   sharpness?: Range;
+  exposureMode?: string[];
+  whiteBalanceMode?: string[];
 };
 type ImageSettings = Record<string, number | string | undefined>;
-const EXPOSURE_CONTROLS: Array<[keyof ImageCapabilities, number]> = [
+// The picture controls a reset puts back to the middle of their range,
+// which is where webcams ship.
+const LEVEL_CONTROLS: ReadonlyArray<"exposureCompensation" | "brightness" | "contrast" | "saturation" | "sharpness"> = [
+  "exposureCompensation",
+  "brightness",
+  "contrast",
+  "saturation",
+  "sharpness",
+];
+
+/** The middle of a control's range, on its step grid. */
+function midpoint(range: Range): number {
+  const middle = (range.min + range.max) / 2;
+  if (!range.step || range.step <= 0) return middle;
+  return range.min + Math.round((middle - range.min) / range.step) * range.step;
+}
+const EXPOSURE_CONTROLS: Array<[(typeof LEVEL_CONTROLS)[number], number]> = [
   ["exposureCompensation", -READ_EXPOSURE_DROP],
   ["brightness", -READ_BRIGHTNESS_DROP],
   ["contrast", READ_CONTRAST_RAISE],
@@ -105,7 +128,7 @@ export class Camera {
    * Throws with a human-readable reason; the caller speaks it aloud.
    * `preferred` is part of a camera's name, from the page URL.
    */
-  async start(preferred: string | null = null): Promise<void> {
+  async start(preferred: string | null = null, exposure: string | null = null): Promise<void> {
     if (!navigator.mediaDevices?.getUserMedia) {
       throw new Error(
         "This browser can't open the camera. Make sure you opened the page over https."
@@ -121,19 +144,76 @@ export class Camera {
       await this.switchTo(chosen);
     }
     await this.show();
+    await this.resetImageControls(exposure);
+    // Best effort on the way out: a reload during a read must not leave the
+    // camera dim for the next session.
+    window.addEventListener("pagehide", () => void this.restoreExposure());
   }
 
-  /** Switch to the next camera and return its name. Throws if it fails. */
-  async next(): Promise<string> {
-    await this.refreshList();
-    if (this.cameras.length < 2) {
-      throw new Error("This is the only camera.");
+  /**
+   * Put every picture control the camera offers back where a webcam ships:
+   * automatic exposure and white balance, and the middle of the range for
+   * exposure compensation, brightness, contrast, saturation and sharpness.
+   *
+   * Done at every start. The read-time dim writes the camera's own
+   * controls, which outlive the page, so a reload mid-read, a crash, or
+   * another program's leftovers can leave the picture dark or off-colour,
+   * and the user cannot see that. Restoring only the values remembered
+   * from before a dim was not enough: a session that started on an
+   * already-dim camera remembered the dim as normal. `?exposure=reset` is
+   * still accepted and means the same thing.
+   */
+  private async resetImageControls(_exposure: string | null): Promise<void> {
+    const track = this.track();
+    if (!track) return;
+    const capabilities = (track.getCapabilities?.() ?? {}) as ImageCapabilities;
+    const values: Record<string, number | string> = {};
+    if (capabilities.exposureMode?.includes("continuous")) values.exposureMode = "continuous";
+    if (capabilities.whiteBalanceMode?.includes("continuous")) values.whiteBalanceMode = "continuous";
+    for (const name of LEVEL_CONTROLS) {
+      const range = capabilities[name];
+      if (range && range.max > range.min) values[name] = midpoint(range);
     }
-    const current = this.cameras.findIndex((camera) => camera.deviceId === this.currentDeviceId());
-    const following = this.cameras[(current + 1) % this.cameras.length];
-    await this.switchTo(following);
-    await this.show();
-    return this.label;
+    if (Object.keys(values).length === 0) return;
+    const applied = await this.applyEach(track, values);
+    console.info(`[camera] picture controls reset: ${applied} of ${Object.keys(values).length}`, values);
+    this.exposureBefore = null;
+    this.forgetExposure();
+  }
+
+  /**
+   * Apply controls one at a time. In one `advanced` set the browser drops
+   * the whole set when any single control is refused, so a camera that
+   * lacked one of them silently kept every other one as it was.
+   */
+  private async applyEach(track: MediaStreamTrack, values: Record<string, number | string>): Promise<number> {
+    let applied = 0;
+    for (const [name, value] of Object.entries(values)) {
+      try {
+        await track.applyConstraints({ advanced: [{ [name]: value } as unknown as MediaTrackConstraintSet] });
+        applied += 1;
+      } catch {
+        // This camera does not take this control; the rest still go.
+      }
+    }
+    return applied;
+  }
+
+  private storedExposure(): Record<string, number> | null {
+    try {
+      const raw = localStorage.getItem(EXPOSURE_KEY);
+      return raw ? (JSON.parse(raw) as Record<string, number>) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private forgetExposure(): void {
+    try {
+      localStorage.removeItem(EXPOSURE_KEY);
+    } catch {
+      // Private browsing or blocked storage.
+    }
   }
 
   /** The camera in use, named for speech; empty before start. */
@@ -190,8 +270,13 @@ export class Camera {
     if (Object.keys(dimmed).length === 0) return;
 
     try {
-      await track.applyConstraints({ advanced: [dimmed as unknown as MediaTrackConstraintSet] });
+      if ((await this.applyEach(track, dimmed)) === 0) throw new Error("no control accepted");
       this.exposureBefore = before;
+      try {
+        localStorage.setItem(EXPOSURE_KEY, JSON.stringify(before));
+      } catch {
+        // Private browsing or blocked storage: the in-memory copy still works.
+      }
       await new Promise((resolve) => setTimeout(resolve, EXPOSURE_SETTLE_MS));
     } catch {
       // The camera refused; the read goes ahead with the picture as it is.
@@ -202,14 +287,12 @@ export class Camera {
   /** Put the exposure back the way it was before `dimForRead`. */
   async restoreExposure(): Promise<void> {
     const track = this.track();
-    const before = this.exposureBefore;
+    const before = this.exposureBefore ?? this.storedExposure();
     this.exposureBefore = null;
     if (!track || !before) return;
-    try {
-      await track.applyConstraints({ advanced: [before as unknown as MediaTrackConstraintSet] });
-    } catch {
-      // Nothing more to do; the next read will try again from wherever it is.
-    }
+    if ((await this.applyEach(track, before)) > 0) this.forgetExposure();
+    // Otherwise the stored values are kept; the next start resets the
+    // camera anyway.
   }
 
   private track(): MediaStreamTrack | undefined {
@@ -263,11 +346,6 @@ export class Camera {
     const fallback = this.stream;
     this.stream = await this.open({ deviceId: { exact: camera.deviceId } });
     fallback?.getTracks().forEach((track) => track.stop());
-    try {
-      localStorage.setItem(REMEMBERED, camera.deviceId);
-    } catch {
-      // Private browsing or blocked storage: the choice just is not kept.
-    }
   }
 
   private async show(): Promise<void> {
@@ -301,15 +379,6 @@ export class Camera {
       const match = cameras.find((camera) => camera.label.toLowerCase().includes(wanted));
       if (match) return match;
     }
-
-    let remembered: string | null = null;
-    try {
-      remembered = localStorage.getItem(REMEMBERED);
-    } catch {
-      remembered = null;
-    }
-    const kept = cameras.find((camera) => camera.deviceId === remembered);
-    if (kept) return kept;
 
     // A phone's rear camera already faces the world; leave it alone. A
     // computer's own camera faces the user, or reports nothing, and either

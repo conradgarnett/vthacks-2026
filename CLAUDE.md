@@ -92,7 +92,7 @@ second, lower pass; tiling still applies.
 
 ```bash
 cd visionos
-.venv/bin/python -m pytest backend/tests -q          # 221 tests (2 Apple-only)
+.venv/bin/python -m pytest backend/tests -q          # 565 tests (3 Apple-only), ~2 min alone
 PYTHONPATH=. .venv/bin/python eval/run_ocr_eval.py 60
 ```
 
@@ -187,6 +187,285 @@ tested.
 
 ## Log
 
+- **2026-09-20, 02:30 to 03:00, visionOS-2, finishing touches for running
+  from GitHub:** the user's direction ("finishing touches so we can push
+  everything to github and start running things from there"). Merged from
+  Conrad: the ElevenLabs voice behind `GET /speech` (4334322; cache-first,
+  404 without a key so the browser voice stays; hazards never use it), the
+  24 measured food classes (`food-vocab` f8562e9: vocabulary 140, all tier
+  small, `orange` cut), the gate fix for glued punctuation
+  (`text_quality.py` dca34f0: "CONTAINS:PEANUTS" and "12:30" no longer take
+  their whole line down; SROIE lines recovered 51% -> 54%), and the
+  allergen-statement corpus (`eval/allergens.py`,
+  `eval/run_allergen_eval.py`, d1ef1bc: 40 labels through
+  `find_allergen_mentions` on the consensus read; the matcher invented 0
+  and mishandled 0 negations and 0 hedges; the reader recovered the
+  small-print statement line 7 of 40, 21% of allergens, so the read path
+  on small print is the open gap and the barcode step matters; the suspect
+  is the tiling gate, which a large product name defeats, Conrad measuring).
+  `README.md` at the root and `visionos/README.md` rewritten from clone to
+  running (keys table, controls, the scanner's ladder, measuring, layout);
+  `run.py --check` and `backend/doctor.py` report the NVIDIA provider, the
+  profile and its allergens, mail or the outbox, the barcode decoder and
+  the voice key, and `run.py` creates `data/` on a fresh clone. The lines
+  the scanner hangs on are pinned through the gate on both engine paths
+  (`test_allergy.py`, df0f8d9). PR #1 is mergeable at this commit; Conrad
+  merges it into `main-project` (the default branch) at his next quiet
+  moment. Owed, needing an idle CPU: the full suite, signage before and
+  after the reader changes, packaging, the allergen eval on this CPU, the
+  detector at 140 classes, the bread frames; `.claude/scripts/measure_window.py`
+  runs them in one go and `find_label_frames.py bread` makes the contact
+  sheet.
+- **2026-09-20, 01:30 to 02:25, visionOS-2, the food allergy scanner and
+  the doctor's email:** the user's request; the shape was agreed with
+  Conrad's agent on PR #2 after his objection that the allergen is not in
+  the pixels (a cookie may or may not contain nuts). So a recognized food is
+  a trigger and never evidence, and the evidence ladder is, strongest
+  first: a barcode looked up in Open Food Facts (OpenCV's own
+  `cv2.barcode` decoder, EAN checksum, keyless API, cached); a CONTAINS /
+  ALLERGENS / INGREDIENTS line the reader was 80% sure of across two frames
+  with the allergen word matched whole and not negated ("dairy free", "no
+  nuts", "does not contain milk" are absences; almond milk and peanut
+  butter are not dairy); then the NVIDIA model over the label's text and
+  picture with a fixed JSON verdict (`confirm` / `deny` / `check`) that
+  must cite what it observed, `check` on any failure. The doctor is
+  emailed only on the first two; "may contain", traces, the model's
+  confirm, a bare product name ("PEANUT BUTTER CUPS") and a food in view
+  ("it looks like you are eating; hold the label up and press Read") speak
+  and never email. One email per allergen per 10 minutes; "Jarvis, false
+  alarm" sends a correction. Code: `backend/alerts/` (`profile.py`,
+  `allergy.py`, `eating.py`, `barcode.py`, `reasoner.py`,
+  `email_agent.py`, `watch.py`), `backend/profile_api.py` (`GET`/`POST
+  /profile`, `POST /alerts/test`), `client/src/allergies.ts` (an
+  Allergies pill and sheet, key L: chips, quick-add, name, doctor's
+  email, a test-email button, every edit spoken). The profile lives in
+  `data/profile.json` (gitignored); without `ALERT_SMTP_USER` and
+  `ALERT_SMTP_PASSWORD` (a Gmail app password) in `.env` every email is
+  written to `data/outbox/` and the wearer hears that mail is not set up;
+  `/health` reports `mail`. Wire protocol (shared, additive): `hazard`
+  gains `kind` (`allergy`, `allergy-warning`), `allergens`, `source`,
+  `evidence`, `emailed`; `ready` gains `allergens`; the client sends
+  `{"type": "false_alarm"}`. Two reader changes the live probe forced: a
+  read that names one of the wearer's allergens always takes the burst
+  (as a dose does) so two frames can agree; and RapidOCR's glued colon
+  ("CONTAINS:PEANUTS", scored 0.996 by the engine and thrown away whole by
+  the plausibility gate) gets its space back in `RapidOCR._recognize`
+  (`_split_colon_glue`; flagged to Conrad; the OCR eval before/after is
+  owed once the app is idle). Conrad measured the 25 proposed food
+  classes on his Mac: no extra time, 0/24 textures, 24 pass and `orange`
+  is cut; they land from `main-project`. Numbers: 83 new tests in five
+  files, 253 passed in every touched file (the full suite waits for a
+  window); the live probe on this CPU read a rendered peanut-butter label
+  in 6.2 s (quick 2.6 s, burst 3.5 s), sounded the alert, wrote the email
+  and, after "false alarm", the correction; the model's second opinion
+  answered within 8 s. `.claude/scripts/allergy_probe.py` drives it.
+- **2026-09-20, 00:00 to 01:10, visionOS-2, the watch, the camera and a
+  rehearsal label:** Conrad's board is a LOLIN S2 Mini with three Grove
+  buttons at 115200 baud (SCAN, READ, ASK lines; banner after a reset;
+  `ignored:` diagnostics; the repo's `hardware/watch_s2/watch_s2.ino` is
+  an older 9600 version); the client's watch reader opens at 115200 and
+  falls back to 9600, acts on whole lines only, reopens a granted port by
+  itself, shows the board's id and every received line, and says when a
+  connected watch stays silent; `hardware/README.md` carries his spec and
+  the pins to avoid. Every start resets the webcam's picture controls
+  (the dim had carried over between sessions). A rehearsal label
+  (`DEMO_LABEL` or `data/demo_label.txt`, empty by default): with a pill
+  bottle in view or the label's own name or drug in the read, Read speaks
+  that sentence instead of the OCR; flagged on PR #2. Suite 565.
+- **2026-09-19, 23:40, visionOS-2, reads on a slow engine:** measured live
+  on this CPU, a Read of a blank wall took 27 to 33 s and a one-word sign
+  18.7 s: 32 and 22 engine calls, because the escalation (the 2x2 then 4x4
+  tile grids, then nine enhancement variants, each a full read) was built
+  for Vision at 15 ms a call, and RapidOCR costs 650 ms. Three rules, for
+  costly engines only (`ocr.py`, Conrad's, flagged; Vision's path is
+  unchanged): a short reading an engine with informative confidence is
+  sure of (3+ characters, every line at 0.85 or more) is a reading, not a
+  scrap to tile (`_SURE_SHORT_CHARS`, `_SURE_SHORT_CONFIDENCE`);
+  `tile_grids` is per engine and RapidOCR stops at 2x2; an engine with
+  `reports_regions` counts its detector's regions during a read, and a
+  costly engine that saw none skips enhancement. After: a blank wall 7
+  calls and 5.0 s in-process (6.8 s live with a benchmark running), one
+  word 2 calls and 1.6 s (2.5 s live). Tests in `test_costly_engine.py`.
+  Benchmarks on the capped path, RapidOCR, Windows, idle priority:
+  signage n=60 CER 0.031, exact 92%, silent 1/60, invented 0/8, row for
+  row the same; prescription labels drug name 57% / 72%, strength 60% /
+  78%, dose right 12% / 18%, wrong 0%, the same; packaging name 12/24,
+  symbols invented 0/12, the same; bundled fonts n=76 sans 89%, serif
+  100%, cursive 75%, handwriting 75%, novelty 80%, the same fourteen
+  misses as the uncapped code run side by side in a second checkout
+  (cursive CER 0.085 -> 0.069: the 4x4 grid's garbled twin of one
+  Sacramento sample is gone). The earlier sans 94% / handwriting 83% were
+  measured before the 0.70 floor landed; the floor, not the cap, moved
+  those two samples.
+- **2026-09-19, 23:15, visionOS-2, Jarvis and a bloat pass:** the assistant
+  answers to Jarvis at the user's request: a question through Ask must
+  start with the name (`WAKE_WORD` in `main.ts`; Jarves, Jervis and
+  Travis count as mis-hearings), the name is stripped before the question
+  is sent, a question without it gets the spoken hint "Say Jarvis first,
+  then your question", and stop words never need it. The ready line says
+  so. Bloat: the panel's HTTP routes moved from `main.py` into
+  `backend/places_api.py` (an `APIRouter` bound to the memory with
+  `bind()`, so the routes work without the lifespan and the tests call
+  them directly); the memory file is no longer written on the event loop
+  (`PlaceMemory.save_async` takes the document on the loop and encodes
+  and swaps the file on a worker thread; fingerprints are rounded once,
+  when the scene is made, not on every save); the two pull-up sheets
+  share `client/src/sheet.ts`; ruff's safe fixes applied (unused imports
+  in `test_enhance.py` and `eval/corpus.py`, empty f-strings, quoted
+  annotations). `.claude/scripts/poll_github.py` and PR posts go through
+  the signed-in `gh` now (5000 requests an hour instead of 60). Evals on
+  d144e35, RapidOCR, Windows, idle priority: signage n=60 CER 0.031,
+  exact 92%, silent 1/60, no-text invented 0/8 (unchanged since the 0.70
+  floor); detector on 100 COCO photos at the 0.30 floor recall 44%,
+  precision 68%, blank textures 0/24 invented, 640 px 152 ms median with
+  nothing else running (refrigerator 0 of 6 here is the `SEE_AS` remap,
+  not the detector). Suite 553 passed, 3 skipped.
+- **2026-09-19, later still, visionOS-2, the blueprint tab:** each scan is
+  drawn from above for the sighted helper (`client/src/blueprint.ts`, a
+  Blueprint pill beside Places, key B): the user at the bottom, the
+  camera's 66 degree wedge, rings every metre to 6 m, every thing the scan
+  saw at its direction and distance (red when it obstructs, faded when
+  seen in one frame only, hollow on the far ring when its distance is
+  unknown), and the floor as half-metre cells: unobstructed where the scan
+  looked and found nothing in the way up to a thing, obstructed where that
+  thing stands, unknown elsewhere; the walkway strip is labelled clear or
+  blocked by the rule the spoken scan uses (1 m wide, 3 m long). A scan
+  that saw nothing leaves the floor unknown. The scan's `inventory` items
+  carry `obstacle` (`main.py`, additive) and every remembered scene saves
+  its layout (`Scene.layout`), so the picker draws any remembered place
+  from its views, older views turned to line up on the things they share
+  (the median turn over two or more shared things within 25 degrees; a
+  view that shares too little stays out rather than being placed by
+  guesswork). Nothing here is spoken. `__visionos.event(...)` in the
+  browser console drives the screen without a camera or a socket. Suite
+  552 -> 553. Walls, at the user's request: a wall is drawn as a line
+  across the directions its box edges were seen in (the pinhole formula
+  of `geometry.py`, on the client), at the distance its floor line gives
+  (camera height over tan of the angle below the horizon; 1.6 m for
+  glasses on a standing adult, `?eye=1.2` for someone seated), shown as
+  "~"; when the box bottom is the frame edge or within 3 degrees of the
+  horizon the wall sits dashed at the map's edge with "?". The floor
+  beyond a wall is unknown; a wall with a known distance across the
+  strip blocks the walkway, an unknown one is noted. For that the
+  `inventory` event carries `frame_size` and every layout entry its
+  normalized `box`, with the scene's `aspect`. Head tilt is not measured,
+  so the wall distance is an estimate of a different kind from the
+  height-prior ones, and it is never spoken.
+- **2026-09-19, late night, visionOS-2, the places memory:** every scan is
+  remembered as a scene (`backend/scene/places.py`): the things two frames
+  agreed on (people and walls left out), the distinctive words read (room
+  numbers and names; wayfinding words like EXIT do not count), the kind of
+  room, a CLIP fingerprint of the frame and a 160 px thumbnail. The
+  fingerprint comes from the CLIP model YOLO-World already holds to embed
+  its class names (`Detector.embed` in `perception/detector.py`, flagged:
+  no extra memory, on the inference thread, 135 to 195 ms of a 2.8 s scan
+  on this CPU). Scenes that look alike are linked into one named place
+  ("Hallway 1", "Office 2", "Place 3" when the room is not decisive). The
+  score is picture (cosine ramped 0.72 to 0.92) x (0.75 + 0.25 x how much
+  of the smaller view's things the other holds) + words (+0.35 a shared
+  number, +0.15 a shared word, -0.10 when both show numbers and share
+  none) + 0.15 when the same place was recognized within the last 60 s.
+  At 0.80 or more (the user's bar) the scan opens with "It looks like you
+  are (still) in Hallway 1"; below 0.50 it ends with "I'll remember this
+  place as Hallway 2"; in between nothing is said and the scene waits
+  unplaced for the helper. A place keeps its 6 newest views, so it is
+  learned from more angles as it is used. Calibrated on 60 indoor COCO
+  photos (`.claude/bench/place_calib.log` on this laptop): the same photo
+  after a small camera move (80% crop) has picture cosine p5 0.853, p50
+  0.919; after a big move (55% crop, rotation, blur, exposure) p50 0.827;
+  two different photos that share two or more kinds of thing p95 0.786,
+  max 0.870 (n=336). At the ramp, 0 of 336 look-alike pairs are wrongly
+  recognized, 87% of small moves are, 13% of big moves on their own. The
+  memory lives in `visionos/data/places.json` (gitignored; `PLACES_FILE`,
+  `PLACES_ENABLED`, `PLACE_MATCH_CONFIDENCE`, `PLACE_NEW_BELOW`). For the
+  panel, plain HTTP beside the socket (`main.py`, shared, additive):
+  `GET /places`, `POST /places/{id}` rename, `DELETE /places/{id}`,
+  `DELETE /places`, `POST /places/{id}/merge`, `DELETE /scenes/{id}`,
+  `POST /scenes/{id}/place`; and a `place` event after every scan. Client:
+  a Places pill top right (green "In Hallway 1"), key P or the pill pulls
+  up a sheet with every place and its views (thumbnails, x to forget one),
+  rename in place, two-tap Delete, "Link into..." to merge places or file
+  an unplaced view, Forget all; every edit is spoken, since a changed
+  memory is a state the user cannot see. "Where am I" answers with the
+  place name first, and the online model gets a REMEMBERED PLACE line
+  (PROMPT_VERSION v6). In Claude mode the memory still runs on the scan
+  frame with the tracked objects. Suite 516 -> 552.
+- **2026-09-19, night, visionOS-2:** merged `main-project` at 4037f63
+  (Conrad's per-engine gating: RapidOCR lines below 0.70 confidence are
+  dropped and the acronym rules relax for a confident engine; his Mac
+  measurement keeps the tier and the dedupe veto). Architecture at 361151b:
+  `TieredReader(fast, thorough)` when two engines load (Vision then RapidOCR
+  on a Mac; RapidOCR alone here) meshes the fast engine's sure lines with
+  the thorough read whenever a line is below 0.8; a `PEEK` frame every 4 s
+  on CPU feeds a background reader, so Read answers at once from readings
+  under 6 s old when every line is >= 0.8, else runs the 3-frame burst with
+  exposure turned down; `SCAN` is its own two-frame burst at 1280 px
+  (imgsz 1280) and `scene/inference.py` paints the description: setting,
+  groups by angle and distance, what a person is doing when person and
+  object are both >= 0.8, up to two notable words with a direction, hedged
+  glimpses only above 0.8, a landmark reminder; a `detections` event after
+  every processed live frame draws red boxes on the preview (live frames
+  every 150 ms on CPU, overlay cleared 350 ms after the last processed
+  frame); the medication guard speaks numbers that frames agreed on and
+  withholds an unconfirmed dose; lexicon context pass and glued-word split;
+  the client picks a plugged-in webcam, keys 1, 2, 3 and 0 stand in for
+  the watch, a Web Serial button reads the Arduino. Numbers, RapidOCR, Windows,
+  0.70 floor: signage n=60 CER 0.031, exact 92%, silent 1/60, no-text
+  invented 0/8; bundled fonts n=76 sans 94%, serif 100%, cursive 75%,
+  handwriting 83%, novelty 80%; packaging name 12/24, symbols invented
+  0/12; prescription labels 40 tuning / 40 held-out: drug name 57% / 72%,
+  strength 60% / 78%, dose right 12% / 18%, wrong dose 0%. Conrad's Mac,
+  both engines, one corpus set: tier receipts 66% at 1132 ms vs RapidOCR
+  alone 66% at 1975 ms vs Vision 36% at 152 ms; medicine drug name 40%,
+  dose 25%, wrong 0%. Later that night: size tiers in `vocabulary.py`
+  (`scale_of`): hand-held things (cups, bottles, bowls, phones, remotes,
+  books, keyboards) are never boxed and are spoken only when asked about
+  ("are there any cups on the table"); laptops and bigger are always
+  spoken. Detector vocabulary 53 -> 115 classes (`vocabulary.py`, tiered;
+  118 added, then apple, banana and handbag cut: apple found 0 of 17 and
+  invented 39; class-agnostic NMS so near-synonyms box a thing once),
+  measured with the new `eval/run_detect_eval.py`: detect time unchanged
+  within noise (640 px ~250 ms, 1280 px ~1 s on this CPU), invented
+  objects on 24 blank textures 0 -> 0, and on 300 COCO val2017 photos
+  (`eval/fetch_everyday.py`, gitignored) the classes both lists share
+  found 59% -> 58% with 10% fewer false claims. Detector floor
+  0.20 -> 0.35 (config.py and `.env`, which pins it and overrides the
+  code), dangerous classes 0.45, hazard floor 0.45: on the held-out half
+  of those photos, claims that were real 54% -> 71%, things found
+  57% -> 47%, invented objects 527 -> 200 (all 300 photos: 54% -> 68%,
+  56% -> 48%, invented 1083 -> 502, doubled boxes 86 -> 21), and the
+  tuning half agrees; a
+  per-class floor table fitted on one half did worse on the other, and a
+  minimum box height separated nothing. Client: the Voice and Camera
+  buttons are gone at the user's request; the glasses webcam is chosen
+  every time and the voice stays on Daniel (`?voice=` overrides). Live
+  frames: one in flight at a time, paused during scans, every 300 ms on
+  a CPU (the loop alone took 80% of this laptop at 150 ms); boxes live
+  2.5x the server's answer gap. Every scan ends with the walkway: blocked
+  by what and how far, or clear (hedged) and what it leads to; `wall` is
+  in the vocabulary with no height, spoken by direction only, never
+  listed or boxed, 0/24 invented on the blank textures. Reading a scan's
+  signs while detecting was measured (2.28 -> 2.53 s here) and reverted.
+  Ask can go online: `VISION_PROVIDER=nvidia` with `NVIDIA_API_KEY` in
+  `.env` builds `NvidiaVisionProvider` (`backend/ai/nvidia_provider.py`):
+  questions go to NVIDIA's OpenAI-style endpoint with the frame as an
+  `image_url` part (their inline `<img>` tag was never seen by the model
+  and it invented a person on a chair; the part form described the same
+  kitchen correctly, 1.4 to 2.5 s), scans and reads stay on-device, a
+  medicine question never goes online, `verify()` reports the key and
+  the model in `/health`. `meta/llama-3.2-11b-vision-instruct` is the
+  default; the 90b timed out at 60 s and Gemma, Phi and NeVA are not
+  enabled for this key. In the two-engine mesh the thorough engine now
+  wins where both read a place (2751b63, for Conrad's receipts drop
+  66% -> 55%; his SROIE run decides). The medium detector (`yolov8m-world.pt`) was
+  measured on this CPU at floor 0.30 and not adopted: found 43% vs the
+  small model's 51%, claims real 67% vs 65%, invented 471 vs 631, 6 of 24
+  blank textures got a "wall", 800 ms a 640 px frame vs ~250. Later the
+  same evening: detector floor back to 0.30, scan frames match a moved
+  camera, scans say the place (hedged "this may be" at 2.5 of the 3.0 bar),
+  then people, then things; `SEE_AS=refrigerator:trash can` on this laptop
+  only. Suite 516 passed, 3 skipped. `HAZARDS_ENABLED` is still false and
+  the depth pass is gated on it.
 - **2026-09-19, evening, visionOS-2:** merged 81b0add (lexicon, 38 bundled
   fonts; their `eval/fonts.py` supersedes ours, helper renamed `typefaces.py`);
   RapidOCR detects at 1280 px and recognizes on full-res crops (657 ms/frame,

@@ -93,6 +93,11 @@ class Detector:
         self._model = None
         self._device = self._resolve_device(settings.perception_device)
         self._open_vocab = settings.detector_mode == "open"
+        # Labels seen as something else, from SEE_AS; applied before the
+        # distance prior so the spoken thing and its height agree.
+        self._remap = settings.label_remap
+        for seen, spoken in self._remap.items():
+            log.info("Detector: seeing every %s as %s (SEE_AS)", seen, spoken)
 
     @staticmethod
     def _resolve_device(preference: str) -> str:
@@ -151,6 +156,12 @@ class Detector:
             conf=base_confidence,
             device=self._device,
             verbose=False,
+            # One box per thing. The vocabulary holds near-synonyms on
+            # purpose ("chair" and "armchair", "oven" and "stove", "bottle"
+            # and "pill bottle"); without class-agnostic suppression the same
+            # object comes back twice under two names, and the tracker,
+            # which never associates different labels, keeps both.
+            agnostic_nms=True,
             **({"imgsz": imgsz} if imgsz else {}),
         )
 
@@ -158,7 +169,7 @@ class Detector:
         for result in results:
             names = result.names
             for raw in result.boxes:
-                label = names[int(raw.cls[0])]
+                label = self._remap.get(names[int(raw.cls[0])], names[int(raw.cls[0])])
                 confidence = float(raw.conf[0])
 
                 # A phantom staircase stops someone dead; a phantom door sends
@@ -189,3 +200,39 @@ class Detector:
         # Shared single-thread pool: MPS is not thread-safe and concurrent
         # access crashes the process. See perception/runtime.py.
         return await run_inference(partial(self.detect_sync, frame_bgr, imgsz))
+
+    # --- A fingerprint of the picture -------------------------------------
+    # YOLO-World keeps the CLIP model it embedded the class names with, and
+    # CLIP's image tower turns a picture into 512 numbers in the same space.
+    # The place memory compares those to recognize a room seen before. It
+    # costs no memory the detector is not already paying, and it runs on the
+    # one inference thread for the same reason detection does.
+
+    def embed_sync(self, frame_bgr) -> list[float] | None:
+        """A unit-length fingerprint of the frame, or None when the loaded
+        model has no CLIP beside it (the COCO checkpoint) or anything fails."""
+        if self._model is None:
+            self.load()
+        clip_model = getattr(getattr(self._model, "model", None), "clip_model", None)
+        if clip_model is None:
+            return None
+        try:
+            import cv2
+            import torch
+            from PIL import Image
+
+            image = Image.fromarray(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB))
+            if hasattr(clip_model, "encode_image"):
+                features = clip_model.encode_image(image)
+            else:
+                tensor = clip_model.image_preprocess(image).unsqueeze(0).to(clip_model.device)
+                with torch.no_grad():
+                    features = clip_model.model.encode_image(tensor).float()
+                features = features / features.norm(dim=-1, keepdim=True)
+            return [round(float(v), 5) for v in features[0].tolist()]
+        except Exception:
+            log.exception("Fingerprint failed; the place memory goes without the picture")
+            return None
+
+    async def embed(self, frame_bgr) -> list[float] | None:
+        return await run_inference(partial(self.embed_sync, frame_bgr))

@@ -118,3 +118,10 @@ class TestSummaryGrammar:
 
     def test_empty_scene_stays_graceful(self):
         assert "can't" in summarize(SceneModel())
+
+
+def test_plurals_the_detector_labels_need():
+    assert pluralize(2, "shelf") == "2 shelves"
+    assert pluralize(2, "drinking glass") == "2 drinking glasses"
+    assert pluralize(2, "bench") == "2 benches"
+    assert pluralize(2, "stairs") == "2 stairs"

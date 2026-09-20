@@ -35,9 +35,22 @@ class Settings(BaseSettings):
     #           confidently WRONG -- it will describe a living room while the
     #           camera points at a parking lot. Rehearsal and tests only.
     #
+    # "nvidia"  Ask is answered by a vision model hosted by NVIDIA
+    #           (build.nvidia.com) with NVIDIA_API_KEY; scans and reads stay
+    #           on-device. Degrades to "local" without a key.
+    #
     # "claude" degrades to "local", not "replay", when no credentials resolve:
     # a truthful partial answer beats a confident fabrication.
-    vision_provider: Literal["claude", "local", "replay"] = "claude"
+    vision_provider: Literal["claude", "nvidia", "local", "replay"] = "claude"
+    nvidia_api_key: str | None = None
+    nvidia_model: str = "meta/llama-3.2-11b-vision-instruct"
+    nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
+    # How the picture travels: "parts" is the OpenAI image_url content part,
+    # "inline" NVIDIA's own <img src="data:.."> tag in the message text.
+    # Measured 2026-09-19 with meta/llama-3.2-11b-vision-instruct on a COCO
+    # kitchen: "parts" described the kitchen correctly in 2.5 s; "inline"
+    # invented a person on a chair in 7 s, so the picture was not seen.
+    nvidia_image_style: Literal["inline", "parts"] = "parts"
     replay_fixture: str = "assets/replay/livingroom.json"
 
     # --- Text reading -----------------------------------------------------
@@ -56,11 +69,33 @@ class Settings(BaseSettings):
     detector_weights: str = "yolo11m.pt"
     # Open-vocabulary scores run lower than closed-set ones; dangerous classes
     # get a stricter floor of their own in vocabulary.py. Raised from 0.12
-    # after real-world use produced a stream of flickering false detections.
-    detector_confidence: float = 0.20
+    # after real-world use produced a stream of flickering false detections,
+    # and from 0.20 after 300 COCO photographs (eval/run_detect_eval.py): at
+    # 0.20 only 54% of the detector's claims were real, at 0.35 it is 69%,
+    # for recall 57% -> 48%; the two halves of the photo set agree, and a
+    # table of per-class floors fitted on one half did worse on the other.
+    # 0.40 is the next notch (73% / 46%) if invented things persist. Set
+    # back to 0.30 (64% / 50%) the same evening when the user found the app
+    # missing things plainly in view: the middle of the measured curve.
+    detector_confidence: float = 0.30
     depth_model: str = "depth-anything/Depth-Anything-V2-Small-hf"
     # Horizontal FOV of a typical phone rear camera. Drives pixel->azimuth.
     camera_hfov_deg: float = 66.0
+    # Detector labels to see as something else, "seen:spoken" pairs separated
+    # by commas, applied before distance and speech so every path agrees.
+    # The user's venue has tall bins the detector calls refrigerators, so this
+    # machine runs SEE_AS=refrigerator:trash can; a real kitchen must not.
+    see_as: str = ""
+
+    @property
+    def label_remap(self) -> dict[str, str]:
+        pairs = {}
+        for item in self.see_as.split(","):
+            if ":" in item:
+                seen, spoken = item.split(":", 1)
+                if seen.strip() and spoken.strip():
+                    pairs[seen.strip().lower()] = spoken.strip().lower()
+        return pairs
     perception_device: Literal["auto", "cpu", "mps", "cuda"] = "auto"
 
     # --- Hazards (safety-critical; no LLM in this path) -------------------
@@ -75,12 +110,80 @@ class Settings(BaseSettings):
     # evidence: several frames of persistence and a higher confidence floor.
     # Without these, open-vocabulary flicker produced constant false warnings.
     hazard_min_hits: int = 3
-    hazard_min_confidence: float = 0.35
+    hazard_min_confidence: float = 0.45  # a step above detector_confidence
 
     # --- Scene model ------------------------------------------------------
     # How long a departed object stays remembered ("it was there a moment ago").
     object_memory_s: float = 20.0
     track_iou_threshold: float = 0.3
+
+    # --- Places -----------------------------------------------------------
+    # Every scan is remembered as a scene and scenes that look alike are
+    # linked into a named place ("Hallway 1"). A match at or above
+    # place_match_confidence is spoken ("It looks like you are in Hallway
+    # 1"), the user's 80% bar; below place_new_below the scene starts a new
+    # place; in between nothing is said and the panel offers the link to a
+    # sighted helper. The file is this machine's memory of places; delete
+    # it, or use the panel, to forget.
+    places_enabled: bool = True
+    places_file: str = "data/places.json"
+    place_match_confidence: float = 0.80
+    place_new_below: float = 0.50
+
+    # --- A rehearsal label ------------------------------------------------
+    # When set, a Read that is looking at one of demo_label_holders (the
+    # tracker sees a pill bottle in view), or whose text contains one of
+    # the label's own distinctive words (the name, the drug), speaks this
+    # sentence instead of the OCR. Empty in the code and in .env.example:
+    # it exists for one demo bottle on one machine, because a canned dose
+    # spoken over a different bottle is the one failure this project is
+    # built to avoid. The log says loudly whenever it is used.
+    demo_label: str = ""
+    demo_label_holders: str = "pill bottle,bottle"
+    # The same sentence can live in a plain file under the gitignored data
+    # folder instead of .env, so a demo machine's .env, which holds keys,
+    # need not be touched to set it.
+    demo_label_file: str = "data/demo_label.txt"
+
+    @property
+    def effective_demo_label(self) -> str:
+        if self.demo_label.strip():
+            return self.demo_label.strip()
+        try:
+            with open(self.demo_label_file, encoding="utf-8") as f:
+                return " ".join(f.read().split())
+        except OSError:
+            return ""
+
+    # --- The food allergy scanner ----------------------------------------
+    # What the wearer is allergic to, their name and their doctor's address
+    # live in a small JSON file under the gitignored data folder, edited
+    # from the Allergies sheet. The scanner is on whenever the profile
+    # lists an allergen; with none listed it does nothing.
+    allergy_alerts_enabled: bool = True
+    profile_file: str = "data/profile.json"
+    # The user's 80% rule for the reader's confidence in a line that names
+    # an allergen, and how many frames must agree on it; one email per
+    # allergen per this many seconds.
+    allergy_min_confidence: float = 0.80
+    allergy_min_agreement: int = 2
+    allergy_min_frames: int = 3
+    allergy_cooldown_s: float = 600.0
+    # A barcode on the packet is looked up in Open Food Facts (keyless);
+    # off, the scanner reads the label only.
+    barcode_lookup_enabled: bool = True
+    # The email to the doctor: SMTP with STARTTLS. Gmail wants an app
+    # password (myaccount.google.com > Security > App passwords) in
+    # ALERT_SMTP_PASSWORD and the full address in ALERT_SMTP_USER. Without
+    # both, every alert is written to the outbox folder instead and the
+    # wearer is told so. The doctor's address in the profile wins over
+    # ALERT_EMAIL_TO.
+    alert_email_to: str = ""
+    alert_smtp_host: str = "smtp.gmail.com"
+    alert_smtp_port: int = 587
+    alert_smtp_user: str = ""
+    alert_smtp_password: str = ""
+    alert_outbox_dir: str = "data/outbox"
 
     # --- Server -----------------------------------------------------------
     # --- Voice ------------------------------------------------------------

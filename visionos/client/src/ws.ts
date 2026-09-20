@@ -5,6 +5,9 @@
  * surfaced to the caller to be spoken rather than shown.
  */
 
+// How big a thing is in the hand-held sense; "small" is never boxed.
+export type Scale = "small" | "medium" | "large";
+
 export type ServerEvent =
   | {
       type: "ready";
@@ -13,6 +16,8 @@ export type ServerEvent =
       ocr?: string;
       device?: string;
       demo_mode: boolean;
+      /** What the allergy scanner is watching for; empty when it is idle. */
+      allergens?: string[];
     }
   | { type: "speech"; text: string }
   | {
@@ -22,24 +27,60 @@ export type ServerEvent =
       stages: Record<string, number>;
       total_ms: number;
     }
-  | { type: "hazard"; text: string; severity: number; azimuth_deg: number; distance_m: number }
+  | {
+      type: "hazard";
+      text: string;
+      severity: number;
+      azimuth_deg: number;
+      distance_m: number;
+      /** Absent for an obstacle; "allergy" for an alert that emails the
+       * doctor, "allergy-warning" for one that only speaks. */
+      kind?: "allergy" | "allergy-warning";
+      allergens?: string[];
+      source?: string;
+      evidence?: string;
+      emailed?: boolean;
+    }
   | { type: "beacon"; label: string; azimuth_deg: number; distance_m: number; visible: boolean }
   | { type: "beacon_stop" }
   | {
       type: "inventory";
       text: string;
+      /** Width and height of the scan frame, so a normalized box can be
+       * turned back into angles. */
+      frame_size?: [number, number];
       items: Array<{
         label: string;
         confidence: number;
         frames: number;
         azimuth_deg: number;
         distance_m: number | null;
+        scale?: Scale;
+        /** Something to walk into, for the blueprint. */
+        obstacle?: boolean;
         box: [number, number, number, number] | null;
       }>;
     }
-  | { type: "detections"; items: Array<{ label: string; confidence: number; box: [number, number, number, number] }> };
+  | {
+      type: "detections";
+      items: Array<{ label: string; confidence: number; scale?: Scale; box: [number, number, number, number] }>;
+    }
+  | PlaceEvent;
 
-export type Boxed = { label: string; confidence: number; box: [number, number, number, number] };
+/** What the place memory made of a scan; the spoken part is already in the
+ * scan's own speech. */
+export type PlaceEvent = {
+  type: "place";
+  kind: "recognized" | "new" | "unsure" | "skipped";
+  score: number;
+  place: { id: string; name: string } | null;
+  candidate: { id: string; name: string } | null;
+  scene_id: string | null;
+  evidence?: string;
+  spoken?: string | null;
+};
+
+export type Boxed = { label: string; confidence: number; scale?: Scale; box: [number, number, number, number] };
 
 type Handlers = {
   onEvent: (event: ServerEvent) => void;

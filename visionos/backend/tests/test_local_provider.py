@@ -108,3 +108,89 @@ async def test_output_is_speakable():
     scene = build_scene([make_detection(label="chair", distance=2.0)])
     spoken = await answer(scene, "Describe this room")
     assert not any(ch in spoken for ch in "*_#[]{}<>")
+
+
+# --- Hand-held things are answered, not listed --------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_question_about_cups_is_about_the_cups_not_the_table():
+    scene = build_scene(
+        [
+            make_detection(label="dining table", x=100, distance=1.5, azimuth=0.0),
+            make_detection(label="cup", x=300, distance=1.4, azimuth=5.0),
+            make_detection(label="cup", x=500, distance=1.6, azimuth=-10.0),
+        ]
+    )
+    spoken = await answer(scene, "Are there any cups on the table?")
+    assert "cups" in spoken and "2" in spoken, spoken
+    assert not spoken.startswith("The dining table"), spoken
+
+
+@pytest.mark.asyncio
+async def test_phone_is_understood_as_a_cell_phone():
+    scene = build_scene([make_detection(label="cell phone", distance=1.0, azimuth=0.0)])
+    spoken = await answer(scene, "Is there a phone here?")
+    assert "cell phone" in spoken and "1.0 meters" in spoken, spoken
+
+
+@pytest.mark.asyncio
+async def test_a_room_description_leaves_out_hand_held_things():
+    scene = build_scene(
+        [
+            make_detection(label="chair", x=100, distance=2.0),
+            make_detection(label="cup", x=300, distance=1.0),
+        ]
+    )
+    spoken = await answer(scene, "Describe this room")
+    assert "chair" in spoken and "cup" not in spoken, spoken
+
+
+@pytest.mark.asyncio
+async def test_a_word_inside_another_word_is_not_an_object():
+    scene = build_scene([make_detection(label="chair", distance=2.0)])
+    spoken = await answer(scene, "Is the seat occupied?")
+    assert "chair" in spoken and "cup" not in spoken, spoken
+
+
+@pytest.mark.asyncio
+async def test_a_plain_table_is_found_by_name():
+    scene = build_scene([make_detection(label="table", distance=1.5)])
+    spoken = await answer(scene, "Where is the table?")
+    assert "table" in spoken and "can't see" not in spoken, spoken
+
+
+@pytest.mark.asyncio
+async def test_stairs_are_a_thing_one_can_ask_about():
+    scene = build_scene([make_detection(label="stairs", distance=None, azimuth=20.0)])
+    spoken = await answer(scene, "Where are the stairs?")
+    assert "stairs" in spoken and "can't judge the distance" in spoken, spoken
+
+
+# --- The wider vocabulary can be asked about in everyday words -----------------
+
+
+@pytest.mark.asyncio
+async def test_pills_means_the_pill_bottle():
+    scene = build_scene([make_detection(label="pill bottle", distance=0.6, azimuth=0.0)])
+    spoken = await answer(scene, "Where are my pills?")
+    assert "pill bottle" in spoken and "0.6 meters" in spoken, spoken
+
+
+@pytest.mark.asyncio
+async def test_bin_means_the_trash_can_and_not_the_cabinet():
+    scene = build_scene(
+        [
+            make_detection(label="cabinet", x=100, distance=2.0),
+            make_detection(label="trash can", x=400, distance=1.5, azimuth=20.0),
+        ]
+    )
+    spoken = await answer(scene, "Is there a bin?")
+    assert "trash can" in spoken and "cabinet" not in spoken, spoken
+
+
+@pytest.mark.asyncio
+async def test_how_many_steps_is_not_a_question_about_stairs():
+    scene = build_scene([make_detection(label="door", distance=3.0, azimuth=0.0)])
+    spoken = await answer(scene, "How many steps to the door?")
+    assert "door" in spoken and "stairs" not in spoken, spoken
