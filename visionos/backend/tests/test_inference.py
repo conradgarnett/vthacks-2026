@@ -220,3 +220,12 @@ async def test_describe_this_room_is_still_an_inventory_not_a_room_question():
     scene = build_scene([make_detection(label="chair", distance=2.0)])
     spoken = await answer(scene, "Describe this room")
     assert "chair" in spoken and "meters" in spoken
+
+
+def test_a_fairly_strong_room_is_offered_as_may_be_and_a_weak_one_is_not():
+    from backend.scene.inference import room_sentence
+
+    assert room_sentence(["desk", "keyboard"]) == "This may be an office."
+    assert room_sentence(["desk", "laptop"]) == "This looks like an office."
+    assert room_sentence(["door", "handrail"]) is None
+    assert room_sentence(["chair"]) is None

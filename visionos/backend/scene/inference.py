@@ -62,6 +62,13 @@ ROOMS: list[tuple[str, dict[str, float]]] = [
 # user heard guesses that were plainly wrong, and a wrong guess is not
 # made harmless by hedging it. Below this score the room is not named.
 _ROOM_MIN_SCORE = 3.0
+# Below that, a room is offered as "this may be" only when the evidence is
+# fairly strong and clearly ahead of any other room: the user asked for
+# every scan to start with what the place seems to be, and also, earlier,
+# never to hear a room that turns out wrong. A desk and a keyboard reach
+# this; a door and a handrail do not.
+_ROOM_HEDGE_SCORE = 2.5
+_ROOM_HEDGE_MARGIN = 1.0
 # A second copy of an object adds evidence; a fifth chair does not.
 _MAX_COUNT_PER_LABEL = 2
 
@@ -90,28 +97,39 @@ class Tentative:
         return clock_position(self.azimuth_deg)
 
 
-def room_guess(labels: Iterable[str]) -> tuple[str, float] | None:
-    """The kind of space these objects add up to, with its evidence score."""
+def room_scores(labels: Iterable[str]) -> list[tuple[str, float]]:
+    """Every room's evidence score for these objects, best first."""
     counts = Counter(labels)
-    best: tuple[str, float] | None = None
+    scored = []
     for room, weights in ROOMS:
         score = sum(
             weights.get(label, 0.0) * min(count, _MAX_COUNT_PER_LABEL)
             for label, count in counts.items()
         )
-        if score >= _ROOM_MIN_SCORE and (best is None or score > best[1]):
-            best = (room, score)
-    return best
+        scored.append((room, score))
+    scored.sort(key=lambda rs: -rs[1])
+    return scored
+
+
+def room_guess(labels: Iterable[str]) -> tuple[str, float] | None:
+    """The kind of space these objects add up to, with its evidence score,
+    when the evidence is decisive."""
+    best = room_scores(labels)[0]
+    return best if best[1] >= _ROOM_MIN_SCORE else None
 
 
 def room_sentence(labels: Iterable[str]) -> str | None:
-    """Named only on decisive evidence, and then plainly; there is no
-    hedged tier, because the evidence is either enough or it is not."""
-    guess = room_guess(labels)
-    if guess is None:
+    """"This looks like a kitchen." on decisive evidence, "This may be a
+    kitchen." on fairly strong evidence with no close rival, else nothing."""
+    scored = room_scores(labels)
+    if not scored:
         return None
-    room, _score = guess
-    return f"This looks like {with_article(room)}."
+    (room, score), runner_up = scored[0], (scored[1][1] if len(scored) > 1 else 0.0)
+    if score >= _ROOM_MIN_SCORE:
+        return f"This looks like {with_article(room)}."
+    if score >= _ROOM_HEDGE_SCORE and score - runner_up >= _ROOM_HEDGE_MARGIN:
+        return f"This may be {with_article(room)}."
+    return None
 
 
 def tentative_objects(detections, scene: SceneModel, limit: int = 2) -> list[Tentative]:
@@ -610,6 +628,9 @@ def describe_scan(
     # Small things still group, since a cup in reach says what a person is
     # doing, but a group with nothing bigger in it is not spoken.
     groups = [g for g in group_seen(things) if any(not is_small(s.label) for s in g)]
+    # The user's order: the place, then people and what they are doing,
+    # then everything else. Nearest first within each.
+    groups.sort(key=lambda g: not any(s.label == "person" for s in g))
     if groups:
         farthest = max(
             groups, key=lambda g: max((s.distance_m or 0.0) for s in g)

@@ -424,3 +424,11 @@ def test_a_thing_the_camera_moved_off_still_counts_in_both_frames():
     far = [detection("chair", 260, 110, 360, 500, 0.75, azimuth=20.0)]
     both, once = match_scan_frames([first, far], (640, 480))
     assert both == [] and len(once) == 2
+
+
+def test_people_come_before_things_whatever_the_distance():
+    spoken = describe_scan(SceneModel(), [
+        seen("table", 0.0, 1.5), seen("chair", 3.0, 1.6),
+        seen("person", -20.0, 4.0, box=(0.2, 0.3, 0.3, 0.9)),
+    ])
+    assert spoken.index("a person") < spoken.index("a table"), spoken
