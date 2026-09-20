@@ -853,6 +853,11 @@ const WATCH_GHOST_PIN = "16";
 const WATCH_BURST_MS = 250;
 let watchBurst: string[] = [];
 let watchBurstTimer = 0;
+// The same command again inside this window is the contact chattering,
+// not a second press.
+const WATCH_TOKEN_REPEAT_MS = 500;
+let lastWatchToken = "";
+let lastWatchTokenAt = 0;
 // A held port reads zero bytes with no error, and an idle board is silent
 // by design, so the only tell is a watch that says nothing after it was
 // connected. The app asks for a press on connect and, if nothing at all
@@ -1004,8 +1009,18 @@ async function listenToWatch(port: SerialPortLike, baudIndex: number): Promise<v
         if (raw && worthShowing) show(`Watch: ${raw}`);
         else if (raw) console.info("[watch]", raw);
         if (line in actions) {
-          if (started) run(line as Action);
-          else void begin();
+          // A chattering contact sends the same command several times in
+          // a quarter second (measured: SCAN x4 in 250 ms). One press is
+          // one command; a deliberate second press comes later than this.
+          const now = performance.now();
+          if (line === lastWatchToken && now - lastWatchTokenAt < WATCH_TOKEN_REPEAT_MS) {
+            console.info("[watch] repeat ignored", raw);
+          } else {
+            lastWatchToken = line;
+            lastWatchTokenAt = now;
+            if (started) run(line as Action);
+            else void begin();
+          }
         } else if (pin) {
           // A diagnostic firmware reports the pin instead of the command,
           // and one press can light a second pin (16 rode along with every
