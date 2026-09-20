@@ -15,8 +15,13 @@
 //
 // WIRING
 //   GPIO9   Grove button 1  -> SCAN   tap, or hold to STOP
-//   GPIO37  Grove button 2  -> READ   tap, or hold to STOP
-//   GPIO1   Grove button 3  -> ASK    tap only, any press length
+//   GPIO1   Grove button 2  -> READ   tap, or hold to STOP
+//   GPIO16  Grove button 3  -> ASK    tap only, any press length
+//
+//   Not GPIO37, and not 33 or 35: those share a power domain with the
+//   SPI flash and PSRAM on this chip (the datasheet makes GPIO33-37's
+//   supply switchable to VDD_SPI), and a button on 37 read as two pins
+//   at once. 37 is also the default UART RX. 9, 1 and 16 are plain.
 //
 // Three buttons cover four commands: STOP is a hold, so it stays reachable
 // from whichever button is under the thumb when speech is running.
@@ -40,7 +45,7 @@
 #include <Arduino.h>
 
 const uint8_t BUTTON_COUNT = 3;
-const uint8_t PINS[BUTTON_COUNT] = {9, 37, 1};
+const uint8_t PINS[BUTTON_COUNT] = {9, 1, 16};
 const char* COMMANDS[BUTTON_COUNT] = {"SCAN", "READ", "ASK"};
 
 // Grove modules bounce less than a bare switch, but a thumb on a wearable
