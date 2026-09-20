@@ -92,7 +92,7 @@ second, lower pass; tiling still applies.
 
 ```bash
 cd visionos
-.venv/bin/python -m pytest backend/tests -q          # 560 tests (3 Apple-only), ~2 min alone
+.venv/bin/python -m pytest backend/tests -q          # 565 tests (3 Apple-only), ~2 min alone
 PYTHONPATH=. .venv/bin/python eval/run_ocr_eval.py 60
 ```
 
@@ -187,6 +187,19 @@ tested.
 
 ## Log
 
+- **2026-09-20, 00:00 to 01:10, visionOS-2, the watch, the camera and a
+  rehearsal label:** Conrad's board is a LOLIN S2 Mini with three Grove
+  buttons at 115200 baud (SCAN, READ, ASK lines; banner after a reset;
+  `ignored:` diagnostics; the repo's `hardware/watch_s2/watch_s2.ino` is
+  an older 9600 version); the client's watch reader opens at 115200 and
+  falls back to 9600, acts on whole lines only, reopens a granted port by
+  itself, shows the board's id and every received line, and says when a
+  connected watch stays silent; `hardware/README.md` carries his spec and
+  the pins to avoid. Every start resets the webcam's picture controls
+  (the dim had carried over between sessions). A rehearsal label
+  (`DEMO_LABEL` or `data/demo_label.txt`, empty by default): with a pill
+  bottle in view or the label's own name or drug in the read, Read speaks
+  that sentence instead of the OCR; flagged on PR #2. Suite 565.
 - **2026-09-19, 23:40, visionOS-2, reads on a slow engine:** measured live
   on this CPU, a Read of a blank wall took 27 to 33 s and a one-word sign
   18.7 s: 32 and 22 engine calls, because the escalation (the 2x2 then 4x4
