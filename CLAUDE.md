@@ -187,6 +187,35 @@ tested.
 
 ## Log
 
+- **2026-09-20, 02:30 to 03:00, visionOS-2, finishing touches for running
+  from GitHub:** the user's direction ("finishing touches so we can push
+  everything to github and start running things from there"). Merged from
+  Conrad: the ElevenLabs voice behind `GET /speech` (4334322; cache-first,
+  404 without a key so the browser voice stays; hazards never use it), the
+  24 measured food classes (`food-vocab` f8562e9: vocabulary 140, all tier
+  small, `orange` cut), the gate fix for glued punctuation
+  (`text_quality.py` dca34f0: "CONTAINS:PEANUTS" and "12:30" no longer take
+  their whole line down; SROIE lines recovered 51% -> 54%), and the
+  allergen-statement corpus (`eval/allergens.py`,
+  `eval/run_allergen_eval.py`, d1ef1bc: 40 labels through
+  `find_allergen_mentions` on the consensus read; the matcher invented 0
+  and mishandled 0 negations and 0 hedges; the reader recovered the
+  small-print statement line 7 of 40, 21% of allergens, so the read path
+  on small print is the open gap and the barcode step matters; the suspect
+  is the tiling gate, which a large product name defeats, Conrad measuring).
+  `README.md` at the root and `visionos/README.md` rewritten from clone to
+  running (keys table, controls, the scanner's ladder, measuring, layout);
+  `run.py --check` and `backend/doctor.py` report the NVIDIA provider, the
+  profile and its allergens, mail or the outbox, the barcode decoder and
+  the voice key, and `run.py` creates `data/` on a fresh clone. The lines
+  the scanner hangs on are pinned through the gate on both engine paths
+  (`test_allergy.py`, df0f8d9). PR #1 is mergeable at this commit; Conrad
+  merges it into `main-project` (the default branch) at his next quiet
+  moment. Owed, needing an idle CPU: the full suite, signage before and
+  after the reader changes, packaging, the allergen eval on this CPU, the
+  detector at 140 classes, the bread frames; `.claude/scripts/measure_window.py`
+  runs them in one go and `find_label_frames.py bread` makes the contact
+  sheet.
 - **2026-09-20, 01:30 to 02:25, visionOS-2, the food allergy scanner and
   the doctor's email:** the user's request; the shape was agreed with
   Conrad's agent on PR #2 after his objection that the allergen is not in

@@ -139,6 +139,9 @@ def ensure_env_file() -> None:
     if not env_file.exists():
         shutil.copy(ROOT / ".env.example", env_file)
         say("Created .env from .env.example")
+    # This machine's memory (the places, the profile, the outbox, the voice
+    # cache) lives here. It is gitignored, so a fresh clone has no folder.
+    (ROOT / "data").mkdir(exist_ok=True)
 
 
 def dotenv_value(key: str) -> str | None:
@@ -168,6 +171,54 @@ def credentials_present() -> bool:
         except Exception:
             return False
     return False
+
+
+def nvidia_present() -> bool:
+    """Ask goes to NVIDIA's hosted model when the provider says so and a key is there."""
+    provider = (os.environ.get("VISION_PROVIDER") or dotenv_value("VISION_PROVIDER") or "claude").lower()
+    return provider == "nvidia" and bool(os.environ.get("NVIDIA_API_KEY") or dotenv_value("NVIDIA_API_KEY"))
+
+
+def scanner_report() -> list[str]:
+    """What the allergy scanner and the voice would do on this machine, read
+    from the backend's own settings: the profile, mail, the barcode decoder,
+    the voice key. Nothing here prints a secret."""
+    line = backend_probe(
+        "import logging; logging.disable(logging.CRITICAL)\n"
+        "from backend.config import get_settings\n"
+        "from backend.alerts.profile import ProfileStore\n"
+        "from backend.alerts.email_agent import EmailAgent\n"
+        "s = get_settings(); p = ProfileStore(s.profile_file).current\n"
+        "mail = EmailAgent(user=s.alert_smtp_user, password=s.alert_smtp_password, to=s.alert_email_to)\n"
+        "try:\n"
+        "    import cv2; barcode = hasattr(cv2, 'barcode')\n"
+        "except Exception:\n"
+        "    barcode = False\n"
+        "print('|'.join([','.join(p.allergens), p.doctor_email or s.alert_email_to or '',"
+        " 'yes' if mail.configured else 'no', 'yes' if barcode else 'no',"
+        " 'yes' if getattr(s, 'elevenlabs_api_key', '') else 'no']))"
+    )
+    parts = line.split("|") if line.count("|") == 4 else ["", "", "no", "no", "no"]
+    allergens, doctor, mail, barcode, voice = parts
+    out: list[str] = []
+    if allergens:
+        out.append(f"Allergies: watching for {allergens.replace(',', ', ')}; alerts to {doctor or 'nobody yet: add the doctor in the app (key L)'}")
+    else:
+        out.append("Allergies: none on file, so the scanner is idle (press L in the app to add them)")
+    if mail == "yes":
+        out.append("Mail: set up; allergy alerts are emailed")
+    else:
+        out.append("Mail: not set up; alerts are written to data/outbox (ALERT_SMTP_USER and")
+        out.append("      ALERT_SMTP_PASSWORD in visionos/.env turn it on)")
+    out.append(
+        "Barcodes: decoded by OpenCV and looked up in Open Food Facts" if barcode == "yes"
+        else "Barcodes: this OpenCV has no barcode module; labels only"
+    )
+    out.append(
+        "Voice: ElevenLabs for answers and reads (browser voice for warnings)" if voice == "yes"
+        else "Voice: the browser's own (ELEVENLABS_API_KEY in visionos/.env for a better one)"
+    )
+    return out
 
 
 def backend_probe(code: str) -> str:
@@ -295,12 +346,17 @@ def main() -> int:
     has_claude = credentials_present()
     if has_claude:
         say("Vision: Claude (credentials found). Full scene descriptions and questions.")
+    elif nvidia_present():
+        say("Vision: NVIDIA (key found). Questions go online; scans and reads stay on-device.")
     else:
-        say("Vision: no Claude credentials. On-device mode: reads text, describes")
+        say("Vision: no Claude or NVIDIA key. On-device mode: reads text, describes")
         say("        recognized objects, but cannot answer open questions.")
-        say("        Add ANTHROPIC_API_KEY=... to visionos/.env for full descriptions.")
+        say("        Add NVIDIA_API_KEY=... (with VISION_PROVIDER=nvidia) or")
+        say("        ANTHROPIC_API_KEY=... to visionos/.env for full answers.")
         if ask("Continue in on-device mode? (y/n)", "y", args.yes).lower().startswith("n"):
             return 1
+    for line in scanner_report():
+        say(line)
 
     if not weights_cached():
         answer = ask("Model weights are not downloaded yet (~450 MB, one time). Download now? (y/n)", "y", args.yes)

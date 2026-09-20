@@ -39,8 +39,18 @@ def check_python() -> bool:
 
 def check_credentials() -> bool:
     """Resolution order mirrors the Anthropic SDK's own."""
-    if get_settings().vision_provider == "replay":
+    settings = get_settings()
+    if settings.vision_provider == "replay":
         _line(OK, "Credentials", "replay provider -- none needed")
+        return True
+    if settings.vision_provider == "nvidia":
+        if settings.nvidia_api_key:
+            _line(OK, "Credentials", f"NVIDIA key set; questions go to {settings.nvidia_model}")
+            return True
+        _line(FAIL, "Credentials", "VISION_PROVIDER=nvidia but NVIDIA_API_KEY is empty -- on-device answers only")
+        return False
+    if settings.vision_provider == "local":
+        _line(OK, "Credentials", "local provider -- none needed; no open questions")
         return True
 
     if os.environ.get("ANTHROPIC_API_KEY"):
@@ -136,6 +146,40 @@ def check_port() -> bool:
     return True
 
 
+def check_scanner() -> bool:
+    """The allergy scanner and the voice: never demo-blocking, always said."""
+    from backend.alerts.email_agent import EmailAgent
+    from backend.alerts.profile import ProfileStore
+
+    settings = get_settings()
+    profile = ProfileStore(settings.profile_file).current
+    if profile.allergens:
+        to = profile.doctor_email or settings.alert_email_to or "nobody yet (add the doctor in the app, key L)"
+        _line(OK, "Allergy scanner", f"watching for {', '.join(profile.allergens)}; alerts to {to}")
+    else:
+        _line(WARN, "Allergy scanner", f"idle: no allergens in {settings.profile_file} (key L in the app)")
+
+    mail = EmailAgent(user=settings.alert_smtp_user, password=settings.alert_smtp_password, to=settings.alert_email_to)
+    if mail.configured:
+        _line(OK, "Alert mail", "set up; alerts are emailed")
+    else:
+        _line(WARN, "Alert mail", f"not set up; alerts go to {settings.alert_outbox_dir} (ALERT_SMTP_USER, ALERT_SMTP_PASSWORD)")
+
+    try:
+        import cv2
+
+        barcode = hasattr(cv2, "barcode")
+    except Exception:
+        barcode = False
+    _line(OK if barcode else WARN, "Barcodes", "OpenCV decodes them; Open Food Facts lookup" if barcode else "no barcode module in this OpenCV; labels only")
+
+    if getattr(settings, "elevenlabs_api_key", ""):
+        _line(OK, "Voice", "ElevenLabs for answers and reads; browser voice for warnings")
+    else:
+        _line(OK, "Voice", "the browser's own (ELEVENLABS_API_KEY for a better one)")
+    return True
+
+
 def main() -> int:
     print("VisionOS pre-flight\n")
     results = [
@@ -143,6 +187,7 @@ def main() -> int:
         check_credentials(),
         check_weights(),
         check_ocr(),
+        check_scanner(),
         check_port(),
     ]
     print()
