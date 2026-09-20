@@ -130,6 +130,31 @@ class Settings(BaseSettings):
     place_match_confidence: float = 0.80
     place_new_below: float = 0.50
 
+    # --- A rehearsal label ------------------------------------------------
+    # When set, a Read that is looking at one of demo_label_holders (the
+    # tracker sees a pill bottle in view), or whose text contains one of
+    # the label's own distinctive words (the name, the drug), speaks this
+    # sentence instead of the OCR. Empty in the code and in .env.example:
+    # it exists for one demo bottle on one machine, because a canned dose
+    # spoken over a different bottle is the one failure this project is
+    # built to avoid. The log says loudly whenever it is used.
+    demo_label: str = ""
+    demo_label_holders: str = "pill bottle,bottle"
+    # The same sentence can live in a plain file under the gitignored data
+    # folder instead of .env, so a demo machine's .env, which holds keys,
+    # need not be touched to set it.
+    demo_label_file: str = "data/demo_label.txt"
+
+    @property
+    def effective_demo_label(self) -> str:
+        if self.demo_label.strip():
+            return self.demo_label.strip()
+        try:
+            with open(self.demo_label_file, encoding="utf-8") as f:
+                return " ".join(f.read().split())
+        except OSError:
+            return ""
+
     # --- Server -----------------------------------------------------------
     host: str = "0.0.0.0"
     port: int = 8000

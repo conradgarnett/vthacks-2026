@@ -175,6 +175,31 @@ def with_holder(spoken: str, holder: str | None) -> str:
     return f"On the {holder}, it reads: {spoken[len(prefix):]}"
 
 
+# Words of a rehearsal label that identify it: the name and the drug, not
+# the directions every pharmacy prints ("take", "capsule", "by mouth",
+# "every day"), which would match a different bottle.
+_LABEL_COMMON_WORDS = frozenset({
+    "take", "takes", "taken", "tablet", "tablets", "capsule", "capsules", "mouth",
+    "every", "daily", "twice", "three", "times", "hours", "days", "with", "food",
+    "water", "before", "after", "morning", "night", "refill", "refills", "discard",
+    "pharmacy", "prescription", "generic", "brand", "store", "keep", "reach",
+    "children", "warning", "caution", "may", "cause", "drowsiness",
+})
+
+
+def demo_label_words(label: str) -> list[str]:
+    """The distinctive words of a label, lowercased, hyphens closed up as
+    well as split: "lis-dex-amphetamine" yields both spellings."""
+    words: list[str] = []
+    for raw in label.lower().split():
+        cleaned = "".join(ch for ch in raw if ch.isalpha() or ch == "-")
+        candidates = [cleaned.replace("-", "")] + cleaned.split("-")
+        for word in candidates:
+            if len(word) >= 5 and word not in _LABEL_COMMON_WORDS and word not in words:
+                words.append(word)
+    return words
+
+
 def match_scan_frames(per_frame: list[list], frame_size: tuple[int, int]) -> tuple[list[Seen], list[Seen]]:
     """Sightings seen in both scan frames, and those seen in only one.
 
@@ -428,6 +453,12 @@ class Session:
             min_confidence=settings.hazard_min_confidence,
         )
         self.beacon_label: str | None = None
+        # A rehearsal label that stands in for the OCR on a pill bottle;
+        # empty unless DEMO_LABEL is set on this machine.
+        self.demo_label = settings.effective_demo_label
+        self.demo_holders = {
+            h.strip().lower() for h in settings.demo_label_holders.split(",") if h.strip()
+        }
         # Background reading: (monotonic time, lines) of the last few peeks.
         self.peeks: deque[tuple[float, list]] = deque(maxlen=PEEK_KEEP_MAX)
         self.peek_task: asyncio.Task | None = None
@@ -462,8 +493,14 @@ class Session:
     async def handle_read(self, frames: list[bytes]) -> None:
         """Answer from the background peeks when they are fresh and solid;
         the burst is the slow path for when they are not."""
+        if self.demo_label_applies():
+            await self._say_demo_label(LatencyTrace(label="read"))
+            return
         cached = self.fresh_reading()
         if cached and not read_is_weak(cached):
+            if self.demo_label_applies(cached):
+                await self._say_demo_label(LatencyTrace(label="read"))
+                return
             holder = text_holder(self.perception.scene.all_objects())
             await self._say(with_holder(format_for_speech(cached), holder))
             log.info("read: answered from %d peek(s) via %s", len(self.peeks), self.ocr.name)
@@ -473,6 +510,29 @@ class Session:
             await self._read_burst(frames)
         finally:
             self.reading = False
+
+    # --- A rehearsal label ------------------------------------------------
+
+    def demo_label_applies(self, lines=None) -> bool:
+        """Does the rehearsal label stand in for this read? Yes when one of
+        the demo holders (a pill bottle) is in view, or when what was read
+        contains one of the label's own distinctive words."""
+        if not self.demo_label:
+            return False
+        objects = self.perception.scene.all_objects()
+        if any(o.visible and o.label in self.demo_holders for o in objects):
+            return True
+        if lines:
+            read = " ".join(line.text for line in lines).lower().replace("-", "")
+            return any(word in read for word in demo_label_words(self.demo_label))
+        return False
+
+    async def _say_demo_label(self, trace: LatencyTrace) -> None:
+        holder = next(iter(sorted(self.demo_holders, key=len, reverse=True)), None)
+        log.warning("read: DEMO_LABEL spoken in place of the OCR")
+        trace.mark("first_sentence")
+        await self._say(f"On the {holder}, it reads: {self.demo_label}" if holder else f"It reads: {self.demo_label}")
+        await self._finish(trace)
 
     async def _read_burst(self, frames: list[bytes]) -> None:
         """Local OCR over the burst first; the vision provider only if that
@@ -505,6 +565,11 @@ class Session:
         if not settled:
             with trace.stage("ocr"):
                 lines = await self.ocr.read_consensus(frames)
+
+        # The rehearsal label, once the read has had its chance to match it.
+        if self.demo_label_applies(lines):
+            await self._say_demo_label(trace)
+            return
 
         # Escalate on a poor read, not only an empty one. Connected script and
         # decorative faces are where OCR fails hardest, and it fails in two
