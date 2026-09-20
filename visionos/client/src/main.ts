@@ -93,13 +93,17 @@ const READ_BURST_GAP_MS = 120;
 // changed voice is a surprise to someone who cannot see why.
 const VOICE_NAME = "daniel";
 
-const setStatus = (text: string): void => {
+type StatusState = "idle" | "ok" | "busy" | "listening" | "error";
+
+/** The status pill: its text, and the colour of the dot beside it. */
+const setStatus = (text: string, state: StatusState = "idle"): void => {
   status.textContent = text;
+  status.dataset.state = state;
 };
 
 /** Surface a failure the user cannot see. Silence reads as a freeze. */
 function reportFailure(message: string): void {
-  setStatus(message);
+  setStatus(message, "error");
   show(message);
   tts.say(message, SpeechPriority.Answer);
 }
@@ -108,11 +112,11 @@ function reportFailure(message: string): void {
 // with no explanation -- which is exactly how it presented.
 window.addEventListener("error", (event) => {
   console.error(event.error ?? event.message);
-  setStatus(`Error: ${event.message}`);
+  setStatus(`Error: ${event.message}`, "error");
 });
 window.addEventListener("unhandledrejection", (event) => {
   console.error(event.reason);
-  setStatus(`Error: ${String(event.reason)}`);
+  setStatus(`Error: ${String(event.reason)}`, "error");
 });
 
 function show(text: string, kind: "speech" | "hazard" = "speech"): void {
@@ -158,6 +162,9 @@ async function showMode(): Promise<void> {
     const response = await fetch("/health", { cache: "no-store" });
     const health = response.ok ? ((await response.json()) as Health) : null;
     modeLine.textContent = describeMode(health);
+    // The dot beside it: green when questions go to a model, amber for
+    // on-device only, red when the backend cannot be reached.
+    modeLine.dataset.tone = !health ? "bad" : health.provider_active === "LocalSceneProvider" ? "warn" : "ok";
     // On the computer that runs the servers, say where a phone should go.
     // The phone needs the HTTPS port; the address changes with the network.
     const local = location.hostname === "localhost" || location.hostname === "127.0.0.1";
@@ -166,6 +173,7 @@ async function showMode(): Promise<void> {
     }
   } catch {
     modeLine.textContent = describeMode(null);
+    modeLine.dataset.tone = "bad";
   }
 }
 
@@ -193,7 +201,7 @@ function onServerEvent(event: ServerEvent): void {
         },
       };
       const mode = modes[event.provider_active];
-      setStatus(mode?.label ?? "Connected");
+      setStatus(mode?.label ?? "Connected", "ok");
       frameIntervalMs = event.device === "cpu" ? FRAME_INTERVAL_CPU_MS : FRAME_INTERVAL_MS;
       peekIntervalMs = event.device === "cpu" ? PEEK_INTERVAL_CPU_MS : PEEK_INTERVAL_MS;
 
@@ -266,6 +274,9 @@ function onServerEvent(event: ServerEvent): void {
       // resume.
       if (event.label.startsWith("read")) readPending = false;
       if (event.label.startsWith("scan")) scanPending = false;
+      // The pill said "Scanning…" or "Reading…" until now; say it is done,
+      // or it looks stuck to anyone watching the screen.
+      setStatus("Ready", "ok");
       console.info(
         `[latency] ${event.label} first_word=${event.stages.first_sentence ?? "-"}ms total=${event.total_ms}ms`
       );
@@ -278,10 +289,10 @@ const connection = new Connection(socketUrl(), {
   onConnectionChange: (connected) => {
     if (connected) {
       announcedDisconnect = false;
-      setStatus("Connected");
+      setStatus("Connected", "ok");
       return;
     }
-    setStatus("Reconnecting…");
+    setStatus("Reconnecting…", "error");
     // Said once per outage, not once per retry.
     if (!announcedDisconnect) {
       announcedDisconnect = true;
@@ -301,9 +312,9 @@ const voice = new Voice({
       // Stop talking before listening, or the mic hears the assistant.
       tts.stopAll();
       spatial.play("info", 0, 1);
-      setStatus("Listening… tap Ask again to stop");
+      setStatus("Listening… tap Ask again to stop", "listening");
     } else {
-      setStatus("Connected");
+      setStatus("Connected", "ok");
     }
   },
   onError: (message) => {
@@ -359,7 +370,7 @@ async function begin(): Promise<void> {
     placeReadArea();
     tapLayer.hidden = false;
     controls.hidden = false;
-    setStatus("Connecting…");
+    setStatus("Connecting…", "busy");
     tts.say(DISCLAIMER, SpeechPriority.Answer);
     // Which camera is in use, and whether it can focus, are states the user
     // cannot see: a webcam on a pair of glasses and the one above the laptop
@@ -425,8 +436,13 @@ async function scanScene(): Promise<void> {
     connection.sendIntent("scan");
     return;
   }
+  if (scanPending) {
+    // A second tap while a scan runs is impatience, not a new request.
+    setStatus("Still scanning…", "busy");
+    return;
+  }
   spatial.play("info", 0, 1);
-  setStatus("Scanning…");
+  setStatus("Scanning…", "busy");
   const captured: Blob[] = [];
   for (let i = 0; i < SCAN_FRAMES; i++) {
     const frame = await camera.captureScan();
@@ -531,8 +547,12 @@ async function readText(): Promise<void> {
   }
   // Audible acknowledgement: reading takes a moment and the tap is otherwise
   // silent, which reads as a missed tap.
+  if (readPending) {
+    setStatus("Still reading…", "busy");
+    return;
+  }
   spatial.play("info", 0, 1);
-  setStatus("Reading…");
+  setStatus("Reading…", "busy");
   // The frame loop is suspended for the whole operation.
   readPending = true;
   try {
@@ -617,12 +637,27 @@ const actions = {
 };
 type Action = keyof typeof actions;
 
+/** Every press answers on screen at once, whichever way it arrived: a tap
+ * here, a key, or the watch. A pressed button lights for a moment even when
+ * no finger touched it, so a sighted helper sees the watch working. */
+function flash(name: Action): void {
+  const button = document.getElementById(name);
+  if (!button) return;
+  button.classList.add("pressed");
+  window.setTimeout(() => button.classList.remove("pressed"), 220);
+}
+
+function run(name: Action): void {
+  flash(name);
+  actions[name]();
+}
+
 startButton.addEventListener("click", begin);
-tapLayer.addEventListener("click", actions.scan);
+tapLayer.addEventListener("click", () => run("scan"));
 for (const name of Object.keys(actions) as Action[]) {
   el(name).addEventListener("click", (e) => {
     e.stopPropagation();
-    actions[name]();
+    run(name);
   });
 }
 
@@ -650,7 +685,7 @@ window.addEventListener("keydown", (event) => {
   const action = KEYS[key];
   if (!action) return;
   event.preventDefault();
-  actions[action]();
+  run(action);
 });
 
 // The watch's Arduino can instead talk over its USB serial port, one command
@@ -672,7 +707,7 @@ if (watchButton && serial) {
     try {
       const port = await serial.requestPort();
       await port.open({ baudRate: 9600 });
-      setStatus("Watch connected");
+      setStatus("Watch connected", "ok");
       tts.say("Watch connected.", SpeechPriority.Answer);
       void listenToWatch(port);
     } catch (err) {
@@ -695,7 +730,7 @@ async function listenToWatch(port: SerialPortLike): Promise<void> {
         const line = buffered.slice(0, newline).trim().toLowerCase();
         buffered = buffered.slice(newline + 1);
         if (line in actions) {
-          if (started) actions[line as Action]();
+          if (started) run(line as Action);
           else void begin();
         }
         newline = buffered.indexOf("\n");
@@ -707,7 +742,7 @@ async function listenToWatch(port: SerialPortLike): Promise<void> {
 }
 
 if (!tts.isSupported) {
-  setStatus("This browser has no speech synthesis. Try Safari or Chrome.");
+  setStatus("This browser has no speech synthesis. Try Safari or Chrome.", "error");
 }
 if (!voice.isSupported) {
   askButton.hidden = true;
