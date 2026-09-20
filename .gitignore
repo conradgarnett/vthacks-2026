@@ -19,10 +19,10 @@ dist/
 eval/data/
 
 # The downloaded COCO slice for eval/run_detect_eval.py (eval/fetch_everyday.py), 95 MB
-visionos/eval/data/coco_everyday/
+med-i-glasses/eval/data/coco_everyday/
 
 # The place memory each machine builds for itself (backend/scene/places.py)
-visionos/data/
+med-i-glasses/data/
 # Rendered speech: derived from the phrase list, re-creatable with
 # eval/warm_voice.py, and large. Never committed.
-visionos/data/voice_cache/
+med-i-glasses/data/voice_cache/

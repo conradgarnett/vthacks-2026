@@ -1,0 +1,11 @@
+{
+  "name": "Med-i-Glasses — Digital Sense of Sight",
+  "short_name": "Med-i-Glasses",
+  "description": "Spatial audio description of your surroundings for blind and low-vision users.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "categories": ["accessibility", "utilities"]
+}

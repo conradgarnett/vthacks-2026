@@ -1,6 +1,6 @@
-# VisionOS — notes for whoever works on this next
+# Med-i-Glasses — notes for whoever works on this next
 
-Assistive "digital senses" platform. `visionos/` is the sight module: a phone
+Assistive "digital senses" platform. `med-i-glasses/` is the sight module: a phone
 camera feeds a spatial scene model, and the user hears descriptions, answers
 and hazard alerts. Hackathon project, several people and agents working in
 parallel on separate branches.
@@ -91,7 +91,7 @@ second, lower pass; tiling still applies.
 ## Verifying a change
 
 ```bash
-cd visionos
+cd med-i-glasses
 .venv/bin/python -m pytest backend/tests -q          # 565 tests (3 Apple-only), ~2 min alone
 PYTHONPATH=. .venv/bin/python eval/run_ocr_eval.py 60
 ```
@@ -132,7 +132,7 @@ takes the defaults, `--local` / `--phone` skip the question.
 Things learned getting it up on Windows, each of which cost time:
 
 - **Vite must be served over plain HTTP for a browser on the same machine.**
-  `VISIONOS_HTTP=1` drops the self-signed certificate; some embedded browsers
+  `MEDIGLASSES_HTTP=1` drops the self-signed certificate; some embedded browsers
   refuse it outright with no way through. The phone still needs HTTPS.
 - **A connection is only real once the server has spoken.** Vite's proxy
   accepts the WebSocket before the backend does, so with the backend down
@@ -203,7 +203,7 @@ tested.
   small-print statement line 7 of 40, 21% of allergens, so the read path
   on small print is the open gap and the barcode step matters; the suspect
   is the tiling gate, which a large product name defeats, Conrad measuring).
-  `README.md` at the root and `visionos/README.md` rewritten from clone to
+  `README.md` at the root and `med-i-glasses/README.md` rewritten from clone to
   running (keys table, controls, the scanner's ladder, measuring, layout);
   `run.py --check` and `backend/doctor.py` report the NVIDIA provider, the
   profile and its allergens, mail or the outbox, the barcode decoder and
@@ -336,7 +336,7 @@ tested.
   from its views, older views turned to line up on the things they share
   (the median turn over two or more shared things within 25 degrees; a
   view that shares too little stays out rather than being placed by
-  guesswork). Nothing here is spoken. `__visionos.event(...)` in the
+  guesswork). Nothing here is spoken. `__mediglasses.event(...)` in the
   browser console drives the screen without a camera or a socket. Suite
   552 -> 553. Walls, at the user's request: a wall is drawn as a line
   across the directions its box edges were seen in (the pinhole formula
@@ -376,7 +376,7 @@ tested.
   two different photos that share two or more kinds of thing p95 0.786,
   max 0.870 (n=336). At the ramp, 0 of 336 look-alike pairs are wrongly
   recognized, 87% of small moves are, 13% of big moves on their own. The
-  memory lives in `visionos/data/places.json` (gitignored; `PLACES_FILE`,
+  memory lives in `med-i-glasses/data/places.json` (gitignored; `PLACES_FILE`,
   `PLACES_ENABLED`, `PLACE_MATCH_CONFIDENCE`, `PLACE_NEW_BELOW`). For the
   panel, plain HTTP beside the socket (`main.py`, shared, additive):
   `GET /places`, `POST /places/{id}` rename, `DELETE /places/{id}`,
