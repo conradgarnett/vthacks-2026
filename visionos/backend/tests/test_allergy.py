@@ -78,6 +78,23 @@ class TestWords:
         mentions = find_allergen_mentions([line("PEANUTBUTTER")], ["peanut"])
         assert mentions and mentions[0].allergen == "peanut" and mentions[0].text == "PEANUTBUTTER"
 
+    def test_the_lines_the_scanner_depends_on_pass_the_gate_on_both_engines(self):
+        """Conrad's gate (dca34f0) judges the parts of a token with punctuation
+        glued inside it. These are the lines an alert can hang on, on the
+        Vision path (uninformative confidence) and the RapidOCR path; and the
+        junk that must still fail on the Vision path."""
+        from backend.ai.text_quality import assess
+
+        for text in (
+            "CONTAINS:PEANUTS", "ALLERGENS:MILK,SOY", "MAY CONTAIN:PEANUTS",
+            "INGREDIENTS:WHEAT FLOUR,WHEY", "12:30", "CONTAINS: PEANUTS",
+            "DAIRY-FREE", "MILK/SOY", "NUT-FREE,VEGAN",
+        ):
+            assert assess(text, 0.5, False).keep, text
+            assert assess(text, 0.95, True).keep, text
+        for junk in ("JQ,JJ", "Il:Il", "fik,th", "a:b"):
+            assert not assess(junk, 0.5, False).keep, junk
+
     def test_the_reader_restores_the_space_after_a_glued_colon(self):
         from backend.ai.ocr import _split_colon_glue
 
