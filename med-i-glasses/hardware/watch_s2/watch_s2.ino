@@ -53,8 +53,11 @@ const uint8_t PINS[BUTTON_COUNT] = {9, 1, 16};
 const char* COMMANDS[BUTTON_COUNT] = {"SCAN", "READ", "ASK"};
 
 // Grove modules bounce less than a bare switch, but a thumb on a wearable
-// still double-taps; 35 ms is below a deliberate second press.
-const unsigned long DEBOUNCE_MS = 35;
+// still double-taps; 50 ms is below a deliberate second press.
+const unsigned long DEBOUNCE_MS = 50;
+// A press shorter than this is noise, not a thumb: a glitch on a line
+// picking up interference lasts tens of milliseconds, a tap lasts longer.
+const unsigned long MIN_PRESS_MS = 60;
 // Measured on the rig on 2026-09-20: one tap chattered into four SCAN
 // lines within 250 ms (the release bounces far longer than 35 ms, likely a
 // connector). After a command is sent, the button is ignored for this
@@ -88,9 +91,12 @@ void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
 
   for (uint8_t i = 0; i < BUTTON_COUNT; i++) {
-    // Plain INPUT: the Grove module supplies its own pull-down. An internal
-    // pull-up here would hold every pin high and report a permanent press.
-    pinMode(PINS[i], INPUT);
+    // The Grove module supplies its own pull-down; the chip's internal one
+    // sits in parallel so a pin whose cable has worked loose reads LOW
+    // instead of floating and firing on noise (SCAN fired on its own on
+    // 2026-09-20). An internal pull-UP would hold every pin high and report
+    // a permanent press.
+    pinMode(PINS[i], INPUT_PULLDOWN);
     wasDown[i] = false;
     pressedAt[i] = 0;
     lastChange[i] = 0;
@@ -165,9 +171,10 @@ void loop() {
       if (down) {
         pressedAt[i] = now;
         holdSent[i] = false;
-      } else if (!holdSent[i]) {
+      } else if (!holdSent[i] && now - pressedAt[i] >= MIN_PRESS_MS) {
         // Released before the hold threshold, so it was a tap. Sent on
-        // release rather than on press so a hold never also sends the tap.
+        // release rather than on press so a hold never also sends the tap;
+        // a "press" shorter than MIN_PRESS_MS was noise and sends nothing.
         Serial.println(COMMANDS[i]);
         blink();
         lockoutUntil[i] = now + LOCKOUT_MS;
