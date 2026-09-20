@@ -67,8 +67,14 @@ the board on the bench actually does:
   ASK(16)`. Opening the port does not reset the board, so the banner is
   not a handshake. The app shows "Watch ready" when it sees any line that
   starts with Ready, whatever pins it names.
-- `ignored (N pins high at once)` is a diagnostic from the firmware's
-  guard, not a command; the app logs it to the console and moves on.
+- A line starting `ignored:` (`ignored: READ(1) + ASK(16)`, naming the
+  pins that fired together) is a diagnostic from the firmware's guard, not
+  a command; the app logs it to the console and moves on. In normal use it
+  never appears. The rig's one fault so far, one press reading as two
+  pins, went away after a reflash without a code change, so it was
+  physical and can come back: if the app suddenly stops receiving presses
+  or `ignored:` lines appear, that is the board or a connector, not the
+  app; check the hardware before the client.
 - The port is exclusive: close the Arduino IDE's Serial Monitor (and the
   `serial-monitor` daemon it leaves behind) or the app reads nothing.
 - The port vanishes for a second or two on a reset or a reflash and comes
