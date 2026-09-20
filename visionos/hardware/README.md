@@ -57,11 +57,16 @@ the board on the bench actually does:
   name changes across resets; the app asks you to pick it once and reopens
   it by itself afterwards.
 - One line per press, on the press, nothing on release: `SCAN`, `READ`,
-  `ASK`. Pins: GPIO9 scan, GPIO1 read, GPIO37 ask. There is no Stop
+  `ASK`. Pins: GPIO9 scan, GPIO1 read, GPIO16 ask (ASK was on GPIO37
+  until 2026-09-20 and read as two pins on one press: GPIO33 to 37 share a
+  power rail with the SPI/PSRAM group on this ESP32-S2FN4R2, so avoid 33,
+  35 and 37 for buttons, as well as 19/20, the native USB pair, and 15,
+  the LED; and keep Tools > PSRAM disabled in the IDE). There is no Stop
   button; Stop is key `0` or the button on screen.
 - After a physical reset it prints one banner, `Ready - SCAN(9) READ(1)
-  ASK(37)`. Opening the port does not reset the board, so the banner is
-  not a handshake. The app shows "Watch ready" when it sees one.
+  ASK(16)`. Opening the port does not reset the board, so the banner is
+  not a handshake. The app shows "Watch ready" when it sees any line that
+  starts with Ready, whatever pins it names.
 - `ignored (N pins high at once)` is a diagnostic from the firmware's
   guard, not a command; the app logs it to the console and moves on.
 - The port is exclusive: close the Arduino IDE's Serial Monitor (and the
