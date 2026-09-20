@@ -86,6 +86,13 @@ _TILE_FRAMES = 1
 # Total characters below which a full-frame reading is treated as a scrap
 # worth escalating on. Most real signage clears this easily.
 _THIN_RESULT_CHARS = 6
+# A short reading an engine is sure of ("EXIT" at 0.97) is a reading, not a
+# scrap, when the engine's confidence means something: tiling it cost twenty
+# recognitions, thirteen seconds on a CPU, to find nothing more. Only an
+# engine with informative confidence uses this; Vision's flat 0.5 never
+# clears it, so its escalation is as it was.
+_SURE_SHORT_CHARS = 3
+_SURE_SHORT_CONFIDENCE = 0.85
 
 # A line this long counts as a real reading, which licenses discarding
 # scraps next to it. Below it, short lines are all we have. Set to 4 so
@@ -150,6 +157,23 @@ class TextReader:
     # for nearly everything, garbage included, so plausibility stands in
     # for it; RapidOCR scores real lines 0.85-0.99 and junk 0.3-0.6.
     confidence_informative = False
+    # Tile grids walked when the full frame came back thin. Twenty more
+    # recognitions are nothing at 15 ms each and everything at 650 ms: an
+    # engine that costs most of a second per call stops at 2x2.
+    tile_grids: tuple[int, ...] = _TILE_GRIDS
+    # Whether the engine can say if its detector saw any text-like region
+    # during a read. A costly engine that saw none skips the nine
+    # enhancement reads: transforming a blank wall only invents, and it
+    # was eight seconds of the thirty a blank Read took on a CPU.
+    reports_regions = False
+    _regions_seen: int | None = None
+
+    def _begin_read(self) -> None:
+        self._regions_seen = 0 if self.reports_regions else None
+
+    def _note_regions(self, count: int) -> None:
+        if self._regions_seen is not None:
+            self._regions_seen += count
 
     @property
     def available(self) -> bool:
@@ -188,11 +212,12 @@ class TextReader:
             return []
 
         try:
+            self._begin_read()
             prepared = _prepare(frame_jpeg)
             lines = self._read_full(prepared)
-            if _needs_tiles(lines):
+            if _needs_tiles(lines, self):
                 lines = self._escalate_tiles(prepared, lines)
-            if _needs_enhancement(lines):
+            if _needs_enhancement(lines, self):
                 lines = self._escalate_enhanced(prepared, lines)
             return lines
         except Exception:
@@ -278,9 +303,9 @@ class TextReader:
         "DLpartiirL Departures"). Measured, unconditional tiling made 3.5%-14%
         text worse while helping only below 2% -- hence the escalation gate.
         """
-        for grid in _TILE_GRIDS:
+        for grid in self.tile_grids:
             lines = _dedupe(lines + self._read_tiles(prepared, grid))
-            if not _needs_tiles(lines):
+            if not _needs_tiles(lines, self):
                 break
         return lines
 
@@ -401,6 +426,7 @@ class TextReader:
         if not usable or not self.available:
             return []
         try:
+            self._begin_read()
             return self._read_consensus(usable)
         except Exception:
             log.exception("OCR failed; treating the burst as having no text")
@@ -419,7 +445,7 @@ class TextReader:
             line for line in readings[0] if _keep(line)
         ]
 
-        if _needs_tiles(merged):
+        if _needs_tiles(merged, self):
             # Two frames, not one: tiling a single frame cost accuracy on the
             # smallest text (CER 0.70 -> 0.85) because it forfeited consensus
             # exactly where readings are least reliable. Two keeps the vote
@@ -438,7 +464,7 @@ class TextReader:
         # Cursive returns nothing rather than garbage, so tiles cannot help:
         # there is no text to cut up. Transforming the image is the only
         # remaining lever, and it runs last because it is the most expensive.
-        if _needs_enhancement(merged):
+        if _needs_enhancement(merged, self):
             sharpest = max(prepared, key=_sharpness)
             merged = self._escalate_enhanced(sharpest, merged)
 
@@ -577,6 +603,12 @@ class RapidOCR(TextReader):
     name = "rapidocr"
     costly_frames = True
     confidence_informative = True
+    # Measured on this CPU, one blank Read: 32 recognitions, 27.8 s, of
+    # which the 4x4 grid was 16 and the enhancement variants 9. With the
+    # grid capped and enhancement skipped on a frame with no text-like
+    # region, the same Read is a handful of recognitions.
+    tile_grids = (2,)
+    reports_regions = True
 
     def __init__(self) -> None:
         self._engine = None
@@ -615,6 +647,7 @@ class RapidOCR(TextReader):
 
         try:
             boxes_small, _ = engine(small, use_cls=False, use_rec=False)
+            self._note_regions(len(boxes_small or []))
             if not boxes_small:
                 return []
             boxes = [np.asarray(box, dtype=np.float32) / scale for box in boxes_small]
@@ -630,9 +663,11 @@ class RapidOCR(TextReader):
             ]
         except (AttributeError, TypeError, ValueError):
             log.debug("RapidOCR internals differ; using its single pass at reduced size")
+            results = _rapid_results(engine(small))
+            self._note_regions(len(results))
             return [
                 (np.asarray(box, dtype=np.float32) / scale, text, score)
-                for box, text, score in _rapid_results(engine(small))
+                for box, text, score in results
             ]
 
     def _recognize(self, frame_jpeg: bytes, minimum_height: float) -> list[TextLine]:
@@ -976,25 +1011,42 @@ def _reading_strength(lines: list[TextLine]) -> float:
     return sum(_plausibility(line) * len(line.text.strip()) for line in lines)
 
 
-def _needs_enhancement(lines: list[TextLine]) -> bool:
+def _needs_enhancement(lines: list[TextLine], reader: "TextReader | None" = None) -> bool:
     """Did the ordinary path fail badly enough to justify transforming the image?
 
     Enhancement costs nine extra recognitions, so it is reserved for reads
     that produced almost nothing -- which is exactly what cursive does.
+
+    A costly engine that can report its detector's regions, and saw none in
+    the whole read (full frame and tiles), skips it: there is nothing
+    text-like to rescue, and transforming a blank wall only invents.
     """
+    if reader is not None and reader.costly_frames and reader._regions_seen == 0:
+        return False
     return _reading_strength(lines) < _ENHANCE_STRENGTH_FLOOR
 
 
-def _needs_tiles(lines: list[TextLine]) -> bool:
+def _needs_tiles(lines: list[TextLine], reader: "TextReader | None" = None) -> bool:
     """Was the full-frame pass good enough to skip the tile escalation?
 
     Nothing found, or only a scrap, means the text was probably too small for
     Vision's frame-relative minimum height. A solid reading means tiling can
-    only add garbled duplicates.
+    only add garbled duplicates. A short reading an engine with informative
+    confidence is sure of ("EXIT" at 0.97) is a reading too, not a scrap.
     """
     if not lines:
         return True
-    return sum(len(line.text.strip()) for line in lines) < _THIN_RESULT_CHARS
+    chars = sum(len(line.text.strip()) for line in lines)
+    if chars >= _THIN_RESULT_CHARS:
+        return False
+    if (
+        reader is not None
+        and reader.confidence_informative
+        and chars >= _SURE_SHORT_CHARS
+        and all(line.confidence >= _SURE_SHORT_CONFIDENCE for line in lines)
+    ):
+        return False
+    return True
 
 
 def _plausibility(line: TextLine) -> float:

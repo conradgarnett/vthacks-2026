@@ -92,7 +92,7 @@ second, lower pass; tiling still applies.
 
 ```bash
 cd visionos
-.venv/bin/python -m pytest backend/tests -q          # 553 tests (3 Apple-only)
+.venv/bin/python -m pytest backend/tests -q          # 560 tests (3 Apple-only), ~2 min alone
 PYTHONPATH=. .venv/bin/python eval/run_ocr_eval.py 60
 ```
 
@@ -187,6 +187,31 @@ tested.
 
 ## Log
 
+- **2026-09-19, 23:40, visionOS-2, reads on a slow engine:** measured live
+  on this CPU, a Read of a blank wall took 27 to 33 s and a one-word sign
+  18.7 s: 32 and 22 engine calls, because the escalation (the 2x2 then 4x4
+  tile grids, then nine enhancement variants, each a full read) was built
+  for Vision at 15 ms a call, and RapidOCR costs 650 ms. Three rules, for
+  costly engines only (`ocr.py`, Conrad's, flagged; Vision's path is
+  unchanged): a short reading an engine with informative confidence is
+  sure of (3+ characters, every line at 0.85 or more) is a reading, not a
+  scrap to tile (`_SURE_SHORT_CHARS`, `_SURE_SHORT_CONFIDENCE`);
+  `tile_grids` is per engine and RapidOCR stops at 2x2; an engine with
+  `reports_regions` counts its detector's regions during a read, and a
+  costly engine that saw none skips enhancement. After: a blank wall 7
+  calls and 5.0 s in-process (6.8 s live with a benchmark running), one
+  word 2 calls and 1.6 s (2.5 s live). Tests in `test_costly_engine.py`.
+  Benchmarks on the capped path, RapidOCR, Windows, idle priority:
+  signage n=60 CER 0.031, exact 92%, silent 1/60, invented 0/8, row for
+  row the same; prescription labels drug name 57% / 72%, strength 60% /
+  78%, dose right 12% / 18%, wrong 0%, the same; packaging name 12/24,
+  symbols invented 0/12, the same; bundled fonts n=76 sans 89%, serif
+  100%, cursive 75%, handwriting 75%, novelty 80%, the same fourteen
+  misses as the uncapped code run side by side in a second checkout
+  (cursive CER 0.085 -> 0.069: the 4x4 grid's garbled twin of one
+  Sacramento sample is gone). The earlier sans 94% / handwriting 83% were
+  measured before the 0.70 floor landed; the floor, not the cap, moved
+  those two samples.
 - **2026-09-19, 23:15, visionOS-2, Jarvis and a bloat pass:** the assistant
   answers to Jarvis at the user's request: a question through Ask must
   start with the name (`WAKE_WORD` in `main.ts`; Jarves, Jervis and
@@ -203,7 +228,13 @@ tested.
   share `client/src/sheet.ts`; ruff's safe fixes applied (unused imports
   in `test_enhance.py` and `eval/corpus.py`, empty f-strings, quoted
   annotations). `.claude/scripts/poll_github.py` and PR posts go through
-  the signed-in `gh` now (5000 requests an hour instead of 60).
+  the signed-in `gh` now (5000 requests an hour instead of 60). Evals on
+  d144e35, RapidOCR, Windows, idle priority: signage n=60 CER 0.031,
+  exact 92%, silent 1/60, no-text invented 0/8 (unchanged since the 0.70
+  floor); detector on 100 COCO photos at the 0.30 floor recall 44%,
+  precision 68%, blank textures 0/24 invented, 640 px 152 ms median with
+  nothing else running (refrigerator 0 of 6 here is the `SEE_AS` remap,
+  not the detector). Suite 553 passed, 3 skipped.
 - **2026-09-19, later still, visionOS-2, the blueprint tab:** each scan is
   drawn from above for the sighted helper (`client/src/blueprint.ts`, a
   Blueprint pill beside Places, key B): the user at the bottom, the
