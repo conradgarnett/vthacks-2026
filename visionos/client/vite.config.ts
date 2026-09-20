@@ -37,6 +37,7 @@ export default defineConfig({
       // The wearer's profile and the mail check, for the allergies sheet.
       "/profile": { target: "http://127.0.0.1:8000" },
       "/alerts": { target: "http://127.0.0.1:8000" },
+      "/speech": { target: "http://127.0.0.1:8000" },
     },
   },
   build: {

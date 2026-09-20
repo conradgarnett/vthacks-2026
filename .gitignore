@@ -23,3 +23,6 @@ visionos/eval/data/coco_everyday/
 
 # The place memory each machine builds for itself (backend/scene/places.py)
 visionos/data/
+# Rendered speech: derived from the phrase list, re-creatable with
+# eval/warm_voice.py, and large. Never committed.
+visionos/data/voice_cache/
