@@ -17,6 +17,13 @@ from dataclasses import dataclass
 
 _VOWELS = set("aeiouAEIOU")
 
+# Punctuation that joins two tokens rather than spoiling one, with an
+# alphanumeric on both sides: "CONTAINS:PEANUTS" and "MILK,SOY" on a label,
+# "12:30" and "1,000" on a receipt. The lookarounds mean a mark at either
+# edge is left to _strip_edges, so "http://" and "Ingredients:" are
+# untouched.
+_GLUE = re.compile(r"(?<=[A-Za-z0-9])[:,;](?=[A-Za-z0-9])")
+
 # Characters an OCR engine produces from non-text structure. Vertical
 # strokes (barcodes, blinds, railings) collapse into the first family;
 # rings and badges into the second. A token drawn entirely from one
@@ -91,6 +98,17 @@ def _token_is_plausible(token: str, confidence_informative: bool = False) -> boo
     """Could this token be a word, a number, or a code?"""
     if not token:
         return False
+    # Punctuation that joins two tokens rather than spoiling one. Judge the
+    # parts: without this the whole line is discarded as implausible -- the
+    # engine had "CONTAINS:PEANUTS" at 0.996 and the gate threw it away, and
+    # a dropped CONTAINS line is a missed allergen. Clock times on receipts
+    # were going the same way. Only an interior mark between alphanumerics
+    # splits, so "http://" and a trailing "Note:" are untouched.
+    if _GLUE.search(token):
+        return all(
+            _token_is_plausible(part, confidence_informative)
+            for part in _GLUE.sub(" ", token).split()
+        )
     if _is_stroke_artifact(token):
         return False
     if _MEANINGFUL_SHORT.match(token):
