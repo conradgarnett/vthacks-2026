@@ -68,6 +68,10 @@ SCAN_FRAMES = 2
 SCAN_IMGSZ = 1280
 SCAN_MATCH_IOU = 0.2
 SCAN_MATCH_AZIMUTH_DEG = 15.0
+# When the boxes no longer overlap because the camera moved between the two
+# frames, the same thing in the same direction at the same size still counts.
+SCAN_MATCH_MOVED_DEG = 8.0
+SCAN_MATCH_SIZE_RATIO = 1.5
 
 # Background reading. The client peeks at what is in view every few seconds
 # and the reader keeps the last few results, so a Read can answer from what
@@ -172,9 +176,11 @@ def with_holder(spoken: str, holder: str | None) -> str:
 def match_scan_frames(per_frame: list[list], frame_size: tuple[int, int]) -> tuple[list[Seen], list[Seen]]:
     """Sightings seen in both scan frames, and those seen in only one.
 
-    Matched by label and box overlap; the frames are a fraction of a second
-    apart, so a real thing barely moves. Confidence is the better of the
-    two, position the average.
+    Matched by label and box overlap, or, when a hand-held camera moved
+    enough between the two frames that the boxes no longer overlap, by
+    direction and size: the same thing within a few degrees at about the
+    same height is the same thing. Confidence is the better of the two,
+    position the average.
     """
     width, height = frame_size
 
@@ -190,12 +196,21 @@ def match_scan_frames(per_frame: list[list], frame_size: tuple[int, int]) -> tup
     claimed: set[int] = set()
     both: list[Seen] = []
     once: list[Seen] = []
+    def same_thing_moved(a, b) -> bool:
+        heights = sorted((a.box.height, b.box.height))
+        return (
+            abs(a.azimuth_deg - b.azimuth_deg) <= SCAN_MATCH_MOVED_DEG
+            and heights[0] > 0 and heights[1] / heights[0] <= SCAN_MATCH_SIZE_RATIO
+        )
+
     for a in first:
         best, best_iou = None, 0.0
         for index, b in enumerate(second):
             if index in claimed or b.label != a.label:
                 continue
             iou = a.box.iou(b.box)
+            if iou < SCAN_MATCH_IOU and same_thing_moved(a, b):
+                iou = SCAN_MATCH_IOU
             if iou > best_iou:
                 best, best_iou = index, iou
         if best is not None and best_iou >= SCAN_MATCH_IOU:

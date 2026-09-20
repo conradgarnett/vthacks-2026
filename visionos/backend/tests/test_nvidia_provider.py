@@ -68,7 +68,7 @@ async def test_a_question_is_answered_online_with_the_picture_and_the_scene():
     user = payload["messages"][-1]["content"]
     assert isinstance(user, list) and user[0]["type"] == "text"
     assert "Question: Is there a chair?" in user[0]["text"] and "SCENE MODEL: chair" in user[0]["text"]
-    assert "at least 80% sure of are facts" in user[0]["text"]
+    assert "at least 80% is a fact" in user[0]["text"]
     assert "found none in view" not in user[0]["text"], "the chair is in the scene"
     assert user[1]["image_url"]["url"] == "data:image/jpeg;base64," + base64.b64encode(b"jpegbytes").decode()
     assert payload["messages"][0]["role"] == "system"

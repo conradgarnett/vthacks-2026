@@ -58,13 +58,13 @@ NO_DOSES = (
 # question. The list carries the detector's confidence per object; the
 # user's rule is that nothing under 80% is stated as a fact.
 GROUNDING = (
-    "Answer from the picture and the detector's list together. Things the "
-    "detector is at least 80% sure of are facts. Below 80%, say 'may be'. If "
-    "the picture shows something the detector did not list, say 'I think I "
-    "see'. If neither the list nor the picture shows what was asked about, say "
-    "you can't see it. Never invent an object. Never mention the detector, the "
-    "list, the scene model or percentages: the listener is blind and hears only "
-    "your words, so say 'may be' or 'I think' instead."
+    "Answer from the picture first. The list says what the detector tracked "
+    "and how sure it is: at least 80% is a fact you can state; below that, say "
+    "'may be'. If you can see something clearly in the picture, say so even if "
+    "the list lacks it. Only if you cannot see what was asked about, and the "
+    "list lacks it, say you can't see it. Never invent an object, and never "
+    "mention the detector, the list, the scene model or percentages: the "
+    "listener is blind and hears only your words."
 )
 
 

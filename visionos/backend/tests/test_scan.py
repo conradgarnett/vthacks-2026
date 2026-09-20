@@ -411,3 +411,16 @@ def test_a_wall_is_what_a_clear_way_leads_to_and_is_never_listed():
     assert spoken.count("wall") == 1, spoken
     with_door = describe_scan(SceneModel(), [seen("wall", 0.0, None), seen("door", 4.0, 3.0)])
     assert "leads to a door about 3 meters ahead" in with_door and "wall" not in with_door, with_door
+
+
+def test_a_thing_the_camera_moved_off_still_counts_in_both_frames():
+    """Hand-held: the second frame is shifted, the boxes no longer overlap,
+    but the same chair in the same direction at the same size is the same
+    chair."""
+    first = [detection("chair", 100, 100, 200, 300, 0.7, azimuth=-5.0)]
+    second = [detection("chair", 260, 110, 360, 310, 0.75, azimuth=-1.0)]
+    both, once = match_scan_frames([first, second], (640, 480))
+    assert [s.label for s in both] == ["chair"] and once == []
+    far = [detection("chair", 260, 110, 360, 500, 0.75, azimuth=20.0)]
+    both, once = match_scan_frames([first, far], (640, 480))
+    assert both == [] and len(once) == 2

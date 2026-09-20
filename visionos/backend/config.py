@@ -74,8 +74,10 @@ class Settings(BaseSettings):
     # 0.20 only 54% of the detector's claims were real, at 0.35 it is 69%,
     # for recall 57% -> 48%; the two halves of the photo set agree, and a
     # table of per-class floors fitted on one half did worse on the other.
-    # 0.40 is the next notch (73% / 46%) if invented things persist.
-    detector_confidence: float = 0.35
+    # 0.40 is the next notch (73% / 46%) if invented things persist. Set
+    # back to 0.30 (64% / 50%) the same evening when the user found the app
+    # missing things plainly in view: the middle of the measured curve.
+    detector_confidence: float = 0.30
     depth_model: str = "depth-anything/Depth-Anything-V2-Small-hf"
     # Horizontal FOV of a typical phone rear camera. Drives pixel->azimuth.
     camera_hfov_deg: float = 66.0
