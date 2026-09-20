@@ -103,7 +103,7 @@ function midpoint(range: Range): number {
   if (!range.step || range.step <= 0) return middle;
   return range.min + Math.round((middle - range.min) / range.step) * range.step;
 }
-const EXPOSURE_CONTROLS: Array<[keyof ImageCapabilities, number]> = [
+const EXPOSURE_CONTROLS: Array<[(typeof LEVEL_CONTROLS)[number], number]> = [
   ["exposureCompensation", -READ_EXPOSURE_DROP],
   ["brightness", -READ_BRIGHTNESS_DROP],
   ["contrast", READ_CONTRAST_RAISE],
