@@ -57,6 +57,13 @@ class TestWords:
             assert mentions and mentions[0].hedged, text
         assert not find_allergen_mentions([line("CONTAINS PEANUTS")], ["peanut"])[0].hedged
 
+    def test_a_custom_allergen_with_a_digit_matches(self):
+        """A dye is a real allergy and its name carries a number."""
+        mentions = find_allergen_mentions([line("CONTAINS FD&C YELLOW 6, BLUE 1")], ["Yellow 6"])
+        assert mentions and mentions[0].allergen == "yellow 6" and mentions[0].statement
+        assert find_allergen_mentions([line("COLOUR: E110")], ["e110"])[0].allergen == "e110"
+        assert find_allergen_mentions([line("YELLOW 5")], ["yellow 6"]) == []
+
     def test_a_custom_allergen_matches_its_own_word(self):
         mentions = find_allergen_mentions([line("INGREDIENTS: KIWI, SUGAR")], ["Kiwi"])
         assert mentions and mentions[0].allergen == "kiwi"

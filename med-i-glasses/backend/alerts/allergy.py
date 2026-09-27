@@ -92,7 +92,9 @@ _FOOD_LABEL = re.compile(
 )
 _FOOD_LABEL_MIN_HITS = 2
 _CLAUSE_SPLIT = re.compile(r"[.;!?]+")
-_TOKEN = re.compile(r"[a-z]+")
+# Digits are part of a word here: a custom allergen can be a dye ("yellow
+# 6", "e110"), and a label prints them as such.
+_TOKEN = re.compile(r"[a-z0-9]+")
 
 # Classes the detector may know that are food: the trigger for "the wearer
 # may be eating". Proposed for the vocabulary and measured before they land

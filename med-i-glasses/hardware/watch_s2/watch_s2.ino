@@ -8,10 +8,13 @@
 //   INPUT_PULLUP and a press read 0. Wiring a Grove module to a sketch
 //   expecting the other polarity looks exactly like a dead button.
 //
-//   9600 BAUD, not the 115200 an ESP32 sketch usually opens with. The browser
-//   opens the port at 9600 (client/src/main.ts), and Web Serial will not
-//   renegotiate. A mismatch delivers bytes as garbage, which reads as "the
-//   watch does nothing".
+//   THE BAUD NUMBER IS NOMINAL. The S2 Mini's USB is native CDC: there is no
+//   UART between the chip and the browser, so 9600 and 115200 behave the
+//   same. The client (client/src/main.ts) opens the port at 115200 and, if
+//   the first bytes are not text, once more at 9600, so it also copes with
+//   a board that does have a real UART (the older AVR sketch). A watch that
+//   "does nothing" is wiring, polarity, or another program holding the port,
+//   never the rate.
 //
 // WIRING
 //   GPIO9   Grove button 1  -> SCAN   tap, or hold to STOP
@@ -33,8 +36,9 @@
 // listen" is the worst failure of the three.
 //
 // IF NOTHING HAPPENS, in this order:
-//   1. Serial Monitor at 9600: a banner should name each pin. No banner means
-//      the sketch is not running, or the monitor is at the wrong baud.
+//   1. Serial Monitor at 115200 (any rate works on native USB): a banner
+//      should name each pin after a reset. No banner means the sketch is not
+//      running, or the board was not reset since the monitor opened.
 //   2. The banner prints live pin levels for three seconds. Press each button
 //      and watch its number go 0 -> 1. Nothing moving is wiring; the wrong
 //      pin moving is a swapped cable.
@@ -58,8 +62,9 @@ const unsigned long HOLD_MS = 900;
 // long. Index into PINS/COMMANDS.
 const uint8_t ASK_INDEX = 2;
 const unsigned long BLINK_MS = 60;
-// The client opens the port at this rate and cannot renegotiate.
-const unsigned long BAUD = 9600;
+// Nominal on native USB (see the header); the client opens at this rate
+// first and falls back to 9600 if the bytes are not text.
+const unsigned long BAUD = 115200;
 
 bool wasDown[BUTTON_COUNT];
 unsigned long pressedAt[BUTTON_COUNT];
@@ -93,7 +98,9 @@ void setup() {
   while (!Serial && millis() < waitUntil) {}
 
   Serial.println();
-  Serial.println(F("Med-i-Glasses watch (S2 Mini) ready. 9600 baud, active HIGH."));
+  // Starts with "Ready" because that is the word the client shows as the
+  // watch's banner (client/src/main.ts, listenToWatch).
+  Serial.println(F("Ready - SCAN(9) READ(1) ASK(16), hold to STOP. Med-i-Glasses watch, S2 Mini, active HIGH."));
   for (uint8_t i = 0; i < BUTTON_COUNT; i++) {
     Serial.print(F("  GPIO"));
     Serial.print(PINS[i]);

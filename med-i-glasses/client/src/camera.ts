@@ -69,6 +69,10 @@ const READ_SHARPNESS_RAISE = 0.25;
 const BUILT_IN = /integrated|built-?in|facetime|internal|easycamera|true ?vision|wide ?vision|user.facing|front/i;
 // Cameras that plug in, by the names they tend to carry.
 const EXTERNAL = /usb|logitech|brio|uvc|razer|elgato|obsbot|insta360|external|kiyo|c9\d\d/i;
+// On a laptop the camera above the screen faces the wearer, never the
+// world. It is left alone and the one on the glasses is waited for, however
+// long that takes; a `?camera=` pin still picks any camera by name.
+const IGNORE_BUILT_IN = true;
 // USB vendor:product ids that browsers append to a webcam's name.
 const VENDOR_ID = /\s*\([0-9a-f]{4}:[0-9a-f]{4}\)/i;
 
@@ -119,6 +123,16 @@ export class Camera {
   focus = "";
   /** Exposure settings to put back after a read, while one is dimmed. */
   private exposureBefore: Record<string, number> | null = null;
+  /** Part of a camera's name pinned from the page URL, kept for late arrivals. */
+  private preferred: string | null = null;
+  /** Called with the new name after the camera changes on its own. */
+  onSwitch: ((label: string) => void) | null = null;
+  private watching = false;
+  private switching = false;
+  /** True while the machine's own camera is being left alone for the glasses. */
+  waitingForGlasses = false;
+  /** Called when the camera in use stops on its own (cable out). */
+  onLost: (() => void) | null = null;
 
   constructor(video: HTMLVideoElement) {
     this.video = video;
@@ -143,11 +157,66 @@ export class Camera {
     if (chosen && chosen.deviceId !== this.currentDeviceId()) {
       await this.switchTo(chosen);
     }
-    await this.show();
-    await this.resetImageControls(exposure);
+    this.preferred = preferred;
     // Best effort on the way out: a reload during a read must not leave the
     // camera dim for the next session.
     window.addEventListener("pagehide", () => void this.restoreExposure());
+    this.watchForLateCameras();
+    if (!preferred && IGNORE_BUILT_IN && BUILT_IN.test(this.track()?.label ?? "")) {
+      // Rather than describe the wrong side of the room, let the machine's
+      // camera go and wait for the one on the glasses.
+      this.release();
+      this.waitingForGlasses = true;
+      return;
+    }
+    await this.show();
+    await this.resetImageControls(exposure);
+  }
+
+  private release(): void {
+    this.stream?.getTracks().forEach((track) => track.stop());
+    this.stream = null;
+    this.video.srcObject = null;
+  }
+
+  /**
+   * Move to the camera on the glasses when it turns up after start: plugged
+   * back in, or listed late by the system. Never bounces between two
+   * built-in cameras, and a failure leaves the current camera running.
+   */
+  private watchForLateCameras(): void {
+    if (this.watching) return;
+    this.watching = true;
+    const recheck = () => void this.adoptLateCamera();
+    try {
+      navigator.mediaDevices.addEventListener("devicechange", recheck);
+    } catch {
+      // No device events in this browser; the timed look below still runs.
+    }
+    // Windows lists a USB camera late after an unclean restart: look again.
+    setTimeout(recheck, 5000);
+    setTimeout(recheck, 15000);
+  }
+
+  private async adoptLateCamera(): Promise<void> {
+    if (this.switching) return;
+    this.switching = true;
+    try {
+      await this.refreshList();
+      const chosen = this.choose(this.preferred);
+      if (!chosen || chosen.deviceId === this.currentDeviceId()) return;
+      const pinned = this.preferred ? chosen.label.toLowerCase().includes(this.preferred.toLowerCase()) : false;
+      if (!pinned && BUILT_IN.test(chosen.label)) return;
+      await this.switchTo(chosen);
+      await this.show();
+      await this.resetImageControls(null);
+      this.waitingForGlasses = false;
+      this.onSwitch?.(this.label);
+    } catch {
+      // The camera that was running keeps running.
+    } finally {
+      this.switching = false;
+    }
   }
 
   /**
@@ -351,6 +420,15 @@ export class Camera {
   private async show(): Promise<void> {
     await this.applyFocus();
     this.video.srcObject = this.stream;
+    // A cable pulled out ends the track; say so rather than go quiet, and
+    // wait for the camera to come back. stop() does not raise this.
+    const track = this.track();
+    track?.addEventListener("ended", () => {
+      if (this.track() !== track) return;
+      this.release();
+      this.waitingForGlasses = true;
+      this.onLost?.();
+    });
     this.video.setAttribute("playsinline", "true");
     this.video.muted = true;
     await this.video.play();
@@ -372,7 +450,7 @@ export class Camera {
   /** The camera to switch to, or null to keep the browser's choice. */
   private choose(preferred: string | null): MediaDeviceInfo | null {
     const cameras = this.cameras;
-    if (cameras.length < 2) return null;
+    if (cameras.length === 0) return null;
 
     if (preferred) {
       const wanted = preferred.toLowerCase();

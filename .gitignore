@@ -29,3 +29,6 @@ med-i-glasses/data/voice_cache/
 
 # Vite's dependency cache, never committed.
 med-i-glasses/client/.vite/
+
+# arduino-cli build cache inside a sketch folder.
+med-i-glasses/hardware/**/build/
