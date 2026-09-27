@@ -324,7 +324,7 @@ def main() -> int:
     parser.add_argument("--check", action="store_true", help="report and exit without starting")
     args = parser.parse_args()
 
-    print("\nVisionOS launcher\n")
+    print("\nMed-i-Glasses launcher\n")
     ensure_python()
 
     node_dir = find_node_dir()
