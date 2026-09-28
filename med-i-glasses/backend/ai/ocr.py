@@ -34,8 +34,9 @@ import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 
-from backend.ai.lexicon import correct_text
+from backend.ai.lexicon import correct_text, is_known_word
 from backend.ai.medication import guard as medication_guard
+from backend.ai.medication import looks_medical
 from backend.ai.text_quality import assess, clean_for_speech, normalize
 
 log = logging.getLogger(__name__)
@@ -820,7 +821,7 @@ def _known_word_share(lines: list[TextLine]) -> float:
     words = [w for w in words if len(w) >= 3]
     if not words:
         return 0.0
-    known = sum(1 for w in words if w in LEXICON or correct_text(w).lower() in LEXICON)
+    known = sum(1 for w in words if is_known_word(w))
     return known / len(words)
 
 
@@ -1345,13 +1346,24 @@ def format_for_speech(lines: list[TextLine]) -> str:
     Stray marks are voiced literally by a speech engine -- "EXIT comma
     comma" -- so they are stripped rather than passed through.
     """
+    kept = _drop_overlapping_fragments(_drop_fragments(lines))
+
+    # Whether this is a medication label is decided once, over the whole
+    # reading, and gates the medication vocabulary for every line in it. The
+    # dose line often carries no medical word of its own while the label
+    # around it does, and a shop sign must not be gated by one stray word.
+    # Ungated, a sign reading "TABLES" was spoken as "TABLETS" in a demo.
+    medical = looks_medical(" ".join(line.text for line in kept))
+
     parts: list[str] = []
-    for row in reading_rows(_drop_overlapping_fragments(_drop_fragments(lines))):
+    for row in reading_rows(kept):
         # Near-miss correction last, on text that has already survived every
         # filter. Cursive drops the lead-in capital, leaving a word one edit
         # from correct; the lexicon restores only that, and only for wording
         # it already knows.
-        text = " ".join(correct_text(clean_for_speech(line.text)) for line in row)
+        text = " ".join(
+            correct_text(clean_for_speech(line.text), medical) for line in row
+        )
         text = " ".join(text.split())
         if text:
             parts.append(text)

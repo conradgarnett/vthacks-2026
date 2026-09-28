@@ -119,8 +119,116 @@ def _ranked_matches(token: str) -> list[tuple[str, float]]:
     return ranked
 
 
-def _best_match(token: str) -> tuple[str, float] | None:
-    ranked = _ranked_matches(token)
+# Words that only make sense on a medication label. A sign reading "TABLES"
+# was spoken as "TABLETS" during a presentation: "tables" is one edit from
+# "tablets", and every lexicon word was a candidate in every context. Domain
+# vocabulary has to be gated on the domain, or the lexicon is just overfitting
+# with extra steps.
+MEDICAL_ONLY: frozenset[str] = frozenset(
+    {
+        "tablet", "tablets", "capsule", "capsules", "dose", "doses", "dosage",
+        "refill", "refills", "prescription", "pharmacy", "pharmacist",
+        "milligram", "milligrams", "millilitre", "milliliter",
+    }
+)
+
+# Reachable from any text: wayfinding, instructions, shops, packaging.
+GENERAL_LEXICON: frozenset[str] = LEXICON - MEDICAL_ONLY
+
+# Ordinary words that sit one edit from something in the lexicon. Without
+# these, a real word gets "corrected" into a lexicon word: tables -> tablets,
+# chairs -> chair(s) collapsing, cables -> tables. The system dictionary in
+# _dictionary_words() catches most of this where it exists, but it is macOS
+# only and thin on plurals, so the collisions we have actually seen are
+# listed explicitly and work everywhere.
+PROTECTED: frozenset[str] = frozenset(
+    {
+        "table", "tables", "cable", "cables", "stable", "stables",
+        "chair", "chairs", "door", "doors", "floor", "floors",
+        "label", "labels", "able", "fable", "gable", "sable",
+        "cabler", "tabled", "stapler", "staple", "staples",
+        "capsul",  # a real OCR fragment, but not evidence of a capsule
+        "doze", "dozen", "hose", "nose", "rose", "close", "chose",
+        "refile", "profile", "reface",
+    }
+)
+
+
+def _dictionary_words() -> frozenset[str]:
+    """The system word list, where there is one.
+
+    A real English word must never be rewritten into a lexicon word. This is
+    best-effort: the file is macOS/BSD only and light on plurals, so it
+    supplements PROTECTED rather than replacing it.
+    """
+    from pathlib import Path
+
+    for candidate in (Path("/usr/share/dict/words"), Path("/usr/dict/words")):
+        try:
+            if candidate.exists():
+                return frozenset(
+                    w.strip().lower() for w in candidate.read_text(
+                        encoding="utf-8", errors="ignore"
+                    ).splitlines() if w.strip()
+                )
+        except Exception:
+            break
+    return frozenset()
+
+
+_DICTIONARY = _dictionary_words()
+
+
+# The dictionary veto applies only from this length up. web2 is a 1934
+# Webster's with 234k entries, so it contains plenty of obscure words that in
+# practice are OCR fragments: "ire" and "inger" are both in it, but a reader
+# meeting them is looking at "Fire" and "ginger" with the cursive lead-in
+# capital lost. Every collision that actually cost us was a six-letter-plus
+# plural noun (tables, chairs, cables, stables); every repair that matters is
+# a short fragment. PROTECTED is curated and applies at any length.
+_DICTIONARY_VETO_CHARS = 6
+
+
+def is_known_word(token: str) -> bool:
+    """Is this word one the lexicon recognises, allowing a plural?
+
+    Membership, not correction. This used to be answered by running the
+    corrector and checking whether its output landed in the lexicon, which
+    tied a confidence measure to whatever the corrector happened to be
+    willing to rewrite -- so tightening the corrector silently lowered
+    confidence on lines that were perfectly readable ("CONTAINS PEANUTS").
+    """
+    lowered = "".join(ch for ch in token if ch.isalpha()).lower()
+    if not lowered:
+        return False
+    if lowered in LEXICON:
+        return True
+    for suffix in ("s", "es"):
+        if lowered.endswith(suffix) and lowered[: -len(suffix)] in LEXICON:
+            return True
+    return False
+
+
+def _is_real_word(token: str) -> bool:
+    """Is this already an English word, and so not a misreading to repair?"""
+    lowered = token.lower()
+    if lowered in PROTECTED:
+        return True
+    if len(lowered) < _DICTIONARY_VETO_CHARS:
+        return False
+    if lowered in _DICTIONARY:
+        return True
+    # web2 carries singulars far more reliably than plurals.
+    if lowered.endswith("s") and lowered[:-1] in _DICTIONARY:
+        return True
+    if lowered.endswith("es") and lowered[:-2] in _DICTIONARY:
+        return True
+    return False
+
+
+def _best_match(token: str, medical_context: bool = False) -> tuple[str, float] | None:
+    allowed = LEXICON if medical_context else GENERAL_LEXICON
+    ranked = [m for m in _ranked_matches(token) if m[0] in allowed]
     return ranked[0] if ranked else None
 
 
@@ -132,8 +240,12 @@ def _match_case(original: str, replacement: str) -> str:
     return replacement
 
 
-def correct_token(token: str) -> str:
-    """Snap a near-miss to a known word, or return it unchanged."""
+def correct_token(token: str, medical_context: bool = False) -> str:
+    """Snap a near-miss to a known word, or return it unchanged.
+
+    `medical_context` opens the medication vocabulary. Without it a sign
+    reading "TABLES" becomes "TABLETS", which is what happened live.
+    """
     stripped = token.strip()
     # Mostly-alphabetic covers digit substitutions, which OCR makes
     # constantly: "Recepti0n", "Stair5". A token that is mostly digits is
@@ -141,9 +253,13 @@ def correct_token(token: str) -> str:
     if not _is_wordlike(stripped):
         return token
     if stripped.lower() in LEXICON:
-        return token  # already a real word; never second-guess it
+        return token  # already a known word; never second-guess it
+    if _is_real_word(stripped):
+        # An ordinary English word is not a misreading. "tables" is a word,
+        # so it is never evidence of "tablets".
+        return token
 
-    match = _best_match(stripped)
+    match = _best_match(stripped, medical_context)
     if match and match[1] >= _SNAP_THRESHOLD:
         return _match_case(stripped, match[0])
     return token
@@ -193,12 +309,19 @@ def split_glued(token: str) -> list[str] | None:
     return [_match_case(stripped, part) for part in parts]
 
 
-def _context_snap(token: str) -> str:
-    """The wider snap, allowed only when the line around it is known words."""
+def _context_snap(token: str, medical_context: bool = False) -> str:
+    """The wider snap, allowed only when the line around it is known words.
+
+    The looser threshold makes the real-word veto matter more here, not less:
+    at 0.75 a great many ordinary words sit within range of a lexicon entry.
+    """
     stripped = token.strip()
     if len(stripped) < _CONTEXT_MIN_CHARS or not _is_wordlike(stripped) or _is_known(stripped):
         return token
-    ranked = _ranked_matches(stripped)
+    if _is_real_word(stripped):
+        return token
+    allowed = LEXICON if medical_context else GENERAL_LEXICON
+    ranked = [m for m in _ranked_matches(stripped) if m[0] in allowed]
     if not ranked or ranked[0][1] < _CONTEXT_SNAP_THRESHOLD:
         return token
     if len(ranked) > 1 and ranked[0][1] - ranked[1][1] < _CONTEXT_MARGIN:
@@ -206,7 +329,7 @@ def _context_snap(token: str) -> str:
     return _match_case(stripped, ranked[0][0])
 
 
-def correct_text(text: str) -> str:
+def correct_text(text: str, medical_context: bool = False) -> str:
     """Near-miss correction for a line, using the line as its own context.
 
     First glued words come apart and each token gets the strict snap. Then,
@@ -214,6 +337,11 @@ def correct_text(text: str) -> str:
     get one more, slightly wider, try: the rest of the line is the evidence
     that this is prose, and "TAKE 1 TABLET BY MOUIH DAILV" finishes as the
     directions it is. A line with no known word in it gets no such benefit.
+
+    `medical_context` should describe the whole reading, not this line: the
+    dose line on a bottle often carries no medical word of its own, while the
+    label around it does. Passing it per line would leave that line ungated
+    and a shop sign gated by one stray word.
     """
     out: list[str] = []
     for token in text.split(" "):
@@ -221,8 +349,11 @@ def correct_text(text: str) -> str:
         if parts:
             out.extend(parts)
         else:
-            out.append(_tidy_case(correct_token(token)))
+            out.append(_tidy_case(correct_token(token, medical_context)))
 
     if any(_is_known(token) for token in out):
-        out = [token if _is_known(token) else _context_snap(token) for token in out]
+        out = [
+            token if _is_known(token) else _context_snap(token, medical_context)
+            for token in out
+        ]
     return " ".join(out)

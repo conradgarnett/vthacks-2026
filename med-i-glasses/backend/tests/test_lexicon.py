@@ -121,3 +121,51 @@ class TestGluedWords:
 
     def test_split_words_are_then_spoken_apart(self):
         assert correct_text("DISCARDAFTER 09/28") == "DISCARD AFTER 09/28"
+
+
+class TestDomainGating:
+    """Regression: a sign reading "TABLES" was spoken as "TABLETS" in a demo.
+
+    The lexicon was medication vocabulary applied to every context. "tables"
+    is one edit from "tablets", so a shop sign inherited a pill bottle's
+    words. Domain vocabulary has to be gated on the domain.
+    """
+
+    @pytest.mark.parametrize(
+        "word", ["TABLES", "Tables", "tables", "table", "stables", "cables", "labels"]
+    )
+    def test_ordinary_words_survive_outside_a_medical_context(self, word):
+        assert correct_text(word) == word
+
+    def test_the_reported_sign_reads_correctly(self):
+        assert correct_text("CONFERENCE TABLES") == "CONFERENCE TABLES"
+
+    def test_medication_words_are_unreachable_from_a_sign(self):
+        from backend.ai.lexicon import GENERAL_LEXICON, MEDICAL_ONLY
+
+        assert "tablets" in MEDICAL_ONLY
+        assert not (MEDICAL_ONLY & GENERAL_LEXICON), "medical words leaked into general"
+
+    def test_medication_words_still_repair_on_a_label(self):
+        """Gating must not cost the case the lexicon exists for."""
+        assert correct_text("CAPSUIE", medical_context=True) == "CAPSULE"
+        assert correct_text("REFILS", medical_context=True) == "REFILLS"
+
+    def test_a_real_word_is_never_rewritten_even_on_a_label(self):
+        """"TABLE" on a pill bottle is still the word table. Protecting a real
+        word costs a rare repair; rewriting one invents content."""
+        assert correct_text("TABLES", medical_context=True) == "TABLES"
+
+
+class TestRealWordVeto:
+    def test_a_dictionary_word_is_not_treated_as_a_misreading(self):
+        from backend.ai.lexicon import _is_real_word
+
+        for word in ("table", "tables", "close", "rose", "profile"):
+            assert _is_real_word(word), word
+
+    def test_a_garbled_token_is_not_protected(self):
+        from backend.ai.lexicon import _is_real_word
+
+        for junk in ("CAPSUIE", "REFILS", "eception", "Recepti0n"):
+            assert not _is_real_word(junk), junk
