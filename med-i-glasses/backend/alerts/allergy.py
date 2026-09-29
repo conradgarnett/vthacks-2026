@@ -72,17 +72,29 @@ _ABSENT_BEFORE = frozenset({"no", "not", "without", "non", "free"})
 _STATEMENT_TOKENS = frozenset({"contains", "contain", "containing", "ingredients", "allergens", "allergen"})
 _ABSENT_BEFORE_STATEMENT = frozenset({"not", "no", "never", "doesnt", "dont", "without"})
 
+_FACILITY = (
+    r"(?:made|produced|prepared|packed|packaged|created|baked|processed|manufactured) (?:in|on)"
+    r"(?: (?:a|an|the|our))?(?: \w+)? (?:facility|facilities|factory|bakery|kitchen|plant|site|"
+    r"premises|equipment|line)"
+)
 _STATEMENT = re.compile(
     r"\b(contains|may contain|allergens?|allergy (?:advice|information|warning)|ingredients|"
-    r"traces? of|made (?:in|on) (?:a |the )?(?:facility|factory|equipment|line))\b",
+    rf"traces? of|trace amounts?|{_FACILITY}|shared (?:equipment|facilit(?:y|ies)|lines?))\b",
     re.IGNORECASE,
 )
 # A warning about what may be there, as opposed to what is: "may contain
 # nuts", "traces of milk", "made in a facility that handles peanuts". Worth
 # saying to the wearer; never grounds for an email.
+#
+# Real packs word it more ways than the corpus did. Found on Open Food Facts
+# photographs (dataset/real, 2026-09-29), each reported as a presence:
+# "Also contains trace amounts of egg, soy", "Produced in a factory that
+# handles milk, gluten, egg", "Created in a bakery that uses peanuts",
+# "due to processing on shared equipment".
 _HEDGE = re.compile(
-    r"\b(may contain|may also contain|may be present|traces? of|made (?:in|on) (?:a |the )?"
-    r"(?:facility|factory|equipment|line)|processed (?:in|on)|manufactured (?:in|on))\b",
+    rf"\b(may contain|may also contain|may be present|traces? of|trace amounts?|{_FACILITY}|"
+    r"processed (?:in|on)|manufactured (?:in|on)|shared (?:equipment|facilit(?:y|ies)|lines?)|"
+    r"(?:that|which) (?:also )?(?:handles?|processes|uses))\b",
     re.IGNORECASE,
 )
 _FOOD_LABEL = re.compile(
@@ -239,11 +251,15 @@ def find_allergen_mentions(lines: Iterable, allergens: Iterable[str]) -> list[Me
         agreement = int(getattr(line, "agreement", 1) or 1)
         statement = bool(_STATEMENT.search(text))
         found: set[str] = set()
+        previous_hedged = False
         for clause in _CLAUSE_SPLIT.split(text):
             tokens = _tokens(clause)
             if not tokens:
                 continue
-            hedged = bool(_HEDGE.search(clause))
+            hedged = bool(_HEDGE.search(clause)) or (
+                previous_hedged and _continues_a_list(tokens, clause)
+            )
+            previous_hedged = hedged
             for group in wanted:
                 if group in found:
                     continue
@@ -252,6 +268,28 @@ def find_allergen_mentions(lines: Iterable, allergens: Iterable[str]) -> list[Me
                     found.add(group)
                     mentions.append(Mention(group, word, text, confidence, agreement, statement, hedged))
     return mentions
+
+
+_ALLERGEN_TOKENS = frozenset(
+    token for words in ALLERGEN_WORDS.values() for word in words for token in word.split()
+) | frozenset({"nuts", "nut", "tree"})
+_LIST_JOINERS = frozenset({"and", "or", "other", "also"})
+
+
+def _continues_a_list(tokens: list[str], clause: str) -> bool:
+    """Is this clause only more of the list before it?
+
+    The recognizer reads a comma as a full stop often enough that "trace
+    amounts of egg, soy" arrives as "trace amounts of egg. soy.", and the
+    soy, a clause of its own, lost the hedge and read as a presence. A
+    clause made only of allergen words and joiners, with no statement word
+    of its own, carries on the list before it. Anything more ("Contains
+    milk", "Wheat flour, sugar") stands on its own: a missed presence is the
+    worse mistake, so the hedge is never stretched over one.
+    """
+    if _STATEMENT.search(clause):
+        return False
+    return all(token in _ALLERGEN_TOKENS or token in _LIST_JOINERS for token in tokens)
 
 
 def has_statement(lines: Iterable) -> bool:

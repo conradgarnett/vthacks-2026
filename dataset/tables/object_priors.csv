@@ -1,0 +1,141 @@
+class,height_m,is_obstacle,is_landmark,scale
+person,1.7,1,0,large
+dog,0.55,1,0,large
+cat,0.3,1,0,medium
+door,2.0,0,1,large
+doorway,2.0,0,1,large
+door handle,0.05,0,1,small
+stairs,,1,1,large
+staircase,,1,1,large
+handrail,0.9,0,1,large
+elevator,2.1,0,1,large
+exit sign,0.2,0,1,medium
+sign,0.3,0,1,medium
+window,1.2,0,0,large
+hallway,,0,1,large
+wall,,1,0,large
+chair,0.9,1,0,large
+couch,0.8,1,0,large
+table,0.75,1,0,large
+dining table,0.75,1,0,large
+desk,0.75,1,0,large
+counter,0.95,1,0,large
+bed,0.6,1,0,large
+bench,0.85,1,0,large
+trash can,0.7,1,0,large
+recycling bin,1.0,1,0,large
+recycling symbol,,0,0,small
+dumpster,1.4,1,0,large
+box,0.4,1,0,medium
+backpack,0.45,1,0,medium
+suitcase,0.65,1,0,large
+bicycle,1.05,1,0,large
+potted plant,0.5,1,0,large
+pole,2.0,1,0,large
+pillar,2.5,1,0,large
+low ceiling,,1,0,large
+shelf,0.3,1,0,medium
+cabinet,0.8,0,0,large
+car,1.5,1,0,large
+bus,3.0,1,0,large
+truck,3.2,1,0,large
+motorcycle,1.1,1,0,large
+cup,0.12,0,0,small
+bottle,0.25,0,0,small
+bowl,0.08,0,0,small
+laptop,0.25,0,0,medium
+keyboard,0.03,0,0,small
+cell phone,0.15,0,0,small
+remote,0.18,0,0,small
+book,0.24,0,0,small
+tv,0.6,0,0,large
+microwave,0.3,0,0,medium
+refrigerator,1.7,1,0,large
+sink,0.25,0,0,medium
+toilet,0.75,0,0,large
+armchair,0.9,1,0,large
+stool,0.7,1,0,large
+coffee table,0.45,1,0,medium
+nightstand,0.6,1,0,large
+dresser,1.0,1,0,large
+wardrobe,2.0,1,0,large
+bookshelf,1.8,1,0,large
+lamp,0.55,1,0,large
+radiator,0.6,1,0,large
+fireplace,1.0,1,0,large
+ladder,1.8,1,0,large
+mirror,0.8,0,0,large
+power strip,0.04,1,0,medium
+oven,0.9,1,0,large
+stove,0.9,1,0,large
+dishwasher,0.85,1,0,large
+washing machine,0.85,1,0,large
+coffee maker,0.35,0,0,medium
+blender,0.4,0,0,medium
+kettle,0.25,0,0,small
+toaster,0.2,0,0,small
+pot,0.15,0,0,small
+pan,0.08,0,0,small
+plate,0.02,0,0,small
+drinking glass,0.12,0,0,small
+fork,0.02,0,0,small
+knife,0.03,0,0,small
+spoon,0.02,0,0,small
+bathtub,0.55,1,0,large
+towel,0.4,0,0,medium
+toilet paper,0.1,0,0,small
+toothbrush,0.02,0,0,small
+hair dryer,0.2,0,0,small
+computer mouse,0.04,0,0,small
+printer,0.3,0,0,medium
+scissors,0.02,0,0,small
+clock,0.3,0,0,medium
+vase,0.25,0,0,small
+umbrella,0.3,0,0,medium
+shoe,0.1,0,0,small
+pill bottle,0.08,0,0,small
+escalator,,1,1,large
+ramp,,0,1,large
+curb,0.15,1,0,medium
+crosswalk,,0,1,large
+traffic light,1.0,0,1,large
+stop sign,0.75,0,1,large
+fire hydrant,0.75,1,0,large
+parking meter,1.4,1,0,large
+bollard,1.0,1,0,large
+traffic cone,0.7,1,0,large
+mailbox,1.1,1,0,large
+fence,1.2,1,0,large
+gate,1.5,0,1,large
+tree,,1,0,large
+shopping cart,1.0,1,0,large
+stroller,1.0,1,0,large
+wheelchair,0.95,1,0,large
+scooter,1.0,1,0,large
+vending machine,1.8,0,1,large
+drinking fountain,1.0,0,1,large
+fire extinguisher,0.55,0,1,large
+sandwich,0.06,0,0,small
+pizza,0.03,0,0,small
+hot dog,0.05,0,0,small
+hamburger,0.08,0,0,small
+donut,0.04,0,0,small
+cake,0.12,0,0,small
+cookie,0.01,0,0,small
+bread,0.1,0,0,small
+bagel,0.05,0,0,small
+pasta,0.05,0,0,small
+cereal,0.25,0,0,small
+cheese,0.05,0,0,small
+ice cream,0.1,0,0,small
+yogurt,0.1,0,0,small
+milk carton,0.25,0,0,small
+egg,0.05,0,0,small
+peanut butter,0.12,0,0,small
+peanuts,0.02,0,0,small
+nuts,0.02,0,0,small
+chocolate,0.02,0,0,small
+shrimp,0.03,0,0,small
+sushi,0.04,0,0,small
+broccoli,0.12,0,0,small
+carrot,0.03,0,0,small

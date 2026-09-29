@@ -1,0 +1,2 @@
+{"id": "packaging-000", "frames": ["images/packaging-000_f0.jpg"], "task": "packaging", "split": "test", "text": "Diet Cola", "font": "AlexBrush-Regular.ttf", "curved": true, "type_scale": 1.0}
+{"id": "packaging-001", "frames": ["images/packaging-001_f0.jpg"], "task": "packaging", "split": "test", "text": "Iced Tea", "font": "Allura-Regular.ttf", "curved": false, "type_scale": 1.3}

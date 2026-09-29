@@ -33,6 +33,7 @@ import logging
 import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+from pathlib import Path
 
 from backend.ai.lexicon import correct_text, is_known_word
 from backend.ai.medication import guard as medication_guard
@@ -130,6 +131,11 @@ class TextLine:
     height: float = 0.0
     # Frames this line was seen in. 1 unless it came through consensus.
     agreement: int = 1
+    # Frames that read the same numbers in it as this text. Frames are
+    # grouped by overall similarity, so "TAKE 1 TABLET" and "TAKE 7 TABLET"
+    # are one line seen twice but two different doses; a number is only
+    # corroborated by frames that read that number.
+    digit_agreement: int = 1
 
     @property
     def center_y(self) -> float:
@@ -611,14 +617,29 @@ class RapidOCR(TextReader):
     tile_grids = (2,)
     reports_regions = True
 
-    def __init__(self) -> None:
+    def __init__(self, rec_model: str | None = None) -> None:
         self._engine = None
+        if rec_model is None:
+            rec_model = _configured_rec_model()
         try:
             try:
                 from rapidocr import RapidOCR as Engine  # 2.x
             except ImportError:
                 from rapidocr_onnxruntime import RapidOCR as Engine  # 1.x
-            self._engine = Engine()
+            self.rec_model = "packaged"
+            if rec_model:
+                # A model exported without its character list in the ONNX
+                # metadata (PaddlePaddle's own exports) carries it beside
+                # the model as <model>.txt, one character per line.
+                keys = Path(rec_model).with_suffix(".txt")
+                extra = {"rec_keys_path": str(keys)} if keys.exists() else {}
+                try:
+                    self._engine = Engine(rec_model_path=rec_model, **extra)
+                    self.rec_model = rec_model
+                except TypeError:
+                    log.warning("This RapidOCR takes no rec_model_path; using its packaged model")
+            if self._engine is None:
+                self._engine = Engine()
         except Exception as exc:
             log.info("RapidOCR unavailable: %s", exc)
 
@@ -697,6 +718,25 @@ class RapidOCR(TextReader):
                 )
             )
         return lines
+
+
+def _configured_rec_model() -> str:
+    """The recognition model from settings, as a path that exists, or ""."""
+    try:
+        from backend.config import get_settings
+
+        configured = get_settings().rapidocr_rec_model.strip()
+    except Exception:
+        return ""
+    if not configured:
+        return ""
+    path = Path(configured)
+    if not path.is_absolute():
+        path = Path(__file__).resolve().parents[2] / path
+    if not path.exists():
+        log.warning("RAPIDOCR_REC_MODEL %s not found; using the packaged model", path)
+        return ""
+    return str(path)
 
 
 # Bold capitals lose their spaces on this recognizer, and a number glued to
@@ -1191,10 +1231,18 @@ def _merge(readings: list[list[TextLine]]) -> list[TextLine]:
 
     for group in _group_similar(readings):
         agreement = len(group)
-        # Plausibility first: Vision reports ~0.5 confidence for nearly
+        # The numbers most frames read win before anything else: a digit
+        # misread once rarely repeats, and plausibility cannot tell "2" from
+        # "3". Then plausibility: Vision reports ~0.5 confidence for nearly
         # everything, so confidence alone barely discriminates between
         # "Departures" and "DLpartiirL".
-        best = max(group, key=lambda line: (_plausibility(line), len(line.text)))
+        support: dict[tuple[str, ...], int] = {}
+        for line in group:
+            support[_digits(line.text)] = support.get(_digits(line.text), 0) + 1
+        best = max(
+            group,
+            key=lambda line: (support[_digits(line.text)], _plausibility(line), len(line.text)),
+        )
 
         if agreement < 2:
             verdict = assess(best.text, best.confidence)
@@ -1214,12 +1262,20 @@ def _merge(readings: list[list[TextLine]]) -> list[TextLine]:
                 left=sum(line.left for line in group) / agreement,
                 height=sum(line.height for line in group) / agreement,
                 agreement=agreement,
+                digit_agreement=support[_digits(best.text)],
             )
         )
 
     # Frames can garble the same word differently enough to land in separate
     # groups; position catches what text similarity missed.
     return _dedupe(merged)
+
+
+_DIGIT_RUN = re.compile(r"\d+")
+
+
+def _digits(text: str) -> tuple[str, ...]:
+    return tuple(_DIGIT_RUN.findall(text))
 
 
 def _longest_common_run(a: str, b: str) -> int:

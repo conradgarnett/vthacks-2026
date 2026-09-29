@@ -1,0 +1,5 @@
+{"id": "font-000", "frames": ["images/font-000_f0.jpg"], "task": "fonts", "split": "test", "text": "Diet Cola", "font": "Montserrat-Variable", "font_family": "everyday_sans"}
+{"id": "font-009", "frames": ["images/font-009_f0.jpg"], "task": "fonts", "split": "test", "text": "Diet Cola", "font": "PlayfairDisplay-Variable", "font_family": "everyday_serif"}
+{"id": "font-013", "frames": ["images/font-013_f0.jpg"], "task": "fonts", "split": "test", "text": "Diet Cola", "font": "DancingScript-Variable", "font_family": "cursive_script"}
+{"id": "font-027", "frames": ["images/font-027_f0.jpg"], "task": "fonts", "split": "test", "text": "Diet Cola", "font": "Caveat-Variable", "font_family": "handwriting"}
+{"id": "font-033", "frames": ["images/font-033_f0.jpg"], "task": "fonts", "split": "test", "text": "Diet Cola", "font": "Bangers-Regular", "font_family": "novelty_display"}

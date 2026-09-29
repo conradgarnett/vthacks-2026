@@ -1,0 +1,20 @@
+{"statement": "CONTAINS: MILK, SOY, WHEAT.", "allergens": ["dairy", "gluten", "soy"], "hedged": false, "case": "present"}
+{"statement": "ALLERGENS: EGG, FISH.", "allergens": ["egg", "fish"], "hedged": false, "case": "present"}
+{"statement": "CONTAINS PEANUTS.", "allergens": ["peanut"], "hedged": false, "case": "present"}
+{"statement": "CONTAINS: TREE NUTS (ALMOND, CASHEW), SOY.", "allergens": ["soy", "tree nut"], "hedged": false, "case": "present"}
+{"statement": "INGREDIENTS: WHEAT FLOUR, SUGAR, WHEY, SOY LECITHIN, SALT.", "allergens": ["dairy", "gluten", "soy"], "hedged": false, "case": "present"}
+{"statement": "INGREDIENTS: DURUM SEMOLINA, WATER, EGG ALBUMIN.", "allergens": ["egg", "gluten"], "hedged": false, "case": "present"}
+{"statement": "CONTAINS: SHELLFISH (SHRIMP, CRAB).", "allergens": ["shellfish"], "hedged": false, "case": "present"}
+{"statement": "CONTAINS: SESAME, MUSTARD.", "allergens": ["sesame"], "hedged": false, "case": "present"}
+{"statement": "MAY CONTAIN PEANUTS AND TREE NUTS.", "allergens": ["peanut", "tree nut"], "hedged": true, "case": "hedged"}
+{"statement": "MAY CONTAIN TRACES OF MILK.", "allergens": ["dairy"], "hedged": true, "case": "hedged"}
+{"statement": "MADE IN A FACILITY THAT PROCESSES PEANUTS AND SOY.", "allergens": ["peanut", "soy"], "hedged": true, "case": "hedged"}
+{"statement": "DAIRY FREE. GLUTEN FREE.", "allergens": [], "hedged": false, "case": "absent"}
+{"statement": "CONTAINS NO NUTS.", "allergens": [], "hedged": false, "case": "absent"}
+{"statement": "DOES NOT CONTAIN MILK OR EGG.", "allergens": [], "hedged": false, "case": "absent"}
+{"statement": "FREE FROM: PEANUTS, TREE NUTS, SOY.", "allergens": [], "hedged": false, "case": "absent"}
+{"statement": "ALMOND MILK. UNSWEETENED.", "allergens": ["tree nut"], "hedged": false, "case": "present"}
+{"statement": "OAT MILK BARISTA BLEND.", "allergens": [], "hedged": false, "case": "absent"}
+{"statement": "COCONUT YOGURT ALTERNATIVE.", "allergens": [], "hedged": false, "case": "absent"}
+{"statement": "INGREDIENTS: CARBONATED WATER, CITRIC ACID, NATURAL FLAVOR, CAFFEINE.", "allergens": [], "hedged": false, "case": "absent"}
+{"statement": "INGREDIENTS: TOMATOES, SALT, BASIL.", "allergens": [], "hedged": false, "case": "absent"}

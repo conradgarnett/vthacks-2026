@@ -21,6 +21,7 @@ import io
 import math
 import os
 import random
+from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -70,8 +71,21 @@ BRAND_MARKS = ["®", "™", "©"]
 DISPLAY_FONTS = [f for f in DISPLAY_FONTS if os.path.exists(f)] or bundled_fonts()
 
 
+# The small print (ingredients, allergen statements) is set in Arial Narrow.
+# Off a Mac it used to fall through to the first bundled face, which is a
+# brush script: every allergen statement was rendered in script capitals no
+# package prints, and no engine read one (0 of 40 on Windows and Linux,
+# 2026-09-20). Real small print is a condensed sans, so that is what stands in.
+_SMALL_PRINT = "/System/Library/Fonts/Supplemental/Arial Narrow.ttf"
+_SMALL_PRINT_STAND_INS = [
+    "C:/Windows/Fonts/ARIALN.TTF",
+    str(Path(__file__).resolve().parent / "fonts" / "Oswald-Variable.ttf"),
+]
+
+
 def _font(path: str, px: int):
-    for candidate in (path, *bundled_fonts()):
+    stand_ins = _SMALL_PRINT_STAND_INS if path == _SMALL_PRINT else []
+    for candidate in (path, *stand_ins, *bundled_fonts()):
         try:
             return ImageFont.truetype(candidate, px)
         except OSError:

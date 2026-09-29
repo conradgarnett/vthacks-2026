@@ -264,11 +264,26 @@ def precache() -> None:
         "YOLOWorld(s.open_vocab_weights).set_classes(CLASS_NAMES); YOLO(s.detector_weights)",
         "from backend.config import get_settings; from transformers import pipeline; "
         "pipeline('depth-estimation', model=get_settings().depth_model)",
+        "from backend.ai.ocr_models import fetch_rec_model; fetch_rec_model()",
         "from backend.config import get_settings; from backend.ai.ocr import build_reader; "
         "build_reader(get_settings().ocr_engine).warmup()",
     ]
     for code in steps:
         subprocess.run([str(venv_python()), "-c", code], cwd=ROOT, check=True)
+
+
+def ensure_ocr_model() -> None:
+    """The PP-OCRv5 recognizer (17 MB), on machines that cached their other
+    weights before it existed. A failure leaves the packaged model in use."""
+    ready = backend_probe(
+        "from backend.ai.ocr_models import rec_model_ready; print('yes' if rec_model_ready() else 'no')"
+    )
+    if ready == "yes":
+        return
+    say("Downloading the text recognition model (17 MB, one time).")
+    done = subprocess.run([str(venv_python()), "-m", "backend.ai.ocr_models"], cwd=ROOT, check=False)
+    if done.returncode != 0:
+        say("Could not download it; reading uses the packaged model, which drops spaces in English.")
 
 
 # --- run --------------------------------------------------------------------
@@ -366,6 +381,7 @@ def main() -> int:
             precache()
     else:
         say("Model weights cached")
+    ensure_ocr_model()
 
     # --- where it will be used ----------------------------------------
     if args.local and not args.phone:

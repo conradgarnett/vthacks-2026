@@ -27,6 +27,10 @@ the app, and how it is measured.
   scanner, the numbers.
 - [med-i-glasses/hardware/README.md](med-i-glasses/hardware/README.md): the three-button
   watch (a LOLIN S2 Mini) and its serial protocol.
+- [dataset/](dataset/README.md): the project's test corpora as a standalone,
+  reproducible dataset for other assistive-vision projects (signage,
+  prescription labels, packaging, allergen statements, fonts, no-text
+  surfaces), with a scorer.
 - [CLAUDE.md](CLAUDE.md): the engineering notes and the measured log, for
   whoever works on it next.
 
