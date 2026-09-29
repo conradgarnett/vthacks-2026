@@ -1,0 +1,30 @@
+EXIT
+Room 204B
+Keep door closed
+Platform 9
+No Entry
+Fire Exit
+Conference Room B
+Capacity 24
+Push
+Pull
+Reception
+Stairs
+Elevator
+Restroom
+Gate A12
+Baggage Claim
+Departures
+Arrivals
+Emergency Exit
+Staff Only
+Wet Floor
+Please Wait Here
+Ticket Office
+Information
+Lost Property
+Way Out
+Car Park Level 3
+Quiet Zone
+No Smoking
+Meeting Room 7

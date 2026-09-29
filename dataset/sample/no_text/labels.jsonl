@@ -1,0 +1,5 @@
+{"id": "notext-texture-000", "frames": ["images/notext-texture-000_f0.jpg"], "task": "no_text", "split": "test", "text": "", "kind": "carpet"}
+{"id": "notext-texture-001", "frames": ["images/notext-texture-001_f0.jpg"], "task": "no_text", "split": "test", "text": "", "kind": "brick"}
+{"id": "notext-symbol-000", "frames": ["images/notext-symbol-000_f0.jpg"], "task": "no_text", "split": "test", "text": "", "kind": "barcode"}
+{"id": "notext-symbol-001", "frames": ["images/notext-symbol-001_f0.jpg"], "task": "no_text", "split": "test", "text": "", "kind": "recycling"}
+{"id": "notext-symbol-002", "frames": ["images/notext-symbol-002_f0.jpg"], "task": "no_text", "split": "test", "text": "", "kind": "nutrition"}

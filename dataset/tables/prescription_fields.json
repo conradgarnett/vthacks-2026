@@ -1,0 +1,74 @@
+{
+  "drugs": [
+    {
+      "drug": "AMOXICILLIN",
+      "strength": "500 MG"
+    },
+    {
+      "drug": "LISINOPRIL",
+      "strength": "10 MG"
+    },
+    {
+      "drug": "METFORMIN HCL",
+      "strength": "850 MG"
+    },
+    {
+      "drug": "ATORVASTATIN",
+      "strength": "20 MG"
+    },
+    {
+      "drug": "LEVOTHYROXINE",
+      "strength": "75 MCG"
+    },
+    {
+      "drug": "OMEPRAZOLE",
+      "strength": "40 MG"
+    },
+    {
+      "drug": "SERTRALINE",
+      "strength": "50 MG"
+    },
+    {
+      "drug": "IBUPROFEN",
+      "strength": "600 MG"
+    },
+    {
+      "drug": "AMLODIPINE",
+      "strength": "5 MG"
+    },
+    {
+      "drug": "PREDNISONE",
+      "strength": "20 MG"
+    },
+    {
+      "drug": "GABAPENTIN",
+      "strength": "300 MG"
+    },
+    {
+      "drug": "AZITHROMYCIN",
+      "strength": "250 MG"
+    }
+  ],
+  "directions": [
+    "TAKE 1 TABLET BY MOUTH DAILY",
+    "TAKE 2 TABLETS BY MOUTH TWICE DAILY",
+    "TAKE 1 CAPSULE EVERY 8 HOURS",
+    "TAKE 1 TABLET EVERY 12 HOURS",
+    "TAKE 2 CAPSULES BY MOUTH AT BEDTIME",
+    "TAKE 1 TABLET THREE TIMES DAILY WITH FOOD",
+    "TAKE HALF TABLET BY MOUTH EVERY MORNING"
+  ],
+  "warnings": [
+    "MAY CAUSE DROWSINESS",
+    "TAKE WITH FOOD",
+    "DO NOT DRINK ALCOHOL",
+    "FINISH ALL MEDICATION",
+    "AVOID SUNLIGHT"
+  ],
+  "pharmacies": [
+    "CITY PHARMACY",
+    "GREENLEAF DRUGS",
+    "UNIVERSITY RX",
+    "OAKMONT CHEMIST"
+  ]
+}

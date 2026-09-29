@@ -1,0 +1,3 @@
+{"id": "signage-000", "frames": ["images/signage-000_f0.jpg"], "task": "signage", "split": "test", "text": "Gate A12", "font": "Righteous-Regular.ttf", "text_height_frac": 0.14}
+{"id": "signage-001", "frames": ["images/signage-001_f0.jpg"], "task": "signage", "split": "test", "text": "Reception", "font": "Oswald-Variable.ttf", "text_height_frac": 0.11}
+{"id": "signage-002", "frames": ["images/signage-002_f0.jpg"], "task": "signage", "split": "test", "text": "EXIT", "font": "PlayfairDisplay-Variable.ttf", "text_height_frac": 0.018}

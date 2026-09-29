@@ -32,3 +32,6 @@ med-i-glasses/client/.vite/
 
 # arduino-cli build cache inside a sketch folder.
 med-i-glasses/hardware/**/build/
+
+# The full render of the dataset (dataset/generate.py), 98 MB; reproducible.
+dataset/out/

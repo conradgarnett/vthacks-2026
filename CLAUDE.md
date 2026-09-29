@@ -187,6 +187,19 @@ tested.
 
 ## Log
 
+- **2026-09-29, the dataset folder:** `dataset/` at the repo root makes the
+  eval corpora a standalone dataset for other assistive-vision projects.
+  `generate.py` calls the same generators and seeds as `eval/`, so there is
+  still one definition of each corpus. It pins every render to the bundled
+  fonts, so the output is identical on any OS. Only the `fonts` task matches
+  a benchmark in this log exactly; the other tasks' numbers do not compare
+  with the platform-font numbers here. Full render: 300 samples, 900 frames,
+  98 MB, 5 min, gitignored. `sample/` (2.7 MB) and `tables/` (object
+  height priors, allergen lexicon and statements) are committed. `score.py`
+  uses only the standard library and reports CER, invented, dose wrong vs
+  not read, and allergens missed vs invented. The data licence is CC BY 4.0
+  (owner to confirm). If a corpus changes in `eval/`, bump `VERSION` in
+  `generate.py`.
 - **2026-09-20, 03:00 to 03:55, visionOS-2, the idle window, the barcode
   step, the merge and the rename:** the user granted the CPU ("im off"),
   and `.claude/scripts/measure_window.py` ran everything owed at idle
