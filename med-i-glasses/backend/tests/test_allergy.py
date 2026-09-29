@@ -57,6 +57,45 @@ class TestWords:
             assert mentions and mentions[0].hedged, text
         assert not find_allergen_mentions([line("CONTAINS PEANUTS")], ["peanut"])[0].hedged
 
+    def test_real_facility_and_trace_wordings_are_hedged_statements(self):
+        """Read off Open Food Facts photographs (dataset/real). Each was
+        reported as a presence, which is an email to the doctor about a
+        traces warning; two were not statements at all, so never spoken."""
+        for text in (
+            "Also contains trace amounts of egg, soy, and tree nuts",
+            "Produced in a factory that handles milk, gluten, egg, soya & other nuts",
+            "ADVISORY: Created in a bakery that uses peanuts",
+            "tree nuts due to processing on shared equipment",
+        ):
+            mentions = find_allergen_mentions([line(text)], ["peanut", "egg", "tree nut"])
+            assert mentions, text
+            assert all(m.statement and m.hedged for m in mentions), text
+
+    def test_a_comma_read_as_a_full_stop_keeps_the_list_hedged(self):
+        """Read off a real pack: "trace amounts of egg, soy" came back as
+        "egg. soy." and the soy, alone in its clause, lost the hedge."""
+        mentions = find_allergen_mentions([line("contains trace amounts of egg. soy.")], ["egg", "soy"])
+        assert {m.allergen: m.hedged for m in mentions} == {"egg": True, "soy": True}
+
+    def test_a_hedge_never_stretches_over_a_clause_that_says_more(self):
+        """A missed presence is the worse mistake: only a bare list of
+        allergen words carries the hedge on."""
+        for text, present in (
+            ("May contain peanuts. Contains milk.", "dairy"),
+            ("May contain peanuts. Wheat flour, sugar.", "gluten"),
+        ):
+            mentions = find_allergen_mentions([line(text)], ["peanut", present])
+            hedged = {m.allergen: m.hedged for m in mentions}
+            assert hedged == {"peanut": True, present: False}, text
+
+    def test_a_contains_clause_beside_a_trace_clause_stays_a_presence(self):
+        mentions = find_allergen_mentions(
+            [line("Contains milk and wheat. Also contains trace amounts of egg")],
+            ["dairy", "gluten", "egg"],
+        )
+        hedged = {m.allergen: m.hedged for m in mentions}
+        assert hedged == {"dairy": False, "gluten": False, "egg": True}
+
     def test_a_custom_allergen_with_a_digit_matches(self):
         """A dye is a real allergy and its name carries a number."""
         mentions = find_allergen_mentions([line("CONTAINS FD&C YELLOW 6, BLUE 1")], ["Yellow 6"])

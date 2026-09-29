@@ -187,6 +187,32 @@ tested.
 
 ## Log
 
+- **2026-09-29, accuracy without hardware (RapidOCR, Linux CPU):**
+  (1) RapidOCR's packaged recognizer is PaddleOCR's v4 *Chinese* model,
+  which is why it drops spaces in English. `backend/ai/ocr_models.py`
+  fetches PP-OCRv5's (pinned, SHA-256 checked) into `weights/ocr/`;
+  `RAPIDOCR_REC_MODEL` points there by default, and a missing file falls
+  back to the packaged model with a warning. `run.py`, `make precache` and
+  the doctor handle it. (2) The earlier "0 of 40 allergen statements on
+  this CPU, so the barcode is the whole feature" finding was the corpus:
+  off a Mac, `eval/packaging.py` set the small print in Alex Brush script.
+  It now falls back to Arial Narrow or Oswald. (3) A dose counts as
+  corroborated only by frames that read the same digits
+  (`TextLine.digit_agreement`), the guard recognises a dose line in the
+  words that are spoken, and the lexicon no longer deletes a digit glued to
+  a word ("TAKE1" -> "TAKE 1"). (4) Allergy matcher: real facility and
+  trace wordings are hedged statements, and a bare list fragment after a
+  hedge stays hedged. Synthetic, packaged -> v5: allergens 7 -> 20 of 42,
+  prescription strength 5/8 -> 17/19 of 40, dose right 14/16 -> 14/17,
+  dose wrong 0, invented 0 everywhere, signage 57 -> 57, fonts 63 -> 64.
+  Rejected after measuring: a tighter detector box and 1600 px detection
+  (symbols invented 0 -> 2 and 0 -> 1). Real photos (`dataset/real`, 167
+  Open Food Facts ingredient panels, 196 VizWiz no-text photos): ingredient
+  words 43.5% -> 60.4%, allergens 55 -> 78 of 189, invented 0 and 0.
+  **Next:** 69 of v5's 111 missed allergens are in the read text on
+  ingredient-list lines below the INGREDIENTS header, which the matcher does
+  not count. Counting every line invents 36, so the continuation has to
+  follow the list's text block. Suite 701 passed.
 - **2026-09-29, the dataset folder:** `dataset/` at the repo root makes the
   eval corpora a standalone dataset for other assistive-vision projects.
   `generate.py` calls the same generators and seeds as `eval/`, so there is

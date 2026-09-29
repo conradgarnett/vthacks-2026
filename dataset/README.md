@@ -6,9 +6,13 @@ blind and low-vision people. It grew out of the Med-i-Glasses project
 system fails its user. It is kept here as a separate folder so that other
 projects can use it without the app.
 
-It is small and synthetic on purpose. It is meant for **evaluation**, not
-training. Every image comes from a script with a fixed seed, the ground truth
-is exact, and the hard cases are in it deliberately.
+It has two halves, both meant for **evaluation**, not training:
+
+- **Synthetic** (`generate.py`): every image comes from a script with a fixed
+  seed, the ground truth is exact, and the hard cases are in it deliberately.
+- **Real** (`fetch_real.py`, `real/`): openly licensed photographs of the
+  same kinds of things: real ingredient panels and real photos taken by blind
+  people. A change that helps on the synthetic half should hold up here.
 
 ## The rule behind every metric
 
@@ -36,6 +40,36 @@ app requires agreement before it states a dose.
 The `medicine` held-out split comes from a separate seed range. Use it only to
 report results, never to tune on. If a system scores much better on `tune`
 than on `holdout`, it has been fitted to the corpus.
+
+### Real photographs (`real/`)
+
+| task | samples | ground truth | source and licence |
+|---|---|---|---|
+| `ingredients` | 167 English ingredient panels | the ingredient list (span reviewed by hand), a reference transcription of the whole photo, and the product's allergens | [Open Food Facts ingredient-detection](https://huggingface.co/datasets/openfoodfacts/ingredient-detection) test split. Photos CC BY-SA 3.0 (Open Food Facts contributors), annotations CC BY-SA 4.0, allergens from the Open Food Facts database (ODbL) |
+| `no_text` | 196 photos | empty: all five annotators said the photo holds no text (four that turned out to hold some were dropped; see `NOT_TEXT_FREE` in `fetch_real.py`) | [VizWiz](https://vizwiz.org) validation images, taken by blind people with their phones. CC BY 4.0 |
+
+```bash
+python dataset/fetch_real.py             # downloads the images for the committed labels
+python dataset/fetch_real.py --rebuild   # rebuilds the labels from the sources (slow)
+```
+
+The labels are committed and the images are not. Committing the labels fixes
+the ground truth, because Open Food Facts is edited all the time and a
+product's allergen list can change after it was fetched. Each label records
+its image URL and licence. If you redistribute images, credit the source as
+its licence requires.
+
+Caveats:
+
+- **The ingredient reference is another engine's reading** (Google Cloud
+  Vision), with its own errors ("barlic" for garlic). So reading is scored as
+  the share of the ingredient list's words recovered, not as CER against it.
+- **The allergens are the product's, not the photo's.** Open Food Facts lists
+  allergens from everything known about the product, which can include text
+  outside the photographed panel. Traces ("may contain") are a separate list
+  and not counted as allergens.
+- **Only one frame per sample**, so a system that requires agreement between
+  frames sees its single-frame behaviour here.
 
 ### Tables (in `tables/`, no images needed)
 
@@ -111,8 +145,23 @@ compare those numbers with each other, not with the log.
 |---|---|---|
 | `fonts` (n=76) | Med-i-Glasses reader, RapidOCR, CPU | exact match: sans 89 %, serif 100 %, cursive 75 %, handwriting 75 %, novelty 80 % |
 
-Results for the other tasks on this render are still to be measured. Please add
-yours here with the system, engine and hardware named.
+**Real photographs**, measured 2026-09-29 with `med-i-glasses/eval/run_dataset_eval.py`
+(RapidOCR on a Linux CPU, one frame per sample, reader and allergen matcher at
+the commit that added `real/`):
+
+| task | recognizer | result |
+|---|---|---|
+| `ingredients` (n=167) | RapidOCR's packaged PP-OCRv4 (Chinese) | ingredient words recovered 43.5 %; allergens reported 55 of 189, invented 0 |
+| `ingredients` (n=167) | PP-OCRv5 mobile | ingredient words recovered 60.4 %; allergens reported 78 of 189, invented 0 |
+| `no_text` (n=196) | either | invented 0 |
+
+Of PP-OCRv5's 111 missed allergens, 69 have their word in the text the reader
+recovered: the matcher only counts lines marked as a statement (CONTAINS,
+INGREDIENTS…), and a long ingredient list carries that word on its first line
+only. Counting the whole read instead reports 135 of 189 but invents 36, so
+the fix has to follow the list's own block of text. Results for the other synthetic tasks on
+this render are still to be measured. Please add yours here with the system,
+engine and hardware named.
 
 ## Known limits
 

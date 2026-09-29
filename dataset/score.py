@@ -63,7 +63,7 @@ def _norm(text: str) -> str:
 
 # The dose is the number immediately after "take"; "TAKE 1 TABLET THREE TIMES
 # DAILY" has dose 1 and frequency 3.
-_DOSE = re.compile(r"\btake\s+(?:about\s+)?(\d+|half|one|two|three|four)\b", re.I)
+_DOSE = re.compile(r"\btake\s+(?:about\s+)?(\d+|half|one|two|three|four)\b", re.IGNORECASE)
 _WORDS = {"one": "1", "two": "2", "three": "3", "four": "4"}
 
 
@@ -116,22 +116,41 @@ def score(labels: dict[str, dict], preds: dict[str, dict]) -> dict[str, dict]:
                 else:
                     wrong += 1
             out.update(dose_right=right, dose_WRONG=wrong, dose_not_read=silent)
+        elif task == "ingredients":
+            # Real panels: the reference is another engine's reading, not
+            # exact truth, so reading is scored as the share of the
+            # ingredient list's words recovered, not as CER.
+            recall = []
+            for r, t in said:
+                want = {w for span in r["ingredients"] for w in _norm(span).split() if len(w) >= 3}
+                got = set(_norm(t).split())
+                if want:
+                    recall.append(len(want & got) / len(want))
+            out["ingredient_word_recall"] = round(sum(recall) / len(recall), 3) if recall else None
+            out["silent"] = sum(not t for _, t in said)
+            out.update(_allergen_counts(pairs))
         elif task == "allergens":
             out["statement_read_cer"] = round(
                 sum(cer(t, r["statement"]) for r, t in said) / n, 3)
-            acted = [(row, p) for row, p in pairs if "allergens" in p]
-            if acted:
-                truth_n = found = missed = invented = 0
-                for row, p in acted:
-                    truth, got = set(row["allergens"]), set(p["allergens"])
-                    truth_n += len(truth)
-                    found += len(truth & got)
-                    missed += len(truth - got)
-                    invented += len(got - truth)
-                out.update(allergens_on_labels=truth_n, reported=found,
-                           MISSED=missed, INVENTED=invented)
+            out.update(_allergen_counts(pairs))
         report[key] = out
     return report
+
+
+def _allergen_counts(pairs) -> dict:
+    """Missed and invented kept apart; only samples whose prediction says
+    which allergens the system would act on are counted."""
+    acted = [(row, p) for row, p in pairs if "allergens" in p]
+    if not acted:
+        return {}
+    truth_n = found = missed = invented = 0
+    for row, p in acted:
+        truth, got = set(row["allergens"]), set(p["allergens"])
+        truth_n += len(truth)
+        found += len(truth & got)
+        missed += len(truth - got)
+        invented += len(got - truth)
+    return dict(allergens_on_labels=truth_n, reported=found, MISSED=missed, INVENTED=invented)
 
 
 def main(argv: list[str]) -> int:
