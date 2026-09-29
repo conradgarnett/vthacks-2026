@@ -19,9 +19,10 @@ from backend.ai.medication import (
 
 
 class Line:
-    def __init__(self, text: str, agreement: int = 1):
+    def __init__(self, text: str, agreement: int = 1, digit_agreement: int | None = None):
         self.text = text
         self.agreement = agreement
+        self.digit_agreement = agreement if digit_agreement is None else digit_agreement
 
 
 class TestDetection:
@@ -60,6 +61,22 @@ class TestDoseGuard:
         lines = [Line("TAKE 2 TABLETS BY MOUTH DAILY", agreement=3)]
         out = guard("It reads: TAKE 2 TABLETS BY MOUTH DAILY.", lines)
         assert "2" in out
+        assert UNREADABLE_DOSE not in out
+
+    def test_frames_that_disagree_on_the_number_do_not_corroborate_it(self):
+        """Three frames grouped as one line, but only one of them read a 2:
+        the others read a different number. That is one sighting of the dose."""
+        lines = [Line("TAKE 2 TABLETS BY MOUTH DAILY", agreement=3, digit_agreement=1)]
+        out = guard("It reads: TAKE 2 TABLETS BY MOUTH DAILY.", lines)
+        assert "2" not in out
+        assert UNREADABLE_DOSE in out
+
+    def test_a_clipped_first_word_still_anchors_an_agreed_dose(self):
+        """The curve of a vial clips the T; the lexicon speaks it as TAKE, so
+        the guard must recognise the dose line in the words that are heard."""
+        lines = [Line("AKE 1 TABLET EVERY 12 HOURS", agreement=3)]
+        out = guard("It reads: TAKE 1 TABLET EVERY 12 HOURS.", lines)
+        assert "TAKE 1 TABLET" in out
         assert UNREADABLE_DOSE not in out
 
     def test_numbers_with_no_dose_line_to_anchor_them_are_withheld(self):

@@ -36,12 +36,12 @@ EVAL = PROJECT / "eval"
 sys.path.insert(0, str(EVAL))
 sys.path.insert(0, str(PROJECT))
 
-import allergens  # noqa: E402
-import corpus  # noqa: E402
-import fonts  # noqa: E402
-import medicine  # noqa: E402
-import packaging  # noqa: E402
-from typefaces import FONT_DIR, bundled_fonts  # noqa: E402
+import allergens
+import corpus
+import fonts
+import medicine
+import packaging
+from typefaces import FONT_DIR, bundled_fonts
 
 VERSION = "1.0"
 
@@ -245,9 +245,8 @@ def write_tables(out: Path) -> None:
             }) + "\n")
 
     with open(out / "product_names.jsonl", "w", encoding="utf-8") as f:
-        for name, sub in allergens.NAMES:
-            f.write(json.dumps({"name": name, "subtitle": sub, "note":
-                "product name, not an ingredient list"}) + "\n")
+        f.writelines(json.dumps({"name": name, "subtitle": sub, "note":
+                "product name, not an ingredient list"}) + "\n" for name, sub in allergens.NAMES)
 
     (out / "signage_phrases.txt").write_text("\n".join(corpus.PHRASES) + "\n", encoding="utf-8")
 

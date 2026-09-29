@@ -126,6 +126,20 @@ def check_ocr() -> bool:
     reader = build_reader(get_settings().ocr_engine)
     if reader.available:
         _line(OK, "OCR engine", reader.name)
+        rapid = next(
+            (r for r in (reader, getattr(reader, "thorough", None), getattr(reader, "fast", None))
+             if getattr(r, "rec_model", None)),
+            None,
+        )
+        if rapid is not None and rapid.rec_model == "packaged":
+            _line(
+                WARN,
+                "OCR recognizer",
+                "packaged Chinese model (drops spaces in English) -- "
+                "python -m backend.ai.ocr_models fetches PP-OCRv5",
+            )
+        elif rapid is not None:
+            _line(OK, "OCR recognizer", Path(rapid.rec_model).name)
         return True
     _line(
         WARN,

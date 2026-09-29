@@ -22,6 +22,7 @@ Measured rejection cases this keeps out: "Ilcccpcion" (0.55 against
 
 from __future__ import annotations
 
+import re
 from difflib import SequenceMatcher
 
 # Wording that actually appears on signage, shopfronts, menus and packaging.
@@ -261,8 +262,27 @@ def correct_token(token: str, medical_context: bool = False) -> str:
 
     match = _best_match(stripped, medical_context)
     if match and match[1] >= _SNAP_THRESHOLD:
-        return _match_case(stripped, match[0])
+        return _snap(stripped, match[0])
     return token
+
+
+_EDGE_DIGITS = re.compile(r"^(?P<lead>\d+)?(?P<word>[A-Za-z]+)(?P<trail>\d+)?$")
+
+
+def _snap(token: str, word: str) -> str:
+    """`token` replaced by the known `word`, keeping any number glued to it.
+
+    A digit at the edge of a token is a number, not a misread letter, when
+    the word it snaps to is exactly the letters around it: "TAKE1" matched
+    "take", and the 1 -- the dose -- vanished. The number stays, as its own
+    token. "Stair5" still becomes "Stairs": that snap replaces the digit
+    rather than dropping it.
+    """
+    edge = _EDGE_DIGITS.match(token)
+    if edge and edge.group("word").lower() == word:
+        snapped = _match_case(edge.group("word"), word)
+        return " ".join(p for p in (edge.group("lead"), snapped, edge.group("trail")) if p)
+    return _match_case(token, word)
 
 
 def _is_wordlike(token: str) -> bool:
@@ -326,7 +346,7 @@ def _context_snap(token: str, medical_context: bool = False) -> str:
         return token
     if len(ranked) > 1 and ranked[0][1] - ranked[1][1] < _CONTEXT_MARGIN:
         return token  # two words fit; guessing between them is inventing
-    return _match_case(stripped, ranked[0][0])
+    return _snap(stripped, ranked[0][0])
 
 
 def correct_text(text: str, medical_context: bool = False) -> str:
@@ -349,7 +369,7 @@ def correct_text(text: str, medical_context: bool = False) -> str:
         if parts:
             out.extend(parts)
         else:
-            out.append(_tidy_case(correct_token(token, medical_context)))
+            out.extend(_tidy_case(part) for part in correct_token(token, medical_context).split(" "))
 
     if any(_is_known(token) for token in out):
         out = [

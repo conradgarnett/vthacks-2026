@@ -57,12 +57,32 @@ def dose_is_corroborated(lines, minimum_agreement: int = 2) -> bool:
     frame, so a misread digit rarely repeats; a real one does.
     """
     for line in lines:
-        text = getattr(line, "text", "")
-        if not _DOSE_PATTERN.search(text):
+        if not _DOSE_PATTERN.search(_as_spoken(line)):
             continue
-        if getattr(line, "agreement", 1) >= minimum_agreement:
+        if _number_agreement(line) >= minimum_agreement:
             return True
     return False
+
+
+def _as_spoken(line) -> str:
+    """The line as it will be heard. The lexicon restores a clipped or
+    garbled first word ("AKE 1 TABLET" is spoken as "TAKE 1 TABLET"), and a
+    dose line must be recognised in the words the user hears, or a dose seen
+    the same way in every frame is withheld for a letter it never needed."""
+    from backend.ai.lexicon import correct_text
+
+    return correct_text(getattr(line, "text", ""), medical_context=True)
+
+
+def _number_agreement(line) -> int:
+    """Frames that read this line with these same numbers in it.
+
+    Frames are grouped by overall similarity, so a line read "TAKE 2" twice
+    and "TAKE 3" once was one line seen three times. Only the frames that
+    read the number vouch for it.
+    """
+    agreement = getattr(line, "agreement", 1)
+    return min(agreement, getattr(line, "digit_agreement", agreement))
 
 
 def contains_unverified_number(text: str) -> bool:
@@ -100,9 +120,9 @@ def corroborated_numbers(lines, minimum_agreement: int = 2) -> frozenset[str]:
     """Digit runs from lines several frames agreed on, dose lines excluded."""
     kept: set[str] = set()
     for line in lines:
-        text = getattr(line, "text", "")
-        if getattr(line, "agreement", 1) < minimum_agreement:
+        if _number_agreement(line) < minimum_agreement:
             continue
+        text = _as_spoken(line)
         if _DOSE_PATTERN.search(text):
             continue
         kept.update(_ANY_NUMBER.findall(text))

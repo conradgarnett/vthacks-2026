@@ -142,6 +142,29 @@ class TestConsensus:
         assert texts(merged) == ["204B"]
         assert merged[0].agreement == 3
 
+    def test_the_number_most_frames_read_wins_and_is_counted(self):
+        """"TAKE 3" read once at higher confidence loses to "TAKE 2" read
+        twice: plausibility cannot tell a 2 from a 3, repetition can. The
+        line was seen three times, its number twice."""
+        readings = [
+            [line("TAKE 3 TABLETS DAILY", 0.1, confidence=0.99)],
+            [line("TAKE 2 TABLETS DAILY", 0.1, confidence=0.80)],
+            [line("TAKE 2 TABLETS DAILY", 0.1, confidence=0.80)],
+        ]
+        merged = _merge(readings)
+        assert texts(merged) == ["TAKE 2 TABLETS DAILY"]
+        assert merged[0].agreement == 3
+        assert merged[0].digit_agreement == 2
+
+    def test_numbers_that_never_repeat_are_counted_once(self):
+        readings = [
+            [line("TAKE 1 TABLET DAILY", 0.1)],
+            [line("TAKE 7 TABLET DAILY", 0.1)],
+        ]
+        merged = _merge(readings)
+        assert merged[0].agreement == 2
+        assert merged[0].digit_agreement == 1
+
     def test_short_fragment_seen_once_is_dropped(self):
         readings = [[line("EXIT", 0.1), line("Jn", 0.5)], [line("EXIT", 0.1)], [line("EXIT", 0.1)]]
         assert texts(_merge(readings)) == ["EXIT"]

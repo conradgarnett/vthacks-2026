@@ -35,6 +35,7 @@ precache:
 	@echo "Downloading model weights so a dead network can't kill perception..."
 	$(PY) -c "from backend.config import get_settings; from backend.perception.vocabulary import CLASS_NAMES; from ultralytics import YOLO, YOLOWorld; s = get_settings(); YOLOWorld(s.open_vocab_weights).set_classes(CLASS_NAMES); YOLO(s.detector_weights)"
 	$(PY) -c "from backend.config import get_settings; from transformers import pipeline; pipeline('depth-estimation', model=get_settings().depth_model)"
+	$(PY) -m backend.ai.ocr_models
 	$(PY) -c "from backend.config import get_settings; from backend.ai.ocr import build_reader; build_reader(get_settings().ocr_engine).warmup()"
 	@echo "Weights cached."
 

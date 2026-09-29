@@ -21,6 +21,9 @@ eval/data/
 # The downloaded COCO slice for eval/run_detect_eval.py (eval/fetch_everyday.py), 95 MB
 med-i-glasses/eval/data/coco_everyday/
 
+# The OCR recognition model and its character list (backend/ai/ocr_models.py).
+med-i-glasses/weights/ocr/
+
 # The place memory each machine builds for itself (backend/scene/places.py)
 med-i-glasses/data/
 # Rendered speech: derived from the phrase list, re-creatable with
@@ -35,3 +38,5 @@ med-i-glasses/hardware/**/build/
 
 # The full render of the dataset (dataset/generate.py), 98 MB; reproducible.
 dataset/out/
+# Real photographs fetched by dataset/fetch_real.py; the labels beside them are committed.
+dataset/real/*/images/

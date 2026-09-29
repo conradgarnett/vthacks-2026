@@ -58,6 +58,12 @@ class Settings(BaseSettings):
     # pyobjc), then RapidOCR anywhere. "none" sends every read to the vision
     # provider, which costs a network round trip.
     ocr_engine: Literal["auto", "apple-vision", "rapidocr", "none"] = "auto"
+    # RapidOCR's recognition model, relative to med-i-glasses/. The package
+    # ships PaddleOCR's v4 Chinese recognizer, which drops the spaces in
+    # English; PP-OCRv5's keeps them and reads small print it cannot
+    # (backend/ai/ocr_models.py has the numbers). run.py and `make precache`
+    # fetch it; until then, or with this empty, the packaged model is used.
+    rapidocr_rec_model: str = "weights/ocr/PP-OCRv5_mobile_rec.onnx"
 
     # --- Local perception -------------------------------------------------
     # "open" detects the curated vocabulary in vocabulary.py, including doors,
