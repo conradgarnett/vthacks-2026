@@ -216,7 +216,7 @@ def write_tables(out: Path) -> None:
     out.mkdir(parents=True, exist_ok=True)
 
     with open(out / "object_priors.csv", "w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f)
+        w = csv.writer(f, lineterminator="\n")
         w.writerow(["class", "height_m", "is_obstacle", "is_landmark", "scale"])
         for label, spec in VOCABULARY.items():
             w.writerow([
@@ -225,7 +225,7 @@ def write_tables(out: Path) -> None:
             ])
 
     with open(out / "allergen_lexicon.csv", "w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f)
+        w = csv.writer(f, lineterminator="\n")
         w.writerow(["allergen_group", "ingredient_word"])
         for group, words in ALLERGEN_WORDS.items():
             for word in words:
