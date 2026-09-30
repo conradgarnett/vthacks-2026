@@ -32,39 +32,15 @@ from typefaces import FONT_DIR
 
 W, H = 1500, 1150
 
-PHARMACIES = ["CITY PHARMACY", "GREENLEAF DRUGS", "UNIVERSITY RX", "OAKMONT CHEMIST"]
-
-# Generic names and plausible strengths. Deliberately varied in length and
-# letter shape -- "Levothyroxine" and "Lisinopril" fail differently.
-DRUGS = [
-    ("AMOXICILLIN", "500 MG"), ("LISINOPRIL", "10 MG"),
-    ("METFORMIN HCL", "850 MG"), ("ATORVASTATIN", "20 MG"),
-    ("LEVOTHYROXINE", "75 MCG"), ("OMEPRAZOLE", "40 MG"),
-    ("SERTRALINE", "50 MG"), ("IBUPROFEN", "600 MG"),
-    ("AMLODIPINE", "5 MG"), ("PREDNISONE", "20 MG"),
-    ("GABAPENTIN", "300 MG"), ("AZITHROMYCIN", "250 MG"),
-]
-
-# The safety-critical field. Scored on its own.
-DIRECTIONS = [
-    "TAKE 1 TABLET BY MOUTH DAILY",
-    "TAKE 2 TABLETS BY MOUTH TWICE DAILY",
-    "TAKE 1 CAPSULE EVERY 8 HOURS",
-    "TAKE 1 TABLET EVERY 12 HOURS",
-    "TAKE 2 CAPSULES BY MOUTH AT BEDTIME",
-    "TAKE 1 TABLET THREE TIMES DAILY WITH FOOD",
-    "TAKE HALF TABLET BY MOUTH EVERY MORNING",
-]
-
-WARNINGS = [
-    "MAY CAUSE DROWSINESS",
-    "TAKE WITH FOOD",
-    "DO NOT DRINK ALCOHOL",
-    "FINISH ALL MEDICATION",
-    "AVOID SUNLIGHT",
-]
-
-NAMES = ["J. MARTINEZ", "A. OKAFOR", "S. NGUYEN", "R. PATEL", "L. ANDERSSON"]
+# The wording lives in vocabulary.py, which is the file to grow: raising `n`
+# past the vocabulary size buys capture variation and no new text.
+from vocabulary import (  # noqa: E402
+    DIRECTIONS,
+    DRUGS,
+    PATIENTS as NAMES,
+    PHARMACIES,
+    WARNINGS,
+)
 
 _LABEL_FONT = "/System/Library/Fonts/Supplemental/Arial Narrow.ttf"
 _BOLD_FONT = "/System/Library/Fonts/Supplemental/Arial Bold.ttf"

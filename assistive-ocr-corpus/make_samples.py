@@ -211,13 +211,25 @@ def main() -> int:
     parser.add_argument("--holdout", action="store_true", help="medicine: held-out seeds")
     args = parser.parse_args()
 
+    # Sized from the vocabulary rather than fixed, because the two are not
+    # independent: the allergen and signage builders step through their lists
+    # by index, so an `n` below the list length silently never renders the
+    # tail of it -- at n=40 against 71 statements, 31 statements are simply
+    # absent and nothing says so. Roughly 2-3x the list is where every entry
+    # appears and capture variation is well sampled.
+    #
+    # These are deliberately larger than the generator defaults, which stay
+    # small so the project's eval loop stays fast. Generating is cheap;
+    # reading 200 labels with an OCR engine is not.
+    import vocabulary as V
+
     defaults = {
-        "signage": (60, 11),
-        "textureless": (8, 23),
-        "medicine": (40, 101),
-        "labels": (24, 31),
-        "symbols": (12, 37),
-        "allergens": (40, 41),
+        "signage": (3 * len(V.SIGNAGE), 11),
+        "textureless": (32, 23),
+        "medicine": (2 * len(V.DRUGS), 101),
+        "labels": (2 * len(V.PRODUCT_TEXT), 31),
+        "symbols": (48, 37),
+        "allergens": (3 * len(V.STATEMENTS), 41),
         "fonts": (0, 41),
     }
     default_n, default_seed = defaults[args.corpus]
@@ -253,11 +265,35 @@ def main() -> int:
                 record["camera"] = camera.name
             handle.write(json.dumps(record) + "\n")
 
+    # Report distinct ground truth alongside the sample count, because they
+    # are what the two numbers actually mean: 400 samples over 135 phrases is
+    # 400 photographs of 135 things, and a reader that memorised the 135
+    # scores the same as one that generalises.
+    # Order matters: an allergen record carries both `statement` and
+    # `product_name`, and the statement is the thing under test. Checking
+    # product_name first reported 20 distinct truths for a corpus of 71
+    # statements -- the diversity of the front of the pack, not of the small
+    # print, which is the opposite of what this corpus measures.
+    truths = set()
+    with manifest.open() as handle:
+        for line in handle:
+            record = json.loads(line)
+            for key in ("statement", "text", "drug", "product_name"):
+                if key in record:
+                    truths.add(record[key])
+                    break
+
     print(
         f"{len(samples)} samples, {written} frames -> {out}/\n"
         f"manifest: {manifest}",
         file=sys.stderr,
     )
+    if truths:
+        print(
+            f"distinct ground truth: {len(truths)}"
+            f"  ({len(samples) / len(truths):.1f} captures each)",
+            file=sys.stderr,
+        )
     if args.corpus in NO_TEXT:
         print(
             "these samples contain no text: any output on them is invented",

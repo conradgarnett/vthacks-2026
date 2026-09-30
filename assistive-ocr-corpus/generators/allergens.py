@@ -47,49 +47,11 @@ from product_labels import (
     draw_recycling,
 )
 
-# (statement lines, allergens that should be reported, hedged?)
-# An empty set means: reporting anything here is an invention.
-STATEMENTS: list[tuple[list[str], set[str], bool]] = [
-    # --- plain CONTAINS: the case that is allowed to email ---------------
-    (["CONTAINS: MILK, SOY, WHEAT."], {"dairy", "soy", "gluten"}, False),
-    (["ALLERGENS: EGG, FISH."], {"egg", "fish"}, False),
-    (["CONTAINS PEANUTS."], {"peanut"}, False),
-    (["CONTAINS: TREE NUTS (ALMOND, CASHEW),", "SOY."], {"tree nut", "soy"}, False),
-    (["INGREDIENTS: WHEAT FLOUR, SUGAR, WHEY,", "SOY LECITHIN, SALT."],
-     {"gluten", "dairy", "soy"}, False),
-    (["INGREDIENTS: DURUM SEMOLINA, WATER,", "EGG ALBUMIN."], {"gluten", "egg"}, False),
-    (["CONTAINS: SHELLFISH (SHRIMP, CRAB)."], {"shellfish"}, False),
-    # mustard is not a group the matcher tracks: only sesame is reportable here.
-    (["CONTAINS: SESAME, MUSTARD."], {"sesame"}, False),
-    # --- hedged: real, but speaks rather than emails ---------------------
-    (["MAY CONTAIN PEANUTS AND TREE NUTS."], {"peanut", "tree nut"}, True),
-    (["MAY CONTAIN TRACES OF MILK."], {"dairy"}, True),
-    (["MADE IN A FACILITY THAT PROCESSES", "PEANUTS AND SOY."], {"peanut", "soy"}, True),
-    # --- negations: naming an allergen to deny it ------------------------
-    (["DAIRY FREE. GLUTEN FREE."], set(), False),
-    (["CONTAINS NO NUTS."], set(), False),
-    (["DOES NOT CONTAIN MILK OR EGG."], set(), False),
-    (["FREE FROM: PEANUTS, TREE NUTS, SOY."], set(), False),
-    # --- name traps and plant milks --------------------------------------
-    (["ALMOND MILK. UNSWEETENED."], {"tree nut"}, False),
-    (["OAT MILK BARISTA BLEND."], set(), False),
-    (["COCONUT YOGURT ALTERNATIVE."], set(), False),
-    # --- nothing to say at all --------------------------------------------
-    (["INGREDIENTS: CARBONATED WATER, CITRIC ACID,", "NATURAL FLAVOR, CAFFEINE."],
-     set(), False),
-    (["INGREDIENTS: TOMATOES, SALT, BASIL."], set(), False),
-]
-
-# Product names, which sit large on the label. Two are traps: the allergen
-# word is in the NAME, and a name is not an ingredient list.
-NAMES = [
-    ("Peanut Butter Cups", "Milk Chocolate"),
-    ("Almond Crunch Bar", "Dark Chocolate"),
-    ("Sandwich Crackers", "Cheese"),
-    ("Breakfast Cereal", "Honey Nut"),
-    ("Pasta Sauce", "Basil"),
-    ("Rice Crackers", "Sea Salt"),
-]
+# The statements and product names live in vocabulary.py, which is the file
+# to grow. Raising `n` past the number of statements re-photographs the same
+# sentences; adding statements there makes every future run more informative.
+from vocabulary import ALLERGEN_PRODUCTS as NAMES  # noqa: E402
+from vocabulary import STATEMENTS  # noqa: E402
 
 
 def render_allergen_label(

@@ -48,21 +48,8 @@ DISPLAY_FONTS = [
     "/System/Library/Fonts/Supplemental/Trattatello.ttf",
 ]
 
-# Wording from real packaging, including the marks that ride along with it.
-PRODUCT_TEXT = [
-    ("Diet Cola", "Zero Sugar"),
-    ("Sparkling Water", "Natural Lime"),
-    ("Orange Juice", "No Pulp"),
-    ("Whole Milk", "Vitamin D"),
-    ("Tomato Soup", "Low Sodium"),
-    ("Greek Yogurt", "Strawberry"),
-    ("Energy Drink", "Sugar Free"),
-    ("Almond Butter", "Unsalted"),
-    ("Iced Tea", "Lemon"),
-    ("Ginger Ale", "Caffeine Free"),
-]
-
-BRAND_MARKS = ["®", "™", "©"]
+# Wording lives in vocabulary.py, which is the file to grow.
+from vocabulary import BRAND_MARKS, PRODUCT_TEXT  # noqa: E402, F401
 
 # Off macOS none of the faces above exist; the committed display faces in
 # eval/fonts/ stand in, so the corpus renders everywhere. On a Mac the list

@@ -25,16 +25,9 @@ from typefaces import platform_fonts
 # platforms. Platform numbers only compare within one platform.
 FONTS = platform_fonts()
 
-# What signage actually says.
-PHRASES = [
-    "EXIT", "Room 204B", "Keep door closed", "Platform 9", "No Entry",
-    "Fire Exit", "Conference Room B", "Capacity 24", "Push", "Pull",
-    "Reception", "Stairs", "Elevator", "Restroom", "Gate A12",
-    "Baggage Claim", "Departures", "Arrivals", "Emergency Exit",
-    "Staff Only", "Wet Floor", "Please Wait Here", "Ticket Office",
-    "Information", "Lost Property", "Way Out", "Car Park Level 3",
-    "Quiet Zone", "No Smoking", "Meeting Room 7",
-]
+# What signage actually says. The list lives in vocabulary.py, which is the
+# file to grow: past its length, a larger `n` re-photographs the same words.
+from vocabulary import SIGNAGE as PHRASES  # noqa: E402
 
 W, H = 1600, 1200
 

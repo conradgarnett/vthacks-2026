@@ -72,7 +72,7 @@ FONT_FAMILIES: dict[str, list[str]] = {
     ],
 }
 
-PHRASES = ["Diet Cola", "Fire Exit", "Room 204B", "Ginger Ale", "Reception"]
+from vocabulary import FONT_PHRASES as PHRASES  # noqa: E402
 
 _BUNDLED_DIR = FONT_DIR  # resolved in typefaces, which checks both layouts
 
