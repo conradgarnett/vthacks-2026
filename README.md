@@ -29,6 +29,11 @@ the app, and how it is measured.
   watch (a LOLIN S2 Mini) and its serial protocol.
 - [CLAUDE.md](CLAUDE.md): the engineering notes and the measured log, for
   whoever works on it next.
+- [assistive-ocr-corpus/](assistive-ocr-corpus/README.md): the evaluation
+  corpora, packaged to stand alone under MIT so other visual-impairment
+  projects can use them — pharmacy vials, allergen statements, packaging,
+  signage, a three-tier camera model, and two corpora containing no text at
+  all for measuring what a reader invents.
 
 On Windows keep the checkout at a short path such as `C:\Users\<you>\vthacks-2026`;
 long paths break Python imports there.

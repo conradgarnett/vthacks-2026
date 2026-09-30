@@ -79,6 +79,15 @@ def _font(path: str, px: int):
     return ImageFont.load_default(size=px)
 
 
+_CURVE_K = 0.92
+# Renormalized; see the long note on _CURVE_SPAN in medicine.py. Here
+# asin(k)/(pi/2) is 0.74, so the outer 13% of each side of the label -- where
+# the ingredient and allergen lines begin -- never reached the frame at all.
+# Packaging and allergen numbers from before 2026-09-29 do not compare with
+# numbers measured after it.
+_CURVE_SPAN = math.asin(_CURVE_K) / (math.pi / 2)
+
+
 def _curve(img: Image.Image, strength: float) -> Image.Image:
     """Bend the image horizontally, as a cylindrical label does.
 
@@ -94,8 +103,8 @@ def _curve(img: Image.Image, strength: float) -> Image.Image:
         u = (x / (width - 1)) * 2 - 1
         shift = int(strength * height * 0.10 * (u * u))
         # Horizontal compression toward the edges
-        src_x = int((math.asin(max(-1.0, min(1.0, u * 0.92))) / (math.pi / 2))
-                    * 0.5 * (width - 1) + 0.5 * (width - 1))
+        arc = math.asin(max(-1.0, min(1.0, u * _CURVE_K))) / (math.pi / 2) / _CURVE_SPAN
+        src_x = int(arc * 0.5 * (width - 1) + 0.5 * (width - 1))
         src_x = max(0, min(width - 1, src_x))
         column = source[:, src_x]
         if shift > 0:

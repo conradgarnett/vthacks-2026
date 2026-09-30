@@ -109,15 +109,55 @@ Do **not** substitute a "does the output contain the word" check. It passes
 "Room 204B" read as "Room 2048", which is how this pipeline once looked fine
 while performing badly.
 
-Current baseline to beat, n=60, as of 2026-09-19:
+Current baseline to beat, n=60, as of 2026-09-29 (Apple Vision + RapidOCR):
 
 ```
-mean CER 0.182 · exact match 70% · silent 2% · hallucinated 0/8 · read p50 281 ms
+mean CER 0.019 · exact match 97% · silent 0% · hallucinated 0/8
 ```
 
 Known weak spot: text at 1.2% of frame height (CER ~0.85) — a standard sign at
 15+ m, ~14 px tall before blur. Closer to an information floor than a tuning
 gap.
+
+### The corpus was cropping the labels — fixed 2026-09-29
+
+**Prescription and packaging numbers from before this date are not comparable
+with numbers after it.** `_curve_label` in `eval/medicine.py` and `_curve` in
+`eval/packaging.py` compute `asin(k·u)/(π/2)` and never divide back out by
+`asin(k)/(π/2)`, which is 0.78 and 0.74. So the destination edges sampled the
+source at only ±0.78 of its width and the outer 11–13% of every label was
+discarded. Every field on a pharmacy label starts at the same left margin,
+and that margin landed **5 px from the frame edge, squeezed to 60% width**.
+Text detectors need background around a glyph to box it, so the first
+character of the drug name was routinely lost: the corpus was scoring a
+cropping bug, not the reader.
+
+Renormalizing (one line in each file) moved the held-out prescription set:
+
+| | before | after |
+|---|---|---|
+| drug name found | 72% | **95%** |
+| strength found | 78% | **90%** |
+| full directions exact | 10% | **60%** |
+| dose read correctly | 22% | **65%** |
+| WRONG dose | 0% | **0%** |
+
+Packaging product name 79% → **92%**, and the gain is entirely on the curved
+half (8/12 → 11/12) while the flat half is unchanged at 11/12 — which is the
+causal signature you'd want, since only curved samples go through `_curve`.
+
+Allergen statements barely moved: 7/40 → **8/40** lines recovered, 9/42
+allergens reported, INVENTED still 0. That is the useful part of the result.
+**Prescriptions were a corpus artifact; allergen statements are a real
+reading failure.** The statement is rendered at 1.28–2.21% of frame height
+against Vision's ~2% frame-relative floor, so three of the four size draws
+sit at or below it. Treat it as an information floor, not a tuning gap, and
+stop re-tuning thresholds against it.
+
+The lesson generalizes: **look at the corpus before trusting a number from
+it.** This one was wrong for weeks and every conclusion drawn from it —
+"prescription small print is the open problem" — was wrong with it. Render a
+contact sheet and eyeball it when a number seems stuck.
 
 ## Running it on any machine
 

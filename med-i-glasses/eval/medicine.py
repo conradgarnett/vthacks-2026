@@ -92,6 +92,20 @@ def _font(path: str, px: int):
     return ImageFont.load_default()
 
 
+_CURVE_K = 0.94
+# asin(k)/(pi/2) is 0.78, not 1, so without dividing it back out the
+# destination edges sample the source at only +/-0.78 of its width and the
+# outer 11% of the label never reaches the frame. Every field on a pharmacy
+# label starts at the same left margin, and that margin landed 5 px from the
+# frame edge, squeezed to 60% width -- text detectors need background around
+# a glyph to box it, so the first character of the drug name was routinely
+# lost. Renormalizing keeps the foreshortening (middle stretched, edges
+# compressed, as a cylinder does) while mapping the whole label into frame.
+# Prescription numbers from before 2026-09-29 were measured on the cropped
+# corpus and do not compare with numbers measured after it.
+_CURVE_SPAN = math.asin(_CURVE_K) / (math.pi / 2)
+
+
 def _curve_label(img: Image.Image, strength: float) -> Image.Image:
     """Wrap the label around a vial: vertical bow plus edge compression."""
     source = np.asarray(img)
@@ -101,10 +115,8 @@ def _curve_label(img: Image.Image, strength: float) -> Image.Image:
     for x in range(width):
         u = (x / max(1, width - 1)) * 2 - 1
         shift = int(strength * height * 0.09 * (u * u))
-        src_x = int(
-            (math.asin(max(-1.0, min(1.0, u * 0.94))) / (math.pi / 2)) * 0.5 * (width - 1)
-            + 0.5 * (width - 1)
-        )
+        arc = math.asin(max(-1.0, min(1.0, u * _CURVE_K))) / (math.pi / 2) / _CURVE_SPAN
+        src_x = int(arc * 0.5 * (width - 1) + 0.5 * (width - 1))
         src_x = max(0, min(width - 1, src_x))
         column = source[:, src_x]
         if shift > 0:
