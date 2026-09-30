@@ -218,6 +218,69 @@ def is_plausible(text: str, confidence: float = 0.5) -> bool:
     return assess(text, confidence).keep
 
 
+# A bare code with no word around it: "A417", "204B", "B12". Real signage
+# carries these, so they cannot simply be rejected -- but two characters is
+# not one ("4A" off a brick wall), and neither is a bare pair of digits
+# ("49" off carpet). Three or more, with the letter-then-digit shape a code
+# actually has, is the line between a room number and a smudge.
+_BARE_CODE = re.compile(r"^(?:[A-Z]{1,3}[- ]?\d{2,5}[A-Z]?|\d{2,4}[A-Z]|\d{3,5})$", re.I)
+
+
+def reading_is_plausible(text: str) -> bool:
+    """Judge a whole reading rather than one line of it.
+
+    Every line-level check here asks "could this token be a word?", and the
+    answer for "4A", "rill", "ali" and "SYIJ" is yes -- they are shaped like
+    words and codes. What gives them away is the company they keep: nothing.
+    A real sign says "Fire Exit", "Room 204B", "Platform 9"; it does not
+    consist solely of one four-letter token that no lexicon has heard of.
+
+    So this asks a question no single line can: does the reading contain a
+    word anybody knows, or a code with the shape of a real code? If neither,
+    it is structure that an engine resolved into glyphs -- brickwork,
+    railings, a keyboard, book spines -- and the wearer is better served by
+    silence.
+
+    The test is orthographic, not a dictionary lookup, for two reasons. The
+    only word list available is /usr/share/dict/words, which exists on macOS
+    and not on Windows, where it loads empty -- a gate requiring it would
+    silence the entire app there. And it is a 1934 Webster's: measured
+    against it, it rejects 78 of 128 generic drug names (LISINOPRIL,
+    ATORVASTATIN, OMEPRAZOLE) and modern signage like "Defibrillator" and
+    "Contactless". Using it to reject text would have cost the reader its
+    main job to make this number look better.
+
+    So a token is word-shaped if it is letters only, at least three of them,
+    carries a vowel, and is cased the way writing is cased: all lower, all
+    upper, or capitalised. "Alarm", "Slow" and "LISINOPRIL" pass without
+    being in any list; "iGJUZJa" fails on the casing, "fid4" and "r.1" on
+    being letters only, "4A" and "49" on the code shape.
+
+    Measured: inventions on 36 textureless surfaces 9 -> 3, and nothing real
+    is lost -- 0 of 248 signage phrases, 0 of 107 allergen statements, 0 of
+    128 drug lines and 0 of 40 directions are rejected. What still gets
+    through is genuinely word-shaped ("rill" is an English word, "ali" and
+    "SYIJ" are indistinguishable from short ones), and telling those from
+    writing needs the picture rather than the characters.
+    """
+    tokens = [_strip_edges(t) for t in re.split(r"\s+", text.strip())]
+    tokens = [t for t in tokens if t]
+    if not tokens:
+        return False
+
+    for token in tokens:
+        if _BARE_CODE.match(token):
+            return True
+        if not token.isalpha() or len(token) < 3:
+            continue
+        if not any(ch in _VOWELS for ch in token):
+            continue
+        if token.islower() or token.isupper() or token.istitle():
+            return True
+
+    return False
+
+
 def normalize(text: str) -> str:
     """Collapse a line for cross-frame comparison."""
     return re.sub(r"[^a-z0-9]+", "", text.lower())

@@ -37,7 +37,12 @@ from difflib import SequenceMatcher
 from backend.ai.lexicon import correct_text, is_known_word
 from backend.ai.medication import guard as medication_guard
 from backend.ai.medication import looks_medical
-from backend.ai.text_quality import assess, clean_for_speech, normalize
+from backend.ai.text_quality import (
+    assess,
+    clean_for_speech,
+    normalize,
+    reading_is_plausible,
+)
 
 log = logging.getLogger(__name__)
 
@@ -1370,6 +1375,15 @@ def format_for_speech(lines: list[TextLine]) -> str:
 
     if not parts:
         return NO_TEXT_FOUND
+
+    # Last gate, over the whole reading. Every check before this one judges a
+    # line on its own, and a lone plausible-looking token passes them all --
+    # which is how a brick wall came to be spoken as "It reads: 4A." and a
+    # railing as "It reads: rill". A reading with no known word and no
+    # well-formed code in it is structure, not writing.
+    if not reading_is_plausible(" ".join(parts)):
+        return NO_TEXT_FOUND
+
     spoken = f"It reads: {'. '.join(parts)}."
     # Medication labels are the one case where a confident number can cause
     # harm, so an uncorroborated dose is withheld rather than spoken.

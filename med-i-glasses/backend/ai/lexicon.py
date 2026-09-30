@@ -209,6 +209,37 @@ def is_known_word(token: str) -> bool:
     return False
 
 
+def dictionary_available() -> bool:
+    """Is there a system word list on this machine?
+
+    macOS and BSD ship /usr/share/dict/words; Windows does not. Anything
+    that uses the dictionary to *reject* text has to ask this first, or it
+    rejects everything on the machine without the file.
+    """
+    return bool(_DICTIONARY)
+
+
+def in_dictionary(token: str) -> bool:
+    """Raw membership, with no length veto and plurals allowed.
+
+    Distinct from `_is_real_word`, which ignores the dictionary below six
+    characters because short web2 entries ("ire", "inger") are usually OCR
+    fragments of a longer word. That veto is right when deciding whether to
+    *rewrite* a token and wrong when deciding whether a token is a word at
+    all: "slow" and "gents" are words, and refusing to admit it would silence
+    real signs.
+    """
+    lowered = "".join(ch for ch in token if ch.isalpha()).lower()
+    if not lowered:
+        return False
+    if lowered in _DICTIONARY or lowered in LEXICON or lowered in PROTECTED:
+        return True
+    for suffix in ("s", "es"):
+        if lowered.endswith(suffix) and lowered[: -len(suffix)] in _DICTIONARY:
+            return True
+    return False
+
+
 def _is_real_word(token: str) -> bool:
     """Is this already an English word, and so not a misreading to repair?"""
     lowered = token.lower()
