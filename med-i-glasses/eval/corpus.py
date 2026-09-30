@@ -17,6 +17,7 @@ from dataclasses import dataclass
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
+import textures
 from typefaces import platform_fonts
 
 # Real system fonts on this machine by default. `--fonts bundled` on the
@@ -161,45 +162,22 @@ def build_corpus(
     return samples
 
 
-def build_textureless_corpus(n: int = 8, seed: int = 23) -> list[list[bytes]]:
+def build_textureless_corpus(n: int = 36, seed: int = 23, frames: int = 3):
     """Surfaces containing no text at all.
 
-    Carpet, brick, foliage and blinds are what a reader hallucinates on: they
-    carry repeating high-frequency structure that looks like glyphs. Any
-    output on these is invented, so this measures the failure that matters
-    most -- a blind user cannot glance at the wall to check.
+    Eighteen real surfaces, in textures.py: brick courses, carpet pile,
+    foliage, blinds, railings, book spines, radiator fins, corrugated
+    metal, keyboards, pegboard. Any output on these is invented.
+
+    These used to be built here from gaussian static with faint structure
+    added on top -- brick lines of amplitude 26 under noise of standard
+    deviation 34 -- so every surface came out as featureless grey mush.
+    A detector needs edges to fire on, and there were none at any scale,
+    so hallucinated 0/8 was measuring almost nothing. The tell was that
+    the symbols corpus, which has real structure, caught an invention at
+    1/12 while this one never did.
     """
-    rng = random.Random(seed)
-    np.random.seed(seed)
-    kinds = ["carpet", "brick", "foliage", "blinds"]
-    out = []
-    for i in range(n):
-        kind = kinds[i % len(kinds)]
-        out.append([_texture(kind, rng) for _ in range(3)])
-    return out
-
-
-def _texture(kind: str, rng: random.Random) -> bytes:
-    a = np.random.normal(140, 34, (H, W, 3))
-    if kind == "carpet":
-        a += np.random.normal(0, 26, (H, W, 3))
-    elif kind == "brick":
-        for y in range(0, H, 74):
-            a[y:y + 6, :] = 96
-        for x in range(0, W, 155):
-            a[:, x:x + 6] = 96
-    elif kind == "foliage":
-        yy, xx = np.mgrid[0:H, 0:W]
-        a += (36 * np.sin(xx / 7.0) * np.cos(yy / 9.0))[..., None]
-    elif kind == "blinds":
-        for y in range(0, H, 22):
-            a[y:y + 9, :] -= 52
-
-    img = Image.fromarray(np.clip(a, 0, 255).astype(np.uint8))
-    img = img.filter(ImageFilter.GaussianBlur(0.8))
-    buf = io.BytesIO()
-    img.save(buf, "JPEG", quality=int(rng.uniform(50, 68)))
-    return buf.getvalue()
+    return textures.build_textureless_corpus(n=n, seed=seed, frames=frames)
 
 
 # -- metrics ---------------------------------------------------------------

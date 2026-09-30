@@ -79,6 +79,20 @@ metric rather than an afterthought is the main opinion this dataset holds:
 for a sighted user a spurious word is noise; for a blind user it is an
 ingredient that isn't there, with no way to check it.
 
+`textureless` is 18 surfaces built around the structure a text detector
+actually fires on — high-contrast strokes of roughly consistent height,
+repeating along a line, separated by gaps. Book spines, railings, radiator
+fins, venetian blinds, corrugated metal and keyboards are the strongest;
+carpet, foliage, gravel and wood supply correlated organic grain instead.
+
+**A corpus of noise is not a test.** Before 2026-09-29 these images were
+gaussian static with structure of lower amplitude added on top, so they had
+no edges at any scale, no detector ever fired, and `0/8` was published as a
+safety property while measuring essentially nothing. The tell was visible in
+the numbers the whole time: the `symbols` corpus, which has real structure,
+caught an invention at 1/12, while `textureless` never caught one. On the
+rebuilt surfaces the same unchanged reader scores **9/36**.
+
 ## Collection and generation
 
 Every image is rendered with PIL from a seeded `random.Random`, then put

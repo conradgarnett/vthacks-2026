@@ -225,7 +225,10 @@ def main() -> int:
 
     defaults = {
         "signage": (3 * len(V.SIGNAGE), 11),
-        "textureless": (32, 23),
+        # A multiple of the 18 surfaces, which are also stepped by index:
+        # anything else weights the early kinds and quietly under-samples
+        # the late ones.
+        "textureless": (4 * len(__import__("textures").KINDS), 23),
         "medicine": (2 * len(V.DRUGS), 101),
         "labels": (2 * len(V.PRODUCT_TEXT), 31),
         "symbols": (48, 37),

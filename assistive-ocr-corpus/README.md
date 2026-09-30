@@ -34,12 +34,22 @@ labels with known ground truth.
 Three things this measures that a document OCR benchmark does not:
 
 **Hallucination, as a first-class score.** Two corpora contain no text at
-all — carpet, brick, foliage, blinds; barcodes, recycling marks, nutrition
-badges, decorative rules. These carry repeating high-frequency structure that
-OCR engines resolve into glyphs. For a sighted user a spurious word is
-noise they ignore. For a blind user it is an ingredient that isn't there, and
-there is no way to check it. Report it beside recall or the recall number
-means nothing.
+all: 18 real surfaces (brick courses, carpet pile, foliage, venetian blinds,
+railings, book spines, radiator fins, corrugated metal, keyboards, pegboard,
+tiling, paving, mesh, wood grain, gravel, fabric, shutters, clapboard), and a
+symbol corpus of barcodes, recycling marks, nutrition badges and decorative
+rules. For a sighted user a spurious word is noise they ignore. For a blind
+user it is an ingredient that isn't there, and there is no way to check it.
+Report it beside recall or the recall number means nothing.
+
+The surfaces are built to have the structure a detector actually fires on —
+high-contrast strokes of roughly consistent height, repeating along a line,
+separated by gaps, because that is what a word is. A shelf of book spines is
+literally that. **This matters more than it sounds:** an earlier version of
+this corpus generated its no-text images from gaussian static with faint
+structure added on top, so they had no edges at any scale, nothing ever fired,
+and the resulting `0/8` was reported as a safety property while measuring
+almost nothing. On the rebuilt surfaces the same reader scores **9/36**.
 
 **Held-out splits, on disjoint seeds.** Thresholds fit whatever you measure
 them against. `build_holdout_corpus()` draws from a seed range the tuning set
@@ -66,7 +76,7 @@ source project that measurement settled an argument: receipts fell 62% → 57%
 | `labels` | food packaging: curvature, display faces, ingredient small print, specular gloss | product name | 24 |
 | `allergens` | allergen statements with negations, hedges, plant-milk traps, derived names | statement + the allergens that should be reported | 40 |
 | `fonts` | one benchmark holding every condition fixed and varying only the typeface, over six families | the phrase | 76 |
-| `textureless` | carpet, brick, foliage, blinds | **none — any output is invented** | 8 |
+| `textureless` | 18 surfaces: brick, carpet, foliage, blinds, railings, book spines, radiator, corrugated metal, keyboard, pegboard, tile, paving, mesh, wood, gravel, fabric, shutters, clapboard | **none — any output is invented** | 72 |
 | `symbols` | barcodes, recycling marks, nutrition badges, flourishes | **none — any output is invented** | 12 |
 
 Each sample is a burst of frames of one scene. A reader that pools several

@@ -345,6 +345,74 @@ STATEMENTS: list[tuple[list[str], set[str], bool]] = [
     (["INGREDIENTS: APPLES, SUGAR, CINNAMON."], set(), False),
     (["INGREDIENTS: CHICKPEAS, WATER, SALT."], set(), False),
     (["INGREDIENTS: OLIVES, BRINE, OREGANO."], set(), False),
+
+    # --- multi-line and crowded: the statement runs on, or shares the panel
+    #     with storage advice and a nutrition table, which is how it looks on
+    #     a real pack and is where a reader that recovers one line and stops
+    #     gets the answer half right ----------------------------------------
+    (["INGREDIENTS: WHEAT FLOUR, WATER, YEAST,", "SALT, SOYA FLOUR, EMULSIFIER",
+      "E472e, VEGETABLE FAT (PALM)."], {"gluten", "soy"}, False),
+    (["INGREDIENTS: MILK CHOCOLATE (SUGAR,", "COCOA BUTTER, DRIED WHOLE MILK,",
+      "COCOA MASS, EMULSIFIER: SOYA", "LECITHIN), PEANUTS (22%)."],
+     {"dairy", "soy", "peanut"}, False),
+    (["STORE IN A COOL DRY PLACE.", "CONTAINS: EGG, MUSTARD."],
+     {"egg", "mustard"}, False),
+    (["ONCE OPENED KEEP REFRIGERATED", "AND USE WITHIN 3 DAYS.",
+      "ALLERGY ADVICE: CONTAINS FISH."], {"fish"}, False),
+    (["NUTRITION PER 100g: ENERGY 2100kJ",
+      "ALLERGENS: SEE INGREDIENTS IN BOLD.", "CONTAINS WHEAT AND BARLEY."],
+     {"gluten"}, False),
+    (["SUITABLE FOR VEGETARIANS.", "CONTAINS MILK AND SOYA."],
+     {"dairy", "soy"}, False),
+    (["SUITABLE FOR VEGANS.", "MAY CONTAIN TRACES OF NUTS."],
+     {"tree nut"}, True),
+    (["INGREDIENTS: OATS (GLUTEN FREE),", "HONEY, SUNFLOWER OIL, SALT."],
+     set(), False),
+    (["PRODUCT OF MORE THAN ONE COUNTRY.", "CONTAINS SESAME AND SOYA."],
+     {"sesame", "soy"}, False),
+    (["KEEP OUT OF DIRECT SUNLIGHT.", "FREE FROM GLUTEN AND DAIRY."],
+     set(), False),
+
+    # --- the bold-ingredient convention: EU labels mark the allergen inside
+    #     the list rather than restating it, so there is no CONTAINS line to
+    #     find at all -------------------------------------------------------
+    (["INGREDIENTS: POTATOES, SUNFLOWER OIL,", "WHEAT STARCH, MILK POWDER,", "SALT."],
+     {"gluten", "dairy"}, False),
+    (["INGREDIENTS: RICE, WATER, ALMONDS (2%),", "SEA SALT, STABILISER."],
+     {"tree nut"}, False),
+    (["INGREDIENTS: COD (58%), WHEAT FLOUR,", "SUNFLOWER OIL, EGG."],
+     {"fish", "gluten", "egg"}, False),
+    (["INGREDIENTS: CHICKPEAS, SESAME PASTE,", "GARLIC, LEMON, OLIVE OIL."],
+     {"sesame"}, False),
+    (["INGREDIENTS: PRAWNS (40%), WATER,", "WHEAT FLOUR, SALT."],
+     {"shellfish", "gluten"}, False),
+    (["INGREDIENTS: SOYA BEANS, WATER,", "NIGARI."], {"soy"}, False),
+    (["INGREDIENTS: CASHEW NUTS, SALT,", "RAPESEED OIL."], {"tree nut"}, False),
+    (["INGREDIENTS: BARLEY MALT EXTRACT,", "WATER, HOPS."], {"gluten"}, False),
+
+    # --- more negations, since a false positive is the costlier error ------
+    (["NO NUTS. NO DAIRY. NO GLUTEN."], set(), False),
+    (["THIS PRODUCT CONTAINS NO ALLERGENS", "FROM THE 14 DECLARABLE GROUPS."],
+     set(), False),
+    (["EGG FREE MAYONNAISE."], set(), False),
+    (["DAIRY FREE CHOCOLATE."], set(), False),
+    (["WHEAT FREE. SUITABLE FOR COELIACS."], set(), False),
+    (["MADE IN A NUT FREE FACTORY."], set(), False),
+    (["NO SESAME. NO MUSTARD."], set(), False),
+    (["FREE FROM ALL 14 MAJOR ALLERGENS."], set(), False),
+
+    # --- more traps: the allergen word appears, meaning something else -----
+    (["MILK CHOCOLATE FLAVOUR. DAIRY FREE."], set(), False),
+    (["NUT ROAST SEASONING. NUT FREE BLEND."], set(), False),
+    (["PEANUT FREE. MADE WITH SOY BUTTER."], {"soy"}, False),
+    (["FISH SHAPED PASTA. NO FISH."], set(), False),
+    (["EGGPLANT DIP. SMOKED."], set(), False),
+    (["WHEATGRASS POWDER. GLUTEN FREE."], set(), False),
+    (["SOYA WAX CANDLE. NOT FOOD."], set(), False),
+    (["CREAM OF TARTAR. NO DAIRY."], set(), False),
+    (["COCOA BUTTER. NO DAIRY CONTENT."], set(), False),
+    (["SHELLFISH FLAVOUR SEASONING.", "CONTAINS CRUSTACEANS."],
+     {"shellfish"}, False),
 ]
 
 # Product names used on the allergen labels. The name is a trap in itself:
@@ -416,6 +484,38 @@ SIGNAGE = [
     "Locker Room", "Changing Rooms", "Shower",
     "Conference Room B", "Lecture Theatre 2", "Seminar Room 5",
     "Laboratory 9", "Workshop", "Store Room", "Server Room",
+    # Numbers and codes, over-represented because a digit misread strands
+    # someone and because they defeat a dictionary: nothing can correct
+    # "Room 2048" back to "Room 204B".
+    "Room 101", "Room 3A", "Room B12", "Room 417", "Room 2B",
+    "Gate 7", "Gate C14", "Gate D3", "Stand 42", "Bay 18",
+    "Suite 900", "Suite 12A", "Level B2", "Level -1", "Floor 14",
+    "Ward 3B", "Bed 7", "Clinic 5", "Bay A", "Cubicle 4",
+    "Exit 24", "Junction 15", "A417", "M4 West", "Platform 2A",
+    "Locker 318", "Seat 14C", "Row K", "Aisle 9", "Shelf 22",
+    "Desk 6", "Pod 3", "Booth 11", "Table 17", "Counter 4",
+    "PIN Required", "Call 999", "Dial 0 For Help", "Ext 2214",
+    "Open 9 to 5", "Open 24 Hours", "Closes At 6pm", "Last Entry 4.30",
+    # Wayfinding and safety wording, which is what carries consequences.
+    "Fire Assembly Point B", "Break Glass", "Alarm", "Emergency Stop",
+    "Pull Cord For Assistance", "Press For Door", "Hold Handrail",
+    "Automatic Door", "Door Opens Outward", "Keep Left", "Keep Right",
+    "Give Way", "Stop", "Slow", "Step Down", "Steps Ahead",
+    "Ramp Ahead", "Uneven Surface", "Loose Chippings", "Deep Water",
+    "No Through Road", "Dead End", "Toilets", "Ladies", "Gents",
+    "Baby Feeding Room", "Prayer Room", "Chapel", "Mortuary",
+    "Reception Closed", "Please Ring", "Deliveries To Rear",
+    "Fragile", "This Side Up", "Handle With Care", "Keep Frozen",
+    "Best Before", "Use By", "Sell By", "Batch No",
+    "Wash Hands", "Sanitise Here", "Face Covering Required",
+    "CCTV In Operation", "Alarmed Door", "Fire Alarm Test Today",
+    "Lift Out Of Service", "Use Stairs", "Escalator", "Travelator",
+    "Quiet Carriage", "First Class", "Standard Class", "Buffet Car",
+    "Toilet Engaged", "Toilet Vacant", "Out Of Service",
+    "Cold Water", "Hot", "Caution Hot Surface", "No Entry Beyond This Point",
+    "Authorised Vehicles Only", "Loading Bay", "Disabled Parking",
+    "Parent And Child", "Electric Vehicle Charging", "Motorcycles Only",
+    "Pay And Display", "Permit Holders Only", "Max Stay 2 Hours",
 ]
 
 # Short phrases for the typeface benchmark, which holds everything else fixed.
