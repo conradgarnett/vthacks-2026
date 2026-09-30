@@ -62,8 +62,18 @@ def evaluate(ocr: TextReader, samples, label: str):
     return rows, mean_cer
 
 
-def evaluate_hallucination(ocr: TextReader, count: int = 8):
-    """Surfaces with no text. Anything spoken here is invented."""
+def evaluate_hallucination(ocr: TextReader, count: int = 36):
+    """Surfaces with no text. Anything spoken here is invented.
+
+    36, not 8: there are 18 surfaces and the corpus steps them by index, so
+    8 covered fewer than half of them and never reached the book spines,
+    keyboards or pegboard -- which are the ones a detector actually fires
+    on. Two full passes over the set, so every surface appears twice.
+
+    Note this measures what is SPOKEN, through format_for_speech, not what
+    the reader returned internally. The difference matters: a line the gate
+    let through reaches the wearer as "It reads: 4A."
+    """
     samples = build_textureless_corpus(count)
     spoke = 0
     for frames in samples:

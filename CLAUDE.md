@@ -112,8 +112,47 @@ while performing badly.
 Current baseline to beat, n=60, as of 2026-09-29 (Apple Vision + RapidOCR):
 
 ```
-mean CER 0.019 · exact match 97% · silent 0% · hallucinated 0/8
+mean CER 0.019 · exact match 97% · silent 0% · hallucinated 9/36
 ```
+
+### The reader invents text on textured surfaces — 9/36, open
+
+**This is the most serious open defect in the project.** It was hidden until
+2026-09-29 because the corpus that was supposed to catch it contained nothing
+to catch.
+
+`eval/corpus.py` built its no-text images from `np.random.normal(140, 34)`
+and added the brick courses and foliage *on top* at amplitude 26–36, i.e.
+below the noise floor. Every surface came out as featureless grey. A text
+detector fires on high-contrast strokes of roughly consistent height
+repeating along a line — that is what a word is — and static has no edges at
+any scale, so nothing ever fired. `hallucinated 0/8` was quoted here as a
+safety property while measuring essentially nothing.
+
+The tell was sitting in the numbers: the packaging symbols corpus, which has
+real barcodes and recycling marks, caught an invention at 1/12, while the
+textureless corpus never caught one at all.
+
+`eval/textures.py` now renders 18 real surfaces chosen for that structure —
+railings, book spines, radiator fins, venetian blinds, corrugated metal,
+keyboards, brickwork, tiling, pegboard, plus organic grain from carpet,
+foliage, wood and gravel. Measured with the reader unchanged:
+
+```
+hallucinated 9/36 — keyboard x2, railings, books, mesh, brick,
+                    clapboard, carpet, fabric
+```
+
+These are **spoken**, not merely returned: the eval scores the output of
+`format_for_speech`, and the wearer hears "It reads: 4A." in front of a brick
+wall. Roughly one textured surface in four. For a user who cannot glance up
+to check, that is the exact failure this project is built to avoid, and it
+outranks every recall number.
+
+Do not "fix" it by raising the plausibility floor until the number goes down
+without re-checking recall — silence and invention trade against each other,
+and `eval/run_ocr_eval.py` reports both. A change that moves invention to 0
+and signage exact match to 60% is not an improvement.
 
 Known weak spot: text at 1.2% of frame height (CER ~0.85) — a standard sign at
 15+ m, ~14 px tall before blur. Closer to an information floor than a tuning
