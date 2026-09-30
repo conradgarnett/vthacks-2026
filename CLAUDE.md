@@ -112,10 +112,10 @@ while performing badly.
 Current baseline to beat, n=60, as of 2026-09-29 (Apple Vision + RapidOCR):
 
 ```
-mean CER 0.019 · exact match 97% · silent 0% · hallucinated 9/36
+mean CER 0.019 · exact match 97% · silent 0% · hallucinated 3/36
 ```
 
-### The reader invents text on textured surfaces — 9/36, open
+### The reader invents text on textured surfaces — 9/36, now 3/36
 
 **This is the most serious open defect in the project.** It was hidden until
 2026-09-29 because the corpus that was supposed to catch it contained nothing
@@ -149,10 +149,41 @@ wall. Roughly one textured surface in four. For a user who cannot glance up
 to check, that is the exact failure this project is built to avoid, and it
 outranks every recall number.
 
-Do not "fix" it by raising the plausibility floor until the number goes down
-without re-checking recall — silence and invention trade against each other,
-and `eval/run_ocr_eval.py` reports both. A change that moves invention to 0
-and signage exact match to 60% is not an improvement.
+**The fix, and what it cost.** Every check in `text_quality.py` judges one
+line alone and asks "could this token be a word or a code?" — and for "4A",
+"rill" and "SYIJ" the answer is honestly yes. They are shaped like writing.
+What gives them away is the company they keep: none.
+`reading_is_plausible()` asks that over the whole reading, as the last step
+of `format_for_speech`: a reading needs a word-shaped token (letters only,
+three or more, a vowel, cased as writing is cased) or a code with a code's
+shape, so "204B" and "A417" pass and "4A" and "49" do not.
+
+```
+hallucinated 3/36 · signage CER 0.019 · exact 58/60 · silent 0/60
+remaining: 'SYIJ', 'grill' (corrected from "rill"), 'r.1. 21. ali.'
+```
+
+Nothing real was given up for it: 0 of 248 signage phrases, 0 of 107 allergen
+statements, 0 of 128 drug lines and 0 of 40 directions are rejected by the
+gate, and the signage eval is row-for-row unchanged.
+
+**A dictionary was tried here and must not be re-tried naively.**
+`/usr/share/dict/words` is the only word list available, and it is a 1934
+Webster's: used to reject text it throws out 78 of 128 generic drug names
+(LISINOPRIL, ATORVASTATIN, OMEPRAZOLE) along with "Defibrillator" and
+"Contactless". It is also absent on Windows, where it loads empty, so a gate
+requiring it silences the whole app there. `lexicon.in_dictionary()` and
+`dictionary_available()` exist for callers that want membership; do not wire
+them into a rejection path.
+
+The three that remain are genuinely word-shaped and were left standing on
+purpose. Special-casing the exact strings this corpus produces is how the
+TABLES → TABLETS overfit happened in a live demo.
+
+Do not "fix" the rest by raising the plausibility floor until the number goes
+down without re-checking recall — silence and invention trade against each
+other, and `eval/run_ocr_eval.py` reports both. A change that moves invention
+to 0 and signage exact match to 60% is not an improvement.
 
 Known weak spot: text at 1.2% of frame height (CER ~0.85) — a standard sign at
 15+ m, ~14 px tall before blur. Closer to an information floor than a tuning
