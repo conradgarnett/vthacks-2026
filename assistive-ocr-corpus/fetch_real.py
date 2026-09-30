@@ -204,9 +204,24 @@ def openfoodfacts(args) -> int:
     written = skipped = 0
     manifest = out / "manifest.jsonl"
     page = 1
-    seen: set[str] = set()
 
-    with manifest.open("w") as handle:
+    # Appended, not truncated, and already-fetched barcodes are skipped, so
+    # several runs accumulate into one directory. That is the way to get past
+    # the deep-paging wall: fetch each country separately into the same --out
+    # rather than paging one country until the server gives up.
+    seen: set[str] = set()
+    if manifest.exists():
+        with manifest.open() as handle:
+            for line in handle:
+                try:
+                    seen.add(json.loads(line)["id"].removeprefix("off-"))
+                except (json.JSONDecodeError, KeyError):
+                    continue
+        if seen:
+            print(f"  {len(seen)} already in {manifest.name}; adding to it",
+                  file=sys.stderr)
+
+    with manifest.open("a") as handle:
         while written < args.n:
             # page_size 20, not 100. The two are not independent of `fields`:
             # 100 products carrying selected_images is heavy enough that the
@@ -221,7 +236,25 @@ def openfoodfacts(args) -> int:
                 "page_size": 20,
                 "page": page,
             }
-            payload = get(SEARCH, params)
+            # Deep pages of a filtered search are expensive server-side, so
+            # failures get likelier the further in this goes -- around page
+            # 10 the retries stop being enough. Everything fetched so far is
+            # already on disk and usable, so stop and report it rather than
+            # raising and making a partial success look like a failure. To
+            # go deeper, fetch several countries into one directory instead:
+            # each stays on shallow pages.
+            try:
+                payload = get(SEARCH, params)
+            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+                print(
+                    f"\n  search failed at page {page}; stopping with "
+                    f"{written} products already fetched.\n"
+                    f"  For more, run again with --country united-states "
+                    f"(or france, germany) into the same --out.",
+                    file=sys.stderr,
+                )
+                break
+
             products = payload.get("products", [])
             if not products:
                 print("  no more products", file=sys.stderr)
