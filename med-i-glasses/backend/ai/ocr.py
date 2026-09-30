@@ -29,6 +29,7 @@ Three things make this work on real camera frames rather than clean renders:
 from __future__ import annotations
 
 import io
+import os
 import logging
 import re
 from dataclasses import dataclass
@@ -908,7 +909,17 @@ class TieredReader(TextReader):
 def build_reader(preferred: str = "auto") -> TextReader:
     """The engines that load, fastest first. `preferred` pins one; "none"
     disables OCR. With two engines the reader starts on the fast one and
-    escalates to the thorough one below the confidence bar."""
+    escalates to the thorough one below the confidence bar.
+
+    An unpinned call honours the OCR_ENGINE environment variable. The app
+    passes `settings.ocr_engine` explicitly and is unaffected; the point is
+    the eval runners, which all call this with no argument and so had no way
+    to be pointed at one engine. Comparing engines is the whole reason the
+    setting exists, and it could not be done without editing each runner.
+    """
+    if preferred == "auto":
+        preferred = os.environ.get("OCR_ENGINE", "auto").strip() or "auto"
+
     if preferred == "none":
         return TextReader()
 

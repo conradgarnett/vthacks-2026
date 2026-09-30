@@ -145,7 +145,8 @@ the 2026-09-29 generators. One machine, one engine pairing — a reference
 point, not a leaderboard.
 
 ```
-signage           mean CER 0.019 · exact 97% · silent 0% · invented 0/8
+signage           mean CER 0.019 · exact 58/60 (97%) · silent 0/60
+textureless       invented 3/36   (9/36 before a whole-reading gate)
 medicine held-out drug name 95% · strength 90% · directions exact 60%
                   dose correct 65% · WRONG dose 0%
 labels            product name present 92% (curved 11/12, flat 11/12)
@@ -155,7 +156,30 @@ allergens         8/40 statement lines recovered · 9/42 allergens reported
 fonts             serif 100% · sans 94% · cursive 75% · display 70% · hand 58%
 ```
 
-Two of those deserve comment.
+**Read every one of those as ±10 to ±28 points.** They are proportions over
+24 to 60 samples, and the 95% intervals are far wider than the numbers
+suggest: "dose correct 65%" at n=40 means [51%, 79%], and "invented 3/36"
+means [2.9%, 21.8%]. At n=36 an invention rate of 8% cannot be told apart
+from one of 4%, so a corpus that size cannot confirm that a fix worked.
+
+Sample sizes to make each metric decide something, at 95% confidence:
+
+| metric | p | width at n now | n for ±2.5pp | n for ±1pp |
+|---|---|---|---|---|
+| invention rate | 0.08 | 19.0% @ 36 | 472 | 3093 |
+| signage exact | 0.97 | 10.4% @ 60 | 217 | 1286 |
+| drug name found | 0.95 | 15.1% @ 40 | 330 | 1937 |
+| dose read correctly | 0.65 | 28.4% @ 40 | 1446 | 8844 |
+| allergen stmt recovered | 0.20 | 24.3% @ 40 | 1017 | 6232 |
+| receipt lines exact | 0.54 | 26.6% @ 50 | 1533 | 9938 |
+
+Interval width falls as 1/√n, so the gain per sample decays as n^(-3/2):
+going from 576 to 1152 samples buys 1.3 points of width, and 1152 to 2304
+buys 0.9. Roughly 500 samples is enough for a metric near 0 or 1, and 1500
+for one near 0.5 — which is where the metrics you care most about sit.
+`make_samples.py` sizes its defaults accordingly.
+
+Two of the results deserve comment.
 
 **The allergen number is the honest failure.** The matcher is correct on
 clean text (10/10 in isolation, including negations, hedges, the plant-milk

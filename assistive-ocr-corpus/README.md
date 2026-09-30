@@ -125,7 +125,7 @@ from metrics import score
 
 samples = medicine.build_holdout_corpus(n=40)
 predictions = [my_reader(s["frames"]) for s in samples]
-blanks = [my_reader(f) for f in corpus.build_textureless_corpus(n=8)]
+blanks = [my_reader(f) for f in corpus.build_textureless_corpus(n=72)]
 
 print(score(predictions, [s["drug"] for s in samples],
             no_text_predictions=blanks).report("drug name"))
@@ -140,6 +140,43 @@ produced them.
 check passes `Room 204B` read as `Room 2048`, and a reader can look healthy by
 it while performing badly in the hand. The source project made this mistake
 and measured its way out of it.
+
+## Real photographs, with real ground truth
+
+Synthetic corpora measure a reader under conditions you control. They cannot
+tell you whether the simulation is right. `fetch_real.py` gets the other
+half from Open Food Facts — photographs of ingredient panels taken by members
+of the public on whatever phone they had:
+
+```bash
+python fetch_real.py openfoodfacts --n 200
+python fetch_real.py openfoodfacts --n 80 --category seafood   # same --out accumulates
+```
+
+Per product it writes the panel photo and, from the database rather than from
+us: `ingredients_text` (the transcription — OCR ground truth), `allergens_tags`
+(stated on the label) and `traces_tags` (precautionary "may contain"). Those
+last two being *separate fields* is the point — it is exactly the
+certain-versus-hedged distinction an allergen matcher has to make, already
+made by a person.
+
+A sweep of 1,015 UK panels came back: 738 stating an allergen, 395 carrying a
+trace warning, 230 clean; 516 tight crops of the panel and 499 whole packs,
+which is worth splitting on, since framing decides the text-height-to-frame
+ratio that a reader with a frame-relative floor keys on.
+
+Two things to know before running it. The allergen mix reflects the shelf,
+not your test needs — that sweep was gluten 366, dairy 290 and **shellfish 1**
+— so use `--category` (`crustaceans`, `sesame-seeds`, `mustards`, `eggs`) to
+balance it. And the search endpoint is limited to roughly 10 requests a
+minute: `--pace` defaults to 12 seconds, running 112 queries back to back got
+every search refused with 503 for an hour, and the fix is to fetch less often
+over a longer period rather than to retry harder. It is a free database run
+by volunteers.
+
+Nothing fetched is redistributed: the data is ODbL and the photographs
+CC BY-SA, neither of which composes with this repository's MIT licence, so it
+downloads into gitignored `data/`. See [THIRD_PARTY.md](THIRD_PARTY.md).
 
 ## Reproducibility
 
@@ -170,17 +207,28 @@ they do not compare.
 
 ```
 generators/       the corpora; PIL + numpy + stdlib only
-  corpus.py         signage, and the no-text textures
+  vocabulary.py     all the wording, in one place — the file to grow
+  corpus.py         signage
   medicine.py       pharmacy vials, tuning and held-out splits
   product_labels.py food packaging, and the no-text symbol corpus
   allergens.py      allergen statements
+  textures.py       18 no-text surfaces, for the hallucination score
   fonts.py          the typeface benchmark
   typefaces.py      font discovery: bundled, platform, or both
   webcam.py         the three camera tiers
 metrics.py        CER, exact match, silence, hallucination
 make_samples.py   write a corpus to disk as JPEG + manifest.jsonl
+fetch_real.py     real labelled photographs from Open Food Facts
+selftest.py       proves an install in ~30s; run it first
 fonts/            38 open-licensed typefaces (see FONT_LICENSES.md)
 ```
+
+`vocabulary.py` is the one to extend. Sample count and diversity are
+different things: 12 drug names rendered ten thousand times is ten thousand
+pictures of twelve drugs, and a reader that memorised the twelve scores
+exactly as well as one that generalises. It currently holds 248 signage
+phrases, 128 generic drug names, 107 allergen statements, 74 products, 40
+directions, 40 patient names, 24 pharmacies and 24 warnings.
 
 `generators/product_labels.py` is named that way rather than `packaging.py`
 on purpose: this directory goes on `sys.path`, and a module named `packaging`
