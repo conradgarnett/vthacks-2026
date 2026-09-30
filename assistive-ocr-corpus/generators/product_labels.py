@@ -213,14 +213,16 @@ def capture_package(img: Image.Image, rng, curved: bool) -> bytes:
     return buf.getvalue()
 
 
-def build_packaging_corpus(n: int = 24, seed: int = 31, frames: int = 3):
+def build_packaging_corpus(
+    n: int = 24, seed: int = 31, frames: int = 3, offset: int = 0
+):
     """Product labels. Truth is the product name, the hardest single line."""
     rng = random.Random(seed)
     np.random.seed(seed)
     samples = []
     for i in range(n):
         lines = rng.choice(PRODUCT_TEXT)
-        font = DISPLAY_FONTS[i % len(DISPLAY_FONTS)]
+        font = DISPLAY_FONTS[(offset + i) % len(DISPLAY_FONTS)]
         scale = rng.choice([0.55, 0.75, 1.0, 1.0, 1.3])
         curved = i % 2 == 0
         base = render_package(lines, font, scale, rng)
@@ -234,7 +236,9 @@ def build_packaging_corpus(n: int = 24, seed: int = 31, frames: int = 3):
     return samples
 
 
-def build_symbol_corpus(n: int = 12, seed: int = 37, frames: int = 3):
+def build_symbol_corpus(
+    n: int = 12, seed: int = 37, frames: int = 3, offset: int = 0
+):
     """Images of symbols and drawings with NO text anywhere.
 
     Barcodes, recycling marks, nutrition badges, decorative scrollwork. These
@@ -247,7 +251,7 @@ def build_symbol_corpus(n: int = 12, seed: int = 37, frames: int = 3):
     out = []
 
     for i in range(n):
-        kind = kinds[i % len(kinds)]
+        kind = kinds[(offset + i) % len(kinds)]
         img = Image.new("RGB", (W, H), rng.choice(["#f4f4f5", "#e7e5e4", "#fafaf9"]))
         d = ImageDraw.Draw(img)
 

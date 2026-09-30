@@ -85,15 +85,17 @@ def render_allergen_label(
     return img
 
 
-def build_allergen_corpus(n: int = 40, seed: int = 41, frames: int = 3):
+def build_allergen_corpus(
+    n: int = 40, seed: int = 41, frames: int = 3, offset: int = 0
+):
     """Labels carrying an allergen statement, photographed hand-held."""
     rng = random.Random(seed)
     np.random.seed(seed)
     samples = []
     for i in range(n):
-        statement, truth, hedged = STATEMENTS[i % len(STATEMENTS)]
-        name = NAMES[i % len(NAMES)]
-        font = DISPLAY_FONTS[i % len(DISPLAY_FONTS)]
+        statement, truth, hedged = STATEMENTS[(offset + i) % len(STATEMENTS)]
+        name = NAMES[(offset + i) % len(NAMES)]
+        font = DISPLAY_FONTS[(offset + i) % len(DISPLAY_FONTS)]
         scale = rng.choice([0.75, 1.0, 1.0, 1.3])
         curved = i % 2 == 0
         base = render_allergen_label(name, statement, font, scale, rng)

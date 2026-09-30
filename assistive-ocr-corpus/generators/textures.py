@@ -397,7 +397,7 @@ def texture(kind: str, rng: random.Random) -> bytes:
 
 
 def build_textureless_corpus(
-    n: int = 36, seed: int = 23, frames: int = 3
+    n: int = 36, seed: int = 23, frames: int = 3, offset: int = 0
 ) -> list[list[bytes]]:
     """Surfaces with no text on them at all.
 
@@ -408,18 +408,20 @@ def build_textureless_corpus(
     np.random.seed(seed % 2**31)
     out = []
     for i in range(n):
-        kind = KINDS[i % len(KINDS)]
+        kind = KINDS[(offset + i) % len(KINDS)]
         out.append([texture(kind, rng) for _ in range(frames)])
     return out
 
 
-def build_labelled(n: int = 36, seed: int = 23, frames: int = 3) -> list[dict]:
+def build_labelled(
+    n: int = 36, seed: int = 23, frames: int = 3, offset: int = 0
+) -> list[dict]:
     """The same corpus, with the surface named, for reporting by kind."""
     rng = random.Random(seed)
     np.random.seed(seed % 2**31)
     out = []
     for i in range(n):
-        kind = KINDS[i % len(KINDS)]
+        kind = KINDS[(offset + i) % len(KINDS)]
         out.append({
             "frames": [texture(kind, rng) for _ in range(frames)],
             "kind": kind,
