@@ -1,0 +1,14 @@
+# Generated corpora. The point of this package is that these are reproducible
+# from a seed, so they are never committed -- `make_samples.py` rebuilds them.
+out/
+*.jpg
+*.png
+
+# Third-party data, fetched on demand. See THIRD_PARTY.md for the terms;
+# none of it is ours to redistribute.
+data/
+
+__pycache__/
+*.py[cod]
+.venv/
+.DS_Store

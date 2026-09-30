@@ -1,0 +1,16 @@
+# The generators and the scorer need nothing but these two.
+#
+# No OCR engine is listed on purpose. This package measures readers; it does
+# not contain one. Bring your own -- Apple Vision, RapidOCR, Tesseract,
+# PaddleOCR, a hosted model -- and score its output with metrics.py, which
+# takes strings and knows nothing about how you produced them.
+#
+# Floors, not pins: these are the oldest versions the code is known to work
+# with, so it composes with whatever else is in your environment. Pin exact
+# versions in your own lockfile if you need byte-identical renders.
+
+pillow>=10.0
+numpy>=1.24
+
+# Optional, for re-running the licence audit in FONT_LICENSES.md:
+# fonttools>=4.40
