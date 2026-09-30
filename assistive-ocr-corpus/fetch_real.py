@@ -35,8 +35,20 @@ this script downloads into `data/`, which is gitignored, and nothing fetched
 is ever committed or redistributed. Attribution for anything you publish from
 it goes to Open Food Facts and its contributors.
 
-Be polite: the search endpoint is rate limited to about 10 requests a minute
-and this script stays under that on purpose. Do not raise it.
+PACING, AND A MISTAKE WORTH NOT REPEATING
+
+The search endpoint is the expensive one and is limited to roughly 10
+requests a minute. `--pace` spaces them at 10 seconds by default; do not
+lower it, and do not run several copies of this script at once.
+
+Running a sweep of 112 category-by-country combinations back to back got
+search refused with 503 for every query, including a one-field one, while
+the product endpoint kept answering 200 -- which is what being throttled
+looks like from the outside, and is easy to misread as the API being down.
+It recovers on its own after a rest. The fix is to fetch less often over a
+longer period, not to retry harder: this is a free database run by
+volunteers, and the photographs and the allergen tags in it were put there
+by people one at a time.
 """
 
 from __future__ import annotations
@@ -358,7 +370,7 @@ def openfoodfacts(args) -> int:
 
             page += 1
             if written < args.n:
-                time.sleep(7)  # under the ~10 requests/minute search limit
+                time.sleep(args.pace)
 
     print(
         f"\n{written} products -> {out}/\n"
@@ -394,6 +406,9 @@ def main() -> int:
     parser.add_argument("source", choices=sorted(SOURCES))
     parser.add_argument("--n", type=int, default=200, help="products to fetch")
     parser.add_argument("--out", default=None)
+    parser.add_argument("--pace", type=float, default=10.0,
+                        help="seconds between search requests (default 10, "
+                             "~6/min). Do not lower it")
     parser.add_argument("--category", default=None,
                         help="OFF category tag, e.g. seafood, cheeses, "
                              "breakfast-cereals; combine with --country to "
