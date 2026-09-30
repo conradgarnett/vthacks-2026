@@ -131,6 +131,46 @@ def download(url: str, path: Path) -> bool:
     return True
 
 
+def code_path(code: str) -> str:
+    """Open Food Facts' directory layout for a barcode.
+
+    Codes of 8 digits or fewer sit in a directory of their own name; longer
+    ones are zero-padded to 13 and split 3/3/3/rest, so 5025125000006 lives
+    at 502/512/500/0006.
+    """
+    if len(code) <= 8:
+        return code
+    padded = code.zfill(13)
+    return f"{padded[:3]}/{padded[3:6]}/{padded[6:9]}/{padded[9:]}"
+
+
+def image_url(code: str, entry: dict, size: str) -> str | None:
+    """Build the photo URL from a search result's `images` entry.
+
+    The search endpoint will not return `selected_images` -- it silently
+    drops that field whenever it is asked for alongside others, answering
+    200 with the field simply absent, which looks like products having no
+    photo rather than like an API limitation. `images` does come back, and
+    carries the revision and the available renditions, so the URL is built
+    here instead of asking for it. This avoids a second request per product.
+    """
+    rev = entry.get("rev")
+    if not rev:
+        return None
+    available = entry.get("sizes", {})
+    # Fall back through the renditions that exist: 800 is not generated for
+    # every image, and asking for a missing one returns a 404 page that is
+    # small enough to look like a failed download.
+    for candidate in (size, "full", "400", "200"):
+        if candidate in available:
+            return (
+                "https://images.openfoodfacts.org/images/products/"
+                f"{code_path(code)}/ingredients_{entry['lang']}"
+                f".{rev}.{candidate}.jpg"
+            )
+    return None
+
+
 def categories(tags: list[str]) -> tuple[set[str], list[str]]:
     """Map OFF tags to our categories, keeping what did not map."""
     mapped, unmapped = set(), []
@@ -151,7 +191,7 @@ def openfoodfacts(args) -> int:
 
     fields = ",".join([
         "code", "product_name", "brands", "allergens_tags", "traces_tags",
-        "ingredients_text", "selected_images", "countries_tags",
+        "ingredients_text", "images", "countries_tags",
     ])
 
     print(
@@ -168,11 +208,17 @@ def openfoodfacts(args) -> int:
 
     with manifest.open("w") as handle:
         while written < args.n:
+            # page_size 20, not 100. The two are not independent of `fields`:
+            # 100 products carrying selected_images is heavy enough that the
+            # server gives up and answers 503 (sometimes 401), while the same
+            # query at 20 returns 200 every time. It presents as rate
+            # limiting or a blocked key and is neither -- it is response
+            # weight. Raising this back to 100 breaks the fetcher.
             params = {
                 "states_tags_en": "ingredients-photo-selected",
                 "countries_tags_en": args.country,
                 "fields": fields,
-                "page_size": 100,
+                "page_size": 20,
                 "page": page,
             }
             payload = get(SEARCH, params)
@@ -189,24 +235,29 @@ def openfoodfacts(args) -> int:
                     continue
                 seen.add(code)
 
-                display = (
-                    product.get("selected_images", {})
-                    .get("ingredients", {})
-                    .get("display", {})
-                )
-                url = display.get(args.lang) or next(iter(display.values()), None)
+                # `images` is keyed "ingredients_<lang>"; prefer the language
+                # asked for and take any other rather than skip a usable
+                # photo.
+                images = product.get("images") or {}
+                key = f"ingredients_{args.lang}"
+                if key not in images:
+                    key = next(
+                        (k for k in images if k.startswith("ingredients_")), None
+                    )
                 text = (product.get("ingredients_text") or "").strip()
-                if not url or not text:
+                if not key or not text:
                     skipped += 1
                     continue
 
-                # The default URL is the 400 px rendition, which is often too
-                # small to be a fair test of a reader: an engine with a
-                # frame-relative minimum text height fails on it for reasons
-                # that have nothing to do with the engine. Ask for the full
-                # image instead.
-                if args.size != "400":
-                    url = url.replace(".400.jpg", f".{args.size}.jpg")
+                entry = dict(images[key])
+                entry["lang"] = key.split("_", 1)[1]
+                # 400 px is often too small to be a fair test: an engine with
+                # a frame-relative minimum text height fails on it for
+                # reasons that have nothing to do with the engine.
+                url = image_url(code, entry, args.size)
+                if not url:
+                    skipped += 1
+                    continue
 
                 name = f"{code}.jpg"
                 if not download(url, out / name):
@@ -215,6 +266,18 @@ def openfoodfacts(args) -> int:
 
                 stated, unmapped = categories(product.get("allergens_tags"))
                 traces, _ = categories(product.get("traces_tags"))
+
+                # Framing varies enormously here -- some contributors upload
+                # a tight crop of the panel, others the whole pack on a
+                # kitchen table. That decides the text-height-to-frame ratio,
+                # which is the variable an engine with a frame-relative
+                # minimum text height actually keys on, so a score over a
+                # mixed set means little unless it can be split by it.
+                # Recorded per image rather than left for the reader to
+                # rediscover.
+                entry_sizes = entry.get("sizes", {})
+                chosen = url.rsplit(".", 2)[-2]
+                shape = entry_sizes.get(chosen, {})
 
                 handle.write(json.dumps({
                     "id": f"off-{code}",
@@ -232,6 +295,15 @@ def openfoodfacts(args) -> int:
                     # certainty as a CONTAINS line.
                     "traces": sorted(traces),
                     "unmapped_allergen_tags": unmapped,
+                    "width": shape.get("w"),
+                    "height": shape.get("h"),
+                    # A wide, short image is a crop of the panel; a portrait
+                    # one is usually the whole pack, with the print much
+                    # smaller relative to the frame.
+                    "aspect": (
+                        round(shape["w"] / shape["h"], 2)
+                        if shape.get("w") and shape.get("h") else None
+                    ),
                 }) + "\n")
                 written += 1
                 if written % 25 == 0:
@@ -279,7 +351,7 @@ def main() -> int:
                         help="OFF country tag, e.g. united-states, france")
     parser.add_argument("--lang", default="en", help="ingredients photo language")
     parser.add_argument("--size", default="full",
-                        choices=["400", "800", "full"],
+                        choices=["400", "full"],
                         help="image rendition; 400 is too small to be fair")
     args = parser.parse_args()
     return SOURCES[args.source](args)
