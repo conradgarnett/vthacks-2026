@@ -232,6 +232,14 @@ def openfoodfacts(args) -> int:
             params = {
                 "states_tags_en": "ingredients-photo-selected",
                 "countries_tags_en": args.country,
+                # Optional second axis. Country alone runs out at the
+                # deep-paging wall around 200 products; adding a category
+                # makes each query a different shallow search instead of one
+                # deep one, which is how the set gets past that. It is also
+                # the only way to balance the allergen mix -- a broad sweep
+                # comes back two thirds gluten and dairy, with one shellfish
+                # in a thousand, because that is what the shelf looks like.
+                **({"categories_tags_en": args.category} if args.category else {}),
                 "fields": fields,
                 "page_size": 20,
                 "page": page,
@@ -328,6 +336,12 @@ def openfoodfacts(args) -> int:
                     # certainty as a CONTAINS line.
                     "traces": sorted(traces),
                     "unmapped_allergen_tags": unmapped,
+                    # Which query produced this row. Worth keeping: a set
+                    # built from several sweeps is not a random sample of the
+                    # shelf, and anyone scoring against it should be able to
+                    # see how it was assembled.
+                    "query_country": args.country,
+                    "query_category": args.category,
                     "width": shape.get("w"),
                     "height": shape.get("h"),
                     # A wide, short image is a crop of the panel; a portrait
@@ -380,6 +394,10 @@ def main() -> int:
     parser.add_argument("source", choices=sorted(SOURCES))
     parser.add_argument("--n", type=int, default=200, help="products to fetch")
     parser.add_argument("--out", default=None)
+    parser.add_argument("--category", default=None,
+                        help="OFF category tag, e.g. seafood, cheeses, "
+                             "breakfast-cereals; combine with --country to "
+                             "stay on shallow pages and to balance allergens")
     parser.add_argument("--country", default="united-kingdom",
                         help="OFF country tag, e.g. united-states, france")
     parser.add_argument("--lang", default="en", help="ingredients photo language")
