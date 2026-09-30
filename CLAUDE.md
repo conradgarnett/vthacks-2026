@@ -163,6 +163,19 @@ hallucinated 3/36 · signage CER 0.019 · exact 58/60 · silent 0/60
 remaining: 'SYIJ', 'grill' (corrected from "rill"), 'r.1. 21. ali.'
 ```
 
+Measured again at n=432 on independent seeds, the rate is **5.1%, 95% CI
+[3.4%, 7.6%]**. The 3/36 above is 8.3% and was high by chance: at n=36 the
+interval on this proportion is nineteen points wide, so that sample could
+not distinguish 3% from 22%. The estimate settles by about n=288 and moves
+less than half a point afterwards. Quote 5.1%; use 3/36 only as the
+before/after pair it belongs to, which is paired and therefore still sound
+(six surfaces fixed, none broken, McNemar exact p = 0.031).
+
+A proportion measured on a few dozen samples is worth very little here, and
+that applies to every number in this file. `eval/` can generate at n=1500;
+the runners default to far less because reading that many labels with an OCR
+engine is slow, not because the small number is adequate.
+
 Nothing real was given up for it: 0 of 248 signage phrases, 0 of 107 allergen
 statements, 0 of 128 drug lines and 0 of 40 directions are rejected by the
 gate, and the signage eval is row-for-row unchanged.

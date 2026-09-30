@@ -12,10 +12,26 @@ import { initPlaces } from "./places";
 import { Voice } from "./voice";
 import { type Boxed, Connection, type ServerEvent } from "./ws";
 
+// The reading distance is not advice, it is the geometry. Text has to cover
+// about 2% of the frame's height before the engine will attempt it, and at a
+// 40-degree vertical field of view the frame spans 0.73 m of height for every
+// metre of distance. So a 4.5 mm drug name needs to be within ~31 cm, 3 mm
+// directions within ~21 cm, and 2.2 mm ingredient print within ~15 cm.
+//
+// Pulling the other way, the glasses webcam is fixed focus at roughly half a
+// metre, so anything closer than ~25 cm is genuinely out of focus -- a disc
+// blur that fills the counters of letters and cannot be sharpened back. The
+// two constraints leave a narrow window, and 20-25 cm is the middle of it:
+// close enough for the drug name and the directions, not so close that the
+// lens gives up. Small ingredient print needs to be closer than the lens can
+// focus, which is why it is the one thing this cannot reliably read.
 const DISCLAIMER =
   "Jarvis ready. Tap anywhere to scan; tap Ask, then say Jarvis and your " +
-  "question. This is an assistive tool, not a replacement for your cane or " +
-  "guide dog. Distances are estimates.";
+  "question. To read a label, hold it about twenty to twenty five " +
+  "centimetres away, roughly a hand span. Closer than that and the camera " +
+  "cannot focus; further and the small print is too small to read. This is " +
+  "an assistive tool, not a replacement for your cane or guide dog. " +
+  "Distances are estimates.";
 
 // The assistant answers to Jarvis, at the user's request: a question through
 // Ask has to start with the name, which is stripped before it is sent. Close
